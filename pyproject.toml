@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "plexusflow"
+version = "0.0.1"
+description = "Reproducible whole-organ vascular reconstruction from spatially tiled flow microscopy."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+  { name = "Alex Mayer", email = "amayer@flatironinstitute.org" },
+]
+keywords = ["microscopy", "vasculature", "stitching", "graph", "flow"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+  "numpy >= 1.24",
+  "scipy >= 1.10",
+  "networkx >= 3.0",
+  "scikit-image >= 0.21",
+  "tifffile >= 2023.7",
+  "pydantic >= 2.5",
+  "pyyaml >= 6.0",
+  "typer >= 0.9",
+]
+
+[project.optional-dependencies]
+gui = ["napari[all] >= 0.5", "PyQt5"]
+sam2 = ["torch", "torchvision"]
+ilastik = ["h5py"]
+dev = [
+  "pytest >= 7.4",
+  "pytest-cov",
+  "ruff >= 0.4",
+  "mypy >= 1.7",
+]
+
+[project.scripts]
+plexusflow = "plexusflow.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/ajmayer95/plexusflow"
+Documentation = "https://github.com/ajmayer95/plexusflow"
+Issues = "https://github.com/ajmayer95/plexusflow/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plexusflow"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+minversion = "7.4"
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]

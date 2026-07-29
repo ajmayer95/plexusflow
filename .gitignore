@@ -1,0 +1,48 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Environments
+.venv/
+venv/
+env/
+.python-version
+
+# Coverage / testing / caches
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Docs build
+site/
+docs/_build/
+
+# Project scratch / large intermediates
+scratch/
+*.gpickle
+*.zarr/
+*.tif
+*.tiff
+!examples/**/*.tif
+!tests/**/*.tif
+
+# Jupyter
+.ipynb_checkpoints/

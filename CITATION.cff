@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use plexusflow in your research, please cite it using the metadata below."
+title: "plexusflow: reproducible whole-organ vascular reconstruction from tiled flow microscopy"
+version: 0.0.1
+authors:
+  - family-names: Mayer
+    given-names: Alex
+    affiliation: "Katifori Lab, Center for Computational Biology, Flatiron Institute"
+    email: amayer@flatironinstitute.org
+license: MIT
+repository-code: "https://github.com/ajmayer95/plexusflow"
+type: software
+keywords:
+  - microscopy
+  - vasculature
+  - image stitching
+  - graph reconstruction
+  - flow measurement
