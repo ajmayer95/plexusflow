@@ -46,3 +46,21 @@ scratch/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# ── plexusflow: data and results never go in git ───────────────────────────
+# canonical graph, sidecars, videos live in the stage folder (Drive / Zenodo)
+*.gpickle
+*.gpickle.*
+*.tif
+*.tiff
+*.npz
+*.pkl
+*.pkl.gz
+runs/
+renders/
+figures/
+*.log
+# personal scratch: exploration that is not (yet) part of the pipeline
+sandbox
+sandbox/
+.DS_Store
