@@ -52,9 +52,15 @@ def launch_stitcher(cfg: StageConfig, tile_source: str = "std_clahe") -> int:
     if not tile_dir.exists():
         raise FileNotFoundError(f'tile dir does not exist: {tile_dir}')
 
+    # Pass this stage's own tiles: the stitch script's built-in default
+    # (--tiles 1-53) is the 21-somite tile count.
+    tile_ids = cfg.discover_tile_ids(tile_source)
+    if not tile_ids:
+        raise FileNotFoundError(f'no tiles matching {pattern!r} in {tile_dir}')
     cmd = [sys.executable, str(script),
            "--image_dir", str(tile_dir),
            "--pattern", pattern,
+           "--tiles", ",".join(str(t) for t in tile_ids),
            "--downsample", str(cfg.stitch_downsample),
            "--output", str(cfg.positions_path)]
     if cfg.positions_path.exists():
