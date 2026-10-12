@@ -77,6 +77,34 @@ proj.qc().write_report("qc/report.html")
 
 MIT — see [LICENSE](LICENSE).
 
+## Quickstart for collaborators (frozen release)
+
+You need: access to this repository, a copy of the data release (`PlexusFlow21S_release_v1/`, ~375 MB — shared
+separately), and Python ≥ 3.10.
+
+```bash
+git clone https://github.com/ajmayer95/plexusflow.git && cd plexusflow
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .                       # add ".[gui]" for the napari viewer
+
+export PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S_release_v1   # the release (treated as read-only)
+export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results       # where your outputs go
+export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
+
+python examples/quickstart.py          # load graph → reliability fit → DC reconciliation → 2 plots (~1 min)
+python scripts/dc_reconcile.py         # the full DC pipeline (writes reliability_model_v1.json, dc_reconciled_v2.pkl)
+python scripts/make_dc_emergent_figure_v2.py      # DC figures (after dc_reconcile)
+python scripts/make_figure8alt_v3.py
+python scripts/ac_field.py             # AC harmonic field (after dc_reconcile)
+python scripts/ac_estimate.py          # joint (D, η) estimate — slow (tens of minutes)
+python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"   # read-only viewer (needs the gui extra)
+```
+
+Working without Python: `graph/export/` in the release holds the graph and every measurement as CSV + npz
+(`SCHEMA.md` explains the columns); `results/` holds the reconciled flows and AC field as CSV.
+The release's `results/` were produced with this code; re-running reproduces them exactly in the environment recorded in
+its `MANIFEST.json`, and to ~0.3 % with other numpy/scipy versions.
+
 ## Repository layout (2026-10)
 
 ```text
@@ -90,6 +118,8 @@ scripts/         pipeline drivers, run in order:
   ac_field.py                      → results/ac_field_v2.pkl
   ac_estimate.py                   → results/ac_group_bc_estimate.pkl, figures/ac/
   make_dc_emergent_figure_v2.py, make_figure8alt_v3.py     DC figures
+  make_release.py                  → frozen, self-contained data release of a stage
+examples/        quickstart.py — graph → reconciliation → plots
 docs/            methods notes (docs/dc_method.md)
 ```
 
