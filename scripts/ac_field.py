@@ -15,7 +15,7 @@ from plexusflow.reconcile import carved_domain
 
 
 def main():
-    G = pickle.loads(paths.GRAPH.read_bytes()); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
+    G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
     A = build_ac_field(G, D)
     print(f"f0 band (±{F0_BAND:.0%} of tile {REF_TILE}, {A['f_ref']:.2f} Hz): {len(A['band'])} tiles;  "
           f"H1 phase mismatch over {len(A['_pairs'])} cross-tile pairs {sync_mismatch(A, False):.1f}° → aligned {sync_mismatch(A):.1f}°")

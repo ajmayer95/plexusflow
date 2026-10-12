@@ -15,7 +15,7 @@ from plexusflow.reconcile import measurement_table, fit_reliability, reconcile_d
 
 
 def main():
-    G = pickle.loads(paths.GRAPH.read_bytes())
+    G = paths.load_graph()
     M = measurement_table(G)
     model, J = fit_reliability(G, M)
     cT = np.array(list(model["c_T"].values()))

@@ -82,23 +82,30 @@ MIT — see [LICENSE](LICENSE).
 You need: access to this repository, a copy of the data release (`PlexusFlow21S_release_v1/`, ~375 MB — shared
 separately), and Python ≥ 3.10.
 
+Paste-safe commands (zsh does not accept `#` comments interactively, so none are inline):
+
 ```bash
-git clone https://github.com/ajmayer95/plexusflow.git && cd plexusflow
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .                       # add ".[gui]" for the napari viewer
-
-export PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S_release_v1   # the release (treated as read-only)
-export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results       # where your outputs go
+git clone -b pipeline https://github.com/ajmayer95/plexusflow.git
+cd plexusflow
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+export PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S_release_v1
+export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results
 export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
-
-python examples/quickstart.py          # load graph → reliability fit → DC reconciliation → 2 plots (~1 min)
-python scripts/dc_reconcile.py         # the full DC pipeline (writes reliability_model_v1.json, dc_reconciled_v2.pkl)
-python scripts/make_dc_emergent_figure_v2.py      # DC figures (after dc_reconcile)
-python scripts/make_figure8alt_v3.py
-python scripts/ac_field.py             # AC harmonic field (after dc_reconcile)
-python scripts/ac_estimate.py          # joint (D, η) estimate — slow (tens of minutes)
-python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"   # read-only viewer (needs the gui extra)
+python examples/quickstart.py
 ```
+
+| Command | What it does |
+|---|---|
+| `python examples/quickstart.py` | load graph → reliability fit → DC reconciliation → 2 plots (~1 min) |
+| `python scripts/dc_reconcile.py` | full DC pipeline (writes `reliability_model_v1.json`, `dc_reconciled_v2.pkl`) |
+| `python scripts/make_dc_emergent_figure_v2.py`, `python scripts/make_figure8alt_v3.py` | DC figures (after `dc_reconcile`) |
+| `python scripts/ac_field.py` | AC harmonic field (after `dc_reconcile`) |
+| `python scripts/ac_estimate.py` | joint (D, η) estimate — slow (tens of minutes) |
+| `pip install -e ".[gui]"` then `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"` | read-only viewer (napari) |
+
+`python3` must be ≥ 3.10 (on macOS, e.g. Homebrew's `python3.11`).  Once the `pipeline` branch is merged, drop `-b pipeline`.
 
 Working without Python: `graph/export/` in the release holds the graph and every measurement as CSV + npz
 (`SCHEMA.md` explains the columns); `results/` holds the reconciled flows and AC field as CSV.

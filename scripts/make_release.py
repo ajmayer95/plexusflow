@@ -195,16 +195,22 @@ viewer needs, and the final DC / AC results.  No mask or graph editing and no ra
 | `results/` | final DC reconciliation, AC field, group-BC (D, η) estimate, reliability model; CSV exports and `summary.json` |
 | `batch_kl_inputs/` | Kloosterman sidecars (time-mean flow per vessel) — refit the reliability model without videos |
 
-**Use** (code: https://github.com/ajmayer95/plexusflow, commit `{commit}`; Python ≥ 3.10):
+**Use** (code: https://github.com/ajmayer95/plexusflow, commit `{commit}`; Python ≥ 3.10).  Paste-safe commands:
 ```bash
-git clone https://github.com/ajmayer95/plexusflow.git && cd plexusflow && git checkout {commit[:10]}
-python3 -m venv .venv && source .venv/bin/activate && pip install -e .        # ".[gui]" for the viewer
-export PLEXUSFLOW_STAGE="/path/to/{out.name}"                     # this folder (read-only)
-export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
-python examples/quickstart.py                                     # graph → reconciliation → plots
-python scripts/dc_reconcile.py && python scripts/ac_field.py      # reproduce results/
-python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"                 # read-only viewer
+git clone https://github.com/ajmayer95/plexusflow.git
+cd plexusflow
+git checkout {commit[:10]}
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+export PLEXUSFLOW_STAGE="/path/to/{out.name}"
+export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results
+export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
+python examples/quickstart.py
 ```
+Then `python scripts/dc_reconcile.py` and `python scripts/ac_field.py` reproduce `results/`; for the read-only viewer,
+`pip install -e ".[gui]"` and `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"`.  This folder is never written to:
+outputs go to PLEXUSFLOW_RESULTS / PLEXUSFLOW_FIGURES.
 No Python?  `graph/export/` (CSV + npz, see `SCHEMA.md`) and the CSVs in `results/` contain everything.
 Reproducibility: the scripts reproduce `results/` exactly in the environment recorded in `MANIFEST.json` (Python / numpy / scipy);
 other versions agree to ~0.3 % (the DC reweighting loop stops at its iteration cap, so last-digit numerical differences persist).

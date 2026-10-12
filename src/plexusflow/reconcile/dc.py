@@ -39,8 +39,10 @@ def reconcile_dc(G, model, M, dom=None, damping=0.3, tol=1e-6, max_iter=500, n_s
             break
     Qp = ref; fb = emergent(Qp, dom)
     rg = np.array([G.edges[e]["radius"] for e in sub], float)
-    rt = np.array([np.nanmedian([m["R_kl_um"] / PX_UM for m in G.edges[e].get("measurements_piv") or []
-                                 if m.get("R_kl_um") and np.isfinite(m["R_kl_um"])] or [np.nan]) for e in sub])
+    def _median_rkl(e):
+        r = [m["R_kl_um"] / PX_UM for m in G.edges[e].get("measurements_piv") or [] if m.get("R_kl_um") and np.isfinite(m["R_kl_um"])]
+        return float(np.median(r)) if r else np.nan
+    rt = np.array([_median_rkl(e) for e in sub])
     r = np.sqrt(rg * np.where(np.isfinite(rt), rt, rg)); L = np.array([G.edges[e]["length"] for e in sub], float)
     K = r ** 4 / L; Qs = passive(K, fb, dom)
     met = metrics(Qm, Qp, Qs, fb, dom, imaged)

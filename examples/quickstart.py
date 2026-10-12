@@ -22,7 +22,7 @@ from plexusflow.reconcile import measurement_table, fit_reliability, reconcile_d
 
 # 1. the measured graph: one node per junction/endpoint, one edge per vessel segment; each edge carries its per-tile
 #    optical-flow measurements (G.edges[u, v]["measurements_piv"]), see graph/export/SCHEMA.md in the release
-G = pickle.loads(paths.GRAPH.read_bytes())
+G = paths.load_graph()
 print(f"graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
 # 2. Kloosterman-valid measurements and the reliability scale c = c_T + c_f (1 − f) + c_a (1 − align)

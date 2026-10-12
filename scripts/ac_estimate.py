@@ -18,7 +18,7 @@ from plexusflow.ac.group_bc import estimate, group_summary
 
 
 def load():
-    G = pickle.loads(paths.GRAPH.read_bytes())
+    G = paths.load_graph()
     D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
     A = pickle.loads((paths.RESULTS / "ac_field_v2.pkl").read_bytes())
     model = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text()); model["c_T"] = {int(k): v for k, v in model["c_T"].items()}

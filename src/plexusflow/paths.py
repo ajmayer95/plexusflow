@@ -23,3 +23,12 @@ GRAPH = STAGE / "graph" / "graph_vessels_piv.gpickle"
 FIGURES = Path(os.environ.get("PLEXUSFLOW_FIGURES", STAGE / "figures")).expanduser()
 MOSAIC = next((p for p in (STAGE / "fuse" / "organ_fusion_close.tif", STAGE / "fuse" / "organ_fusion.tif") if p.exists()),
               STAGE / "fuse" / "organ_fusion_close.tif")
+
+
+def load_graph(path=None):
+    """Load the measured graph (networkx gpickle).  Graphs are pickled with numpy 1.x so that every environment can read
+    them; numpy 2 reads them fine but warns about the old ``numpy.core`` module path — silenced here."""
+    import pickle, warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return pickle.loads(Path(path or GRAPH).read_bytes())
