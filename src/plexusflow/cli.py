@@ -635,6 +635,8 @@ def view(stage_root: Path = typer.Argument(...),
         of_video_dir=of_video_dir,
         of_video_pattern=video_pattern,
         initial_field=field,
+        # A frozen release (has MANIFEST.json) is read-only: never write caches back into its graph.
+        cache_harmonic_class=not (Path(stage_root) / "MANIFEST.json").exists(),
     ).run()
 
 

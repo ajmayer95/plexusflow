@@ -101,6 +101,19 @@ Coordinates are in the fused-mosaic graph frame (pixels; ~1.7 µm/px at 10×).
     return mid
 
 
+def prime_viewer_cache(graph_path):
+    """Run the viewer's per-edge harmonic_class precompute headlessly and save it into the release graph, so opening the
+    release never has to compute (≈3 min) or write it (the viewer does not write into folders with a MANIFEST.json)."""
+    if int(np.__version__.split(".")[0]) >= 2:
+        sys.exit("make_release must run under numpy < 2: a gpickle written by numpy 2 cannot be read by numpy 1.x "
+                 "(the viewer's Python). Use the system python3.")
+    from plexusflow.viewer.app import ReadOnlyMosaicViewer
+    v = object.__new__(ReadOnlyMosaicViewer)
+    v.G = pickle.loads(Path(graph_path).read_bytes()); v.graph_path = Path(graph_path)
+    v.cache_harmonic_class = True; v.force_recompute_harmonic_class = False
+    v._precompute_harmonic_classes()
+
+
 def downsample_videos(src_dir, dst_dir, spatial, n_frames):
     import tifffile
     dst_dir.mkdir(parents=True, exist_ok=True); n = 0
@@ -147,8 +160,9 @@ def main():
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).parent, capture_output=True, text=True).stdout.strip()
     dirty = bool(subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=Path(__file__).parent, capture_output=True, text=True).stdout.strip())
     print(f"release → {out}  (code {commit[:10]}{' + uncommitted changes' if dirty else ''})", flush=True)
-    (out / "graph").mkdir(); shutil.copy2(paths.GRAPH, out / "graph" / paths.GRAPH.name)
-    G = pickle.loads(paths.GRAPH.read_bytes()); n_meas = export_graph(G, out / "graph" / "export"); print(f"  graph + export: {n_meas} measurements", flush=True)
+    (out / "graph").mkdir(); gdst = out / "graph" / paths.GRAPH.name; shutil.copy2(paths.GRAPH, gdst)
+    prime_viewer_cache(gdst)
+    G = pickle.loads(gdst.read_bytes()); n_meas = export_graph(G, out / "graph" / "export"); print(f"  graph + export: {n_meas} measurements", flush=True)
     (out / "fuse").mkdir(); shutil.copy2(st / "fuse" / "organ_fusion.tif", out / "fuse" / "organ_fusion.tif")
     (out / "stitch").mkdir()
     for f in ("positions.json", "provenance.json"):
@@ -172,7 +186,7 @@ viewer needs, and the final DC / AC results.  No mask or graph editing and no ra
 
 | folder | contents |
 |---|---|
-| `graph/` | `graph_vessels_piv.gpickle` (networkx) and `export/` — the same graph as CSV + npz (see `export/SCHEMA.md`) |
+| `graph/` | `graph_vessels_piv.gpickle` (networkx; includes the viewer's derived per-edge harmonic cache) and `export/` — the same graph as CSV + npz (see `export/SCHEMA.md`) |
 | `fuse/`, `stitch/` | organ mosaic and tile placement |
 | `videos_realtime/` | every tile, {a.spatial}× downsampled in space, {a.frames} frames (display only) |
 | `results/` | final DC reconciliation, AC field, group-BC (D, η) estimate, reliability model; CSV exports and `summary.json` |
