@@ -1041,7 +1041,14 @@ def analyze_stage(cfg: StageConfig,
         if kl_sidecar_dir is not None and sidecar and not dry_run:
             import gzip
             Path(kl_sidecar_dir).mkdir(parents=True, exist_ok=True)
-            with gzip.open(Path(kl_sidecar_dir) / f"tile_{tid}.pkl.gz", "wb") as fh:
+            sc_path = Path(kl_sidecar_dir) / f"tile_{tid}.pkl.gz"
+            if skip_analyzed and sc_path.exists():
+                # incremental run: keep the inputs of vessels measured earlier
+                # (only those still in the graph), add the new ones
+                with gzip.open(sc_path, "rb") as fh:
+                    old = pickle.load(fh).get("kl_inputs", {})
+                sidecar = {**{e: v for e, v in old.items() if G.has_edge(*e)}, **sidecar}
+            with gzip.open(sc_path, "wb") as fh:
                 pickle.dump(dict(tile=tid, f0=f0, kl_inputs=sidecar), fh, protocol=4)
         total_measured += n_ves
 

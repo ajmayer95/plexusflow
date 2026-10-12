@@ -336,6 +336,36 @@ def analyze(stage_root: Path = typer.Argument(...),
                     kl_sidecar_dir=side, out_path=out)
 
 
+@app.command('carry-measurements')
+def carry_measurements_cmd(stage_root: Path = typer.Argument(...),
+                           tol_px: float = typer.Option(1.0, help='Centreline match tolerance (px).')) -> None:
+    """After editing + condense: copy flow measurements from the previous analysed graph
+    (graph_vessels_piv) onto the edited graph (graph_vessels) for every vessel whose centreline is
+    unchanged, then save it as the new graph_vessels_piv.  Follow with `analyze --skip-analyzed` to
+    measure only edited/new vessels.  The previous analysed graph is backed up first."""
+    import datetime, pickle, shutil
+    from .analyze.carryover import carry_measurements, remap_sidecars
+    cfg = StageConfig.load(stage_root)
+    if not cfg.graph_piv_path.exists():
+        typer.echo(f'no analysed graph at {cfg.graph_piv_path} — nothing to carry'); raise typer.Exit(2)
+    G_old = pickle.loads(cfg.graph_piv_path.read_bytes())
+    G_new = pickle.loads(cfg.graph_vessels_path.read_bytes())
+    stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup = cfg.graph_piv_path.with_name(cfg.graph_piv_path.name + f'.pre_carry_{stamp}')
+    shutil.copy2(cfg.graph_piv_path, backup)
+    stats, emap = carry_measurements(G_new, G_old, tol_px=tol_px)
+    side = Path(stage_root) / 'batch_kl_inputs'
+    if side.exists():
+        shutil.copytree(side, side.with_name(side.name + f'.pre_carry_{stamp}'))
+        n_sc = remap_sidecars(side, emap)
+        typer.echo(f'  sidecars remapped: {n_sc} tiles')
+    cfg.graph_piv_path.write_bytes(pickle.dumps(G_new, protocol=pickle.HIGHEST_PROTOCOL))
+    typer.echo(f'carried measurements → {cfg.graph_piv_path.name}  (backup: {backup.name})')
+    for k, v in stats.items():
+        typer.echo(f'  {k}: {v}')
+    typer.echo('next: plexusflow analyze <stage> --skip-analyzed   (measures only the vessels listed as to_measure)')
+
+
 @app.command()
 def normalize(stage_root: Path = typer.Argument(...),
               src: Path = typer.Option(None,
