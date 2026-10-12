@@ -163,7 +163,10 @@ def main():
     (out / "graph").mkdir(); gdst = out / "graph" / paths.GRAPH.name; shutil.copy2(paths.GRAPH, gdst)
     prime_viewer_cache(gdst)
     G = pickle.loads(gdst.read_bytes()); n_meas = export_graph(G, out / "graph" / "export"); print(f"  graph + export: {n_meas} measurements", flush=True)
-    (out / "fuse").mkdir(); shutil.copy2(st / "fuse" / "organ_fusion.tif", out / "fuse" / "organ_fusion.tif")
+    (out / "fuse").mkdir()
+    for f in ("organ_fusion.tif", "organ_fusion_close.tif"):
+        if (st / "fuse" / f).exists():
+            shutil.copy2(st / "fuse" / f, out / "fuse" / f)
     (out / "stitch").mkdir()
     for f in ("positions.json", "provenance.json"):
         shutil.copy2(st / "stitch" / f, out / "stitch" / f)

@@ -25,8 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import plexusflow.paths as _paths  # stage + results locations (PLEXUSFLOW_STAGE)
 
 STAGE = _paths.STAGE
-MOSAIC = STAGE / 'fuse' / 'organ_fusion_close.tif'
-OUT = STAGE / 'figures' / 'dc_emergent'
+MOSAIC = _paths.MOSAIC
+OUT = _paths.FIGURES / 'dc_emergent'
 ARROW_PCT = 95
 
 

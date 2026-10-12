@@ -44,8 +44,8 @@ import plexusflow.paths as _paths  # stage + results locations (PLEXUSFLOW_STAGE
 from plexusflow.reconcile import carved_domain, passive
 
 STAGE = _paths.STAGE
-MOSAIC_P = STAGE / 'fuse' / 'organ_fusion_close.tif'
-OUT_DIR = STAGE / 'figures' / 'fig8alt_v3'
+MOSAIC_P = _paths.MOSAIC
+OUT_DIR = _paths.FIGURES / 'fig8alt_v3'
 SCHEME, RADIUS, N_SHUFFLE = 'irls', 'consensus', 10
 
 
