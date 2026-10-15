@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import numpy as np
 import plexusflow.paths as paths
+from plexusflow.release import SCHEMA_VERSION
 
 RESULTS = ("reliability_model_v1.json", "dc_reconciled_v2.pkl", "ac_field_v2.pkl")
 RESULTS_OPTIONAL = ("ac_group_bc_estimate.pkl",)
@@ -259,7 +260,7 @@ Methods: `docs/dc_method.md`, `docs/synthetic_validation.md` in the code reposit
     files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != "MANIFEST.json")
     import platform, scipy, networkx
     env = dict(python=platform.python_version(), numpy=np.__version__, scipy=scipy.__version__, networkx=networkx.__version__)
-    man = dict(name=out.name, created=datetime.datetime.now().isoformat(timespec="seconds"), code_commit=commit, code_dirty=dirty, environment=env,
+    man = dict(name=out.name, schema_version=SCHEMA_VERSION, created=datetime.datetime.now().isoformat(timespec="seconds"), code_commit=commit, code_dirty=dirty, environment=env,
                source_stage=str(st), measurement_batch=batch, graph=dict(nodes=G.number_of_nodes(), edges=G.number_of_edges(), measurements=n_meas),
                files={str(p.relative_to(out)): dict(bytes=p.stat().st_size, sha256=sha256(p), tier=tier(p.relative_to(out))) for p in files})
     (out / "MANIFEST.json").write_text(json.dumps(man, indent=1, default=str))

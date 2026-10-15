@@ -61,7 +61,7 @@ def test_core_modules_import_without_plexusmech(monkeypatch):
     """The reconstruction API imports with plexusmech hidden."""
     import importlib, sys
     monkeypatch.setitem(sys.modules, "plexusmech", None)
-    for m in ("plexusflow.reconcile", "plexusflow.reconcile.carve", "plexusflow.ac.field",
+    for m in ("plexusflow.reconcile", "plexusflow.reconcile.carve", "plexusflow.ac.field", "plexusflow.release",
               "plexusflow.paths", "plexusflow.cli"):
         sys.modules.pop(m, None)
         importlib.import_module(m)
