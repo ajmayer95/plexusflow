@@ -851,7 +851,7 @@ def _print_dc_bc_diagnostic(G, source_nodes, sink_nodes, result_p1) -> None:
         else:
             all_pred_V = total_pred
         print(f'{label}:  Q_pred_pass1   Q_meas   ratio    diff')
-        print(f'          ----------------------------------------')
+        print('          ----------------------------------------')
         for n, qp, qm in rows:
             if qp is None or qm is None:
                 print(f'  node {n:>6}:   (no bc_harmonics or pass-1 result)')
@@ -3178,7 +3178,7 @@ class ReadOnlyMosaicViewer:
             level_ac_amplitude=bool(self._norm_level_ac.isChecked()),
         )
         self._norm_log.clear()
-        self._log_norm(f"Starting normalization with:")
+        self._log_norm("Starting normalization with:")
         for f, v in [
                 ('  H1 min-SNR',    f'{params.min_snr_db_h1} dB'),
                 ('  H2 min-SNR',    f'{params.min_snr_db_h2} dB' if params.compute_h2 else '(H2 disabled)'),
@@ -7870,7 +7870,7 @@ class ReadOnlyMosaicViewer:
         log_prior_D = -0.5 * ((np.log(D_GRID) - MU_D) / TAU_D) ** 2
         prior = np.exp(log_prior_D - log_prior_D.max())
         ax.plot(D_GRID, prior, color='C7', lw=1.4, ls=':',
-                 label=(f'prior: LogN(ln 1.5×10⁻³, τ=ln 10)'))
+                 label=('prior: LogN(ln 1.5×10⁻³, τ=ln 10)'))
         # 95% prior support band
         D_prior_lo = np.exp(MU_D - 2 * TAU_D)
         D_prior_hi = np.exp(MU_D + 2 * TAU_D)
@@ -7911,21 +7911,21 @@ class ReadOnlyMosaicViewer:
             f'   At MAP D̂, max_e C_e ≈ {result["C_e_at_map"]:.3f}.',
             '',
             '── Priors ──',
-            f'   D₀  ~  LogNormal( μ = ln 1.5×10⁻³,  τ = ln 10 )',
+            '   D₀  ~  LogNormal( μ = ln 1.5×10⁻³,  τ = ln 10 )',
             f'        ≈95% prior support: [{D_prior_lo:.1e}, {D_prior_hi:.1e}] /Pa',
             f'   b_H₁ ~  Complex N(0, σ_b² · I_{{n_B}})  with σ_b = {result["sigma_b"]:.1f} Pa',
-            f'        Var(Re b_n) = Var(Im b_n) = σ_b²/2;  σ_b = RMS complex amplitude.',
+            '        Var(Re b_n) = Var(Im b_n) = σ_b²/2;  σ_b = RMS complex amplitude.',
             f'   a   log-uniform on [{result["A_GRID"][0]:.0e}, {result["A_GRID"][-1]:.0e}]  '
             f'(m³/s, {result["A_GRID"].size} pts)',
             f'   s²  log-uniform on [{S2_GRID[0]:.0e}, {S2_GRID[-1]:.0e}]  '
             f'(dimensionless, {S2_GRID.size} pts)',
             '',
             '── Noise model (additive + proportional, both inferred) ──',
-            f'   σ²_j  =  a²  +  s² · |Q_H₁,j|²',
-            f'   a   (m³/s)        — measurement-noise FLOOR (absolute, signal-independent)',
-            f'   s²  (dimensionless) — proportional MISFIT (ridge + KCL deficit ∝ |Q|)',
-            f'   |Q|* = a / s       — crossover: |Q| < |Q|* → noise-dominated edge',
-            f'                                    |Q| ≥ |Q|* → misfit-dominated edge',
+            '   σ²_j  =  a²  +  s² · |Q_H₁,j|²',
+            '   a   (m³/s)        — measurement-noise FLOOR (absolute, signal-independent)',
+            '   s²  (dimensionless) — proportional MISFIT (ridge + KCL deficit ∝ |Q|)',
+            '   |Q|* = a / s       — crossover: |Q| < |Q|* → noise-dominated edge',
+            '                                    |Q| ≥ |Q|* → misfit-dominated edge',
             f'   â = {result["a_at_map"]*1e12:.4f} nL/s   ·   '
             f'ŝ = {result["s_at_map"]:.3f}   ·   '
             f'|Q|* = {result["Q_crossover"]*1e12:.4f} nL/s',
@@ -7933,11 +7933,11 @@ class ReadOnlyMosaicViewer:
             f'(reported, NOT used in weighting; γ → 0 from inferred-shape test)',
             '',
             '── Identifiability note ──',
-            f'   Under C_e ≪ 1 with approximately-uniform b̂_H₁, the data identify',
-            f'   the product D·|b̂_H₁| and the shape of b̂ across BC nodes; the',
-            f'   absolute split between D and |b̂_H₁| depends on σ_b.',
+            '   Under C_e ≪ 1 with approximately-uniform b̂_H₁, the data identify',
+            '   the product D·|b̂_H₁| and the shape of b̂ across BC nodes; the',
+            '   absolute split between D and |b̂_H₁| depends on σ_b.',
             f'   D̂ above is the value at σ_b = {result["sigma_b"]:.1f} Pa.  Treat as one',
-            f'   point on a structural b–D ridge, not a unique measurement.',
+            '   point on a structural b–D ridge, not a unique measurement.',
             '',
             '── Per-edge D ──',
             f'   D_e = D₀ · (R_e / R_ref)^α   with α = {result["alpha"]:+.2f}',
@@ -8511,12 +8511,12 @@ class ReadOnlyMosaicViewer:
             f"  Δ@0          = {res['delta_at_zero']:+.1f} nats  "
             f"({'IDENTIFIED' if res['delta_at_zero'] >= 10 else 'not identified'})",
             "",
-            f"  ── Inferred noise model:  σ²_j = â² + ŝ²·|Q_j|² ──",
+            "  ── Inferred noise model:  σ²_j = â² + ŝ²·|Q_j|² ──",
             f"  â  (measurement floor)     = {res['a_at_map']*1e12:.4f} nL/s",
             f"  ŝ  (proportional misfit)   = {res['s_at_map']:.3f}  "
             f"(dimensionless)",
             f"  |Q|* = â / ŝ (crossover)   = {res['Q_crossover']*1e12:.4f} nL/s",
-            f"           below |Q|* = measurement-noise-dominated edges",
+            "           below |Q|* = measurement-noise-dominated edges",
             "",
             f"  n_meas       = {n_valid_h1}  (of {n_edges} carve edges)",
             (f"  n_boundary   = {n_B}  "
@@ -8547,7 +8547,7 @@ class ReadOnlyMosaicViewer:
                         / max(I_total, 1e-30))
             lines.append("")
             lines.append(
-                f"  ── Bayesian information (Fisher / Laplace) ──")
+                "  ── Bayesian information (Fisher / Laplace) ──")
             lines.append(
                 f"  I_total (log-D)            = {I_total:.2f}")
             lines.append(
@@ -11247,7 +11247,7 @@ class ReadOnlyMosaicViewer:
             # Combined (bold)
             ax.plot(phase_grid, y_total / qbar_abs,
                      color=color, lw=2.4, alpha=0.95,
-                     label=f"sum (H₁+H₂+H₃)")
+                     label="sum (H₁+H₂+H₃)")
             ax.axhline(0.0, color='#888', lw=0.5, ls=':')
             ax.set_xlim(0, 1)
             ax.set_xlabel('cycle fraction')
@@ -12799,7 +12799,7 @@ class ReadOnlyMosaicViewer:
                 return
 
             # 2. Load full-res video, percentile-normalise to uint8.
-            print(f"\n  ── Optical-flow re-analysis (read-only) ──")
+            print("\n  ── Optical-flow re-analysis (read-only) ──")
             print(f"  edge ({u}, {v}), tile {tile_id}, "
                   f"video {video_path}")
             # No frame cap → matches batch's default (max_frames=None loads
@@ -13410,7 +13410,7 @@ class ReadOnlyMosaicViewer:
 
         boundary_type = self.G.nodes[boundary_node].get('boundary_type', '?')
         ax.set_xlabel('t (s)')
-        ax.set_ylabel(f'Q (nL/s) — signed to match "flow OUT of J toward arm"')
+        ax.set_ylabel('Q (nL/s) — signed to match "flow OUT of J toward arm"')
         ax.set_title(f'Boundary Q(t) reconstruction  —  '
                       f'{boundary_type.upper()} {boundary_node},  J={junction_node}\n'
                       f'Bold blue = KCL SUM (what your colleague should use as BC).  '
@@ -13430,7 +13430,7 @@ class ReadOnlyMosaicViewer:
             f"Boundary Q(t) at {boundary_type.upper()} {boundary_node}",
             f"  J = {junction_node}, contributions = {len(contributions)}",
             f"  KCL SUM  mean_Q = {mean_sum:+.4f} nL/s",
-            f"  arm raw  mean_Q = " + ', '.join(
+            "  arm raw  mean_Q = " + ', '.join(
                 f"{Q_t.mean():+.3f}(tile{tid})" for tid, Q_t, _ in arm_traces),
         ]
         try:
@@ -13743,7 +13743,7 @@ class ReadOnlyMosaicViewer:
                             label='raw Q(t)')
                 try:
                     from scipy.signal import butter, filtfilt
-                    nyq = 0.5 / dt   # 125 Hz at 250 fps
+                    nyq = 0.5 * 250.0   # 125 Hz at 250 fps (was 0.5 / dt with dt undefined: overlay never drawn)
                     cutoff = min(4.0 * f0, 0.9 * nyq)
                     b, a_lp = butter(N=4, Wn=cutoff / nyq, btype='low')
                     Q_lp = filtfilt(b, a_lp, Q_t)
@@ -14086,7 +14086,7 @@ class ReadOnlyMosaicViewer:
                         label=f'SNR-wtd mean phasor  (n={n_meas})')
         ax_ov.set_xlabel('cardiac phase  (fraction of one cycle at canonical f0)')
         ax_ov.set_ylabel('Q_norm (nL/s)')
-        ax_ov.set_title(f'Cycle-folded overlay  (bold = mean cycle per tile)')
+        ax_ov.set_title('Cycle-folded overlay  (bold = mean cycle per tile)')
         ax_ov.grid(alpha=0.3); ax_ov.legend(fontsize=8, loc='best')
 
         # ── Phasor panel (right column, full height) ─────────────────────

@@ -283,17 +283,17 @@ def run_carved_sim_full(G: nx.Graph,
               f"(exclude={sorted(exclude_tiles) if exclude_tiles else 'none'})")
     n_v2 = recompute_v2_fields(G, exclude_tiles=exclude_tiles)
     if verbose:
-        print(f"[carved-sim] fitting DC α ...")
+        print("[carved-sim] fitting DC α ...")
     outlets, alpha = fit_dc_alpha(G, exclude_tiles=exclude_tiles)
 
     U, _, outlet_comp, A_a, V_a, _ = find_porous_and_outlets(G)
     if verbose:
-        print(f"[carved-sim] extracting DA + φ_shift")
+        print("[carved-sim] extracting DA + φ_shift")
     H_DA = _extract_DA_harmonics(G, sorted(A_a))
     phi_shift = _phi_shift_per_outlet(G, outlets)
     Gc = _build_carved_graph(G, U, outlets, A_a)
     if verbose:
-        print(f"[carved-sim] running LOCKED two-pass TL sim")
+        print("[carved-sim] running LOCKED two-pass TL sim")
     result = run_carved_outlets_sim(Gc, alpha, outlets, phi_shift, H_DA,
                                       D=D, verbose=verbose)
     # Copy the sim fields from Gc back to G on shared edges.
