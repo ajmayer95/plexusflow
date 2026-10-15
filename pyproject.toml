@@ -42,6 +42,8 @@ dependencies = [
 gui = ["napari[all] >= 0.5", "PyQt5"]
 sam2 = ["torch", "torchvision"]
 ilastik = ["h5py"]
+# known-truth benchmark (scripts/benchmark/): scikit-fem + numba to run; gmsh + meshio only to rebuild geometry
+bench = ["scikit-fem >= 10", "numba >= 0.58", "meshio >= 5", "gmsh >= 4.11"]
 dev = [
   "pytest >= 7.4",
   "pytest-cov",

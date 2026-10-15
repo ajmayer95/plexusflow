@@ -129,6 +129,7 @@ src/plexusflow/      measurement → conservative flow field (paper 1)
   analyze/       optical flow + Kloosterman per-vessel batch (per-measurement `quality` record)
   reconcile/     DC: reliability scale, carve, carved network, reliability-weighted IRLS projection, passive flow
   ac/            AC: Option-A harmonic field (tile time gauge, junction residuals, phase-determined vessels)
+  synthetic/     known-truth benchmark: Stokes flow in real junctions / vessels → hybrid videos → production measurement
   release.py     read-only loader for frozen data releases (schema-versioned)
   viewer/        napari viewer: `plexusflow view` (read-only) / `plexusflow workbench` (fresh OF, tagging, edits)
   legacy/        2026-09 tile_normalize / KCL path, kept to reproduce old figures; unused by pipeline and viewer
@@ -141,6 +142,8 @@ scripts/         pipeline drivers, run in order:
   ac_field.py                      → results/ac_field_v2.pkl
   make_dc_emergent_figure_v2.py, make_figure8alt_v3.py, make_figure_ac_field.py     reconstruction figures
   make_release.py                  → frozen, self-contained data release of a stage
+  benchmark/                       known-truth benchmark of the flux measurement (docs/synthetic_validation.md):
+                                   make_bundle.py, junctions.py, vessels.py, frame_spacing.py
   mech/ac_estimate.py              → results/ac_group_bc_estimate.pkl, figures/ac/
   mech/make_figure9alt_v3.py       measured vs RC-network figure
 examples/        quickstart.py — graph → reconciliation → plots
