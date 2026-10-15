@@ -962,8 +962,8 @@ def solve_transmission_line(
         p_bc_nodes = []
         z_bc_nodes = []
         if verbose:
-            print(f"  Merged boundary BC: all boundary nodes share P_u")
-            print(f"    Arterial Q prescribed (total), venous Q predicted")
+            print("  Merged boundary BC: all boundary nodes share P_u")
+            print("    Arterial Q prescribed (total), venous Q predicted")
     elif use_impedance_bc:
         q_bc_nodes = list(source_nodes)
         p_bc_nodes = []

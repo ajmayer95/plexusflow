@@ -67,7 +67,7 @@ def init(stage_root: Path = typer.Argument(...),
         (stage_root / sub).mkdir(parents=True, exist_ok=True)
     cfg_path = stage_root / 'plexusflow.yaml'
     if cfg_path.exists() and not force:
-        typer.echo(f'plexusflow.yaml exists — pass --force to overwrite')
+        typer.echo('plexusflow.yaml exists — pass --force to overwrite')
     else:
         cfg_path.write_text(_STARTER_YAML.strip() + '\n')
         typer.echo(f'wrote {cfg_path}')
@@ -578,7 +578,7 @@ def simulate(stage_root: Path = typer.Argument(...),
         print(f"[simulate] Pass 1 V DC at {v_anchor}: {v1_dc:+.4f}  →  "
               f"Pass 2 |H1|={abs(arr[1]):.3f}∠{math.degrees(np.angle(arr[1])):+.1f}°")
 
-    print(f"[simulate] Pass 2: solving with full Q-BC set …")
+    print("[simulate] Pass 2: solving with full Q-BC set …")
     r2 = tl.solve_transmission_line(
         G, D=D, n_harmonics=N_HARM, f0_hz=f0,
         bc_harmonics_override=bc_pass2, verbose=False)
