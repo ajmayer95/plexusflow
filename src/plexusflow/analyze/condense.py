@@ -181,6 +181,10 @@ def condense_graph(G: nx.Graph) -> tuple[nx.Graph, dict]:
         for i, (u, v) in enumerate(ch):
             r = G.edges[u, v].get("radius")
             if r is None:
+                # edges added by hand (editor connect, patch merge) carry no radius: use their end nodes'
+                rn = [G.nodes[x].get("radius") for x in (u, v) if G.nodes[x].get("radius") is not None]
+                r = float(np.mean(rn)) if rn else None
+            if r is None:
                 continue
             w = float(G.edges[u, v].get("length",
                         G.edges[u, v].get("weight", 1.0)))

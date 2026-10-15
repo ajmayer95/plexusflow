@@ -82,10 +82,25 @@ def launch_mask_editor(cfg: StageConfig,
                      "--video-dir",       str(video_dir),
                      "--video-pattern",   cfg.raw_video_dir_pattern]
 
+    # Snapshot the mask before editing so the session's changes are journaled (mask/edits/).
+    from . import journal
+    before = None
+    if cfg.mask_path.exists():
+        import tifffile
+        before = tifffile.imread(cfg.mask_path) > 0
+        if not journal.load_log(cfg.mask_path):
+            journal.record(cfg.mask_path, None, before, note="mask before journaling began")
     print(f'[mask] launching threshold editor on {prob_path.name} '
           f'(source={prob_source})')
     rc = subprocess.call(cmd)
     if rc == 0 and cfg.mask_path.exists():
+        import tifffile
+        after = tifffile.imread(cfg.mask_path) > 0
+        e = journal.record(cfg.mask_path, before, after,
+                           note="mask editor session" if before is not None else "initial threshold + paint")
+        if e is not None:
+            print(f"[mask] journaled: {e.get('n_added', e.get('n_on'))} px added, {e.get('n_removed', 0)} removed "
+                  f"→ {cfg.mask_path.parent / 'edits'}")
         cfg.write_provenance("mask", extra={
             "prob_source": prob_source, "prob_path": str(prob_path),
             "video": video, "invert_prob": invert_prob,
