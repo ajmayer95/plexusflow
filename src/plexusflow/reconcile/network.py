@@ -15,7 +15,7 @@ def carved_domain(G):
     """Carved network: radial_uncertain (porous) edges and DA anchor stubs removed.  Boundary = carve-boundary nodes
     (nodes of the carved network touching a removed edge, excluding V anchors) + V nodes.  Carve nodes are labelled
     L/R by x relative to the mean DA-anchor x."""
-    from plexusflow.inference import find_porous_and_outlets
+    from .carve import find_porous_and_outlets
     _, _, _, A_anch, V_anch, _ = find_porous_and_outlets(G)
     edges = list(G.edges())
     carved = np.array([not G.edges[e].get("radial_uncertain") and e[0] not in A_anch and e[1] not in A_anch for e in edges])

@@ -7,14 +7,14 @@ Writes results/ac_group_bc_estimate.pkl and figures/ac/ac_group_bc_estimate.png.
 """
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import json, pickle
 import numpy as np
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 import plexusflow.paths as paths
 from plexusflow.reconcile import carved_domain
-from plexusflow.ac.model import build_context, ac_reliability
-from plexusflow.ac.group_bc import estimate, group_summary
+from plexusmech.ac.model import build_context, ac_reliability
+from plexusmech.ac.group_bc import estimate, group_summary
 
 
 def load():

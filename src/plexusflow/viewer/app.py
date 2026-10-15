@@ -97,7 +97,7 @@ except Exception:
 # promotions (ed['mean_Q_piv'], ...) are being removed downstream; go
 # through MeasurementView so a schema bump doesn't require re-editing
 # every read site.
-from ..mosaic.measurement_view import MeasurementView
+from ..io.measurement_view import MeasurementView
 
 
 # ── Defaults / constants ───────────────────────────────────────────────
@@ -158,16 +158,16 @@ PROPERTY_DEFS = [
     # (key,           display label,          is_harmonic_keyed, valid_in)
     ('magnitude',     'Magnitude |·|',        True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q')}),
     # Signed value (real part, NO |·|) — sim only.  The point is DC pressure,
     # where the gauge can dip below 0; |·| would hide the sign.  Rendered on a
     # diverging colormap centred at 0.  (At AC harmonics this is the in-phase
     # component, whose sign depends on the solver phase reference.)
     ('signed',        'Signed (no |·|)',      True,
-        {('sim', 'Q'), ('sim', 'P')}),
+        {('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q')}),
     ('phase',         'Phase ∠·',             True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q')}),
     # (Resolution Z = amp/SE removed — same ranking as SNR (dB) for
     # fixed-N, so redundant from the user's perspective.  Z is still
     # computed internally by _harmonic_fit_full and used by the
@@ -189,7 +189,7 @@ PROPERTY_DEFS = [
     # PI@H2 / PI@H3 measure higher-harmonic content as a fraction of mean.
     ('PI',            'Pulsatility index',    True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q')}),
     # OSI (oscillation index, Q-form).  OSI_Q = ½·(1 − |∫Q|/∫|Q|) over
     # one period — aggregate (NOT harmonic-keyed).  0 = unidirectional;
     # ½ = perfectly bidirectional.  Reconstructed from DC + H1..H3.
@@ -243,15 +243,12 @@ PROPERTY_DEFS = [
     ('waveform_av',   'Waveform A↔V (+art / −ven)', False,
         {('measured', 'Q'), ('sim', 'Q')}),
 ]
-# Every measured-Q property is ALSO valid under 'normalized' source
-# (which reads `measurements_piv_normalized` + the `_h_*_norm` cache
-# populated by pertile.mosaic.tile_normalize).  Auto-extend `valid_in`
-# rather than duplicating tuples in every entry — this keeps a single
-# source of truth for "which properties come from PIV measurements".
-for _key, _label, _keyed, _valid_in in PROPERTY_DEFS:
-    if ('measured', 'Q') in _valid_in:
-        _valid_in.add(('normalized', 'Q'))
-del _key, _label, _keyed, _valid_in
+# Reconciliation outputs (results/dc_reconciled_v2.pkl + ac_field_v2.pkl, see `_load_reconciliation`):
+# relative DC uncertainty from the IRLS ensemble, and the bootstrap SD of the winner tile's time gauge.
+PROPERTY_DEFS += [
+    ('rec_dc_sd',     'DC uncertainty (ensemble SD / |Q\u2032|)', False, {('reconciled', 'Q')}),
+    ('rec_gauge_sd',  'Tile time-gauge SD (deg)', False, {('reconciled', 'Q')}),
+]
 
 HARMONIC_KEYS = ['DC', 'H1', 'H2', 'H3']
 HARMONIC_LABELS = {'DC': 'DC', 'H1': 'H₁', 'H2': 'H₂', 'H3': 'H₃'}
@@ -715,11 +712,8 @@ def _resolve_edge_field(G, u, v, field: str,
             return None
         phi_ac = 0.5 * sum_sq / G_e_f
         return float(phi_ac) if np.isfinite(phi_ac) else None
-    # All other fields come from the best PIV measurement.  For
-    # source='normalized', read from the parallel `_normalized` list
-    # (populated by pertile.mosaic.tile_normalize).
-    meas_key = ('measurements_piv_normalized' if source == 'normalized'
-                else 'measurements_piv')
+    # All other fields come from the best PIV measurement.
+    meas_key = 'measurements_piv'
     m = _best_measurement(d.get(meas_key))
     if m is None:
         return None
@@ -916,8 +910,14 @@ def _video_glob(pattern, tile_id):
 # Viewer
 # ══════════════════════════════════════════════════════════════════════
 class ReadOnlyMosaicViewer:
-    """napari-based read-only mosaic viewer with field coloring + edge
-    inspection.  No buttons that modify state."""
+    """napari-based mosaic viewer with field colouring + edge inspection.
+
+    Two capability levels (``mode``):
+      'view'      — purely for viewing: never writes any file, no fresh optical flow, no tagging or boundary
+                    editing, no simulations.  The default, and the only mode allowed on a frozen release.
+      'workbench' — adds fresh OF on a selected vessel, radial-uncertainty tagging, boundary marking (Edit tab)
+                    and saving those to the stage graph; the Simulate tab appears only if `plexusmech` is installed.
+    """
 
     def __init__(
         self,
@@ -933,8 +933,22 @@ class ReadOnlyMosaicViewer:
         force_recompute_harmonic_class: bool = False,
         rotate_cw: bool = False,
         rotate_ccw: bool = False,
+        mode: str = 'view',
     ):
         self.graph_path = Path(graph_path)
+        if mode not in ('view', 'workbench'):
+            raise ValueError(f"mode must be 'view' or 'workbench', not {mode!r}")
+        # A frozen release (MANIFEST.json in the stage folder) is never written: workbench is refused there.
+        self.is_release = (self.graph_path.parent.parent / 'MANIFEST.json').exists()
+        if mode == 'workbench' and self.is_release:
+            print("  ⚠ This is a frozen data release — opening read-only (workbench edits need a stage folder).")
+            mode = 'view'
+        self.mode = mode
+        self.workbench = mode == 'workbench'
+        import importlib.util as _ilu
+        self.mech_available = _ilu.find_spec('plexusmech') is not None
+        if not self.workbench:
+            cache_harmonic_class = False      # view mode never writes the graph
         self.tiff_path = Path(tiff_path) if tiff_path else None
         self.tile_positions_path = Path(tile_positions) if tile_positions else None
         # video_dir / of_video_dir may each be a list of CANDIDATE locations
@@ -960,17 +974,9 @@ class ReadOnlyMosaicViewer:
         if self.rotate_cw and self.rotate_ccw:
             raise ValueError("Pass at most one of --rotate-cw / --rotate-ccw.")
         self.G = self._load_graph()
-        # Normalization now lives on the same graph.  A graph that has
-        # been through `pertile.mosaic.tile_normalize` carries side-by-side
-        # `measurements_piv_normalized` on each edge plus a `tile_gauges`
-        # dict on G.graph — the 'Normalized' data-source radio and the
-        # Normalize tab detect this via `_normalization_available()`.
-        n_gauges = len(self.G.graph.get('tile_gauges', {}))
-        if n_gauges:
-            print(f"  Loaded graph has tile_gauges for {n_gauges} tiles "
-                  f"(f0_canonical = "
-                  f"{self.G.graph.get('f0_canonical_hz', float('nan')):.3f} Hz)"
-                  " — 'Normalized' source available")
+        # Reconciliation outputs (DC Q', AC field) from the stage/release results folder; the
+        # 'Reconciled' data source reads them.  In-memory only (`_h_*_rec` edge attrs).
+        self._rec = self._load_reconciliation()
         self.mosaic = self._load_tiff() if self.tiff_path else None
         self.tiles = self._load_tile_positions() if self.tile_positions_path else {}
         self.edge_list: List[Tuple[int, int]] = list(self.G.edges())
@@ -1113,12 +1119,11 @@ class ReadOnlyMosaicViewer:
             self._sim_last_f0_hz = float(_meta.get('f0_hz', float('nan')))
         # Data source for the View tab field colormap + the comparison
         # plot.  'measured' uses PIV results from `measurements_piv`;
-        # 'normalized' uses tile-gauge-normalized measurements
-        # (`measurements_piv_normalized`) computed by the Normalize tab
-        # via `pertile.mosaic.tile_normalize`; 'sim' uses the in-memory
+        # 'reconciled' uses the DC reconciliation + aligned AC field from
+        # results/ (`_load_reconciliation`); 'sim' uses the in-memory
         # `_sim_tmp_*` outputs.  The Source radio in the View tab drives
-        # this; 'normalized' is disabled until tile_gauges are populated
-        # on the graph, and 'sim' is disabled until `_sim_active`.
+        # this; 'reconciled' is disabled when no results are found, and
+        # 'sim' is disabled until `_sim_active`.
         self.current_source: str = 'measured'
         # Mosaic height — used to invert node y so points align with the
         # image layer (mosaic uses display-y = row, graph stores math-y).
@@ -1135,15 +1140,8 @@ class ReadOnlyMosaicViewer:
 
     # ── data loading ───────────────────────────────────────────────────
     def _meas_key(self, source: Optional[str] = None) -> str:
-        """Return the per-edge measurements-list key for a source.
-
-        'normalized' → `measurements_piv_normalized`, else
-        `measurements_piv`.  Defaults to `self.current_source`.
-        """
-        src = source if source is not None else \
-            getattr(self, 'current_source', 'measured')
-        return ('measurements_piv_normalized' if src == 'normalized'
-                else 'measurements_piv')
+        """Per-edge measurements-list key (always `measurements_piv`; kept for callers)."""
+        return 'measurements_piv'
 
     # ── Tile-filtered measured-Q resolver ─────────────────────────────
     def _resolve_tile_filtered_value(self, u, v, d: dict,
@@ -1305,13 +1303,11 @@ class ReadOnlyMosaicViewer:
     # ── AC-harmonic helpers (harmonic_fraction / waveform_av) ─────────
     def _edge_ac_harmonics(self, d, src, qty):
         """Complex AC harmonics [H1, H2, H3] for an edge under the given
-        source/quantity, or None.  Measured-Q reads measurements_piv;
-        normalized-Q reads measurements_piv_normalized; sim-Q reads
+        source/quantity, or None.  Measured-Q reads measurements_piv; sim-Q reads
         `_sim_tmp_harmonics`; sim-P reads `_sim_tmp_p_harmonics`
         (each stored as complex [DC, H1, H2, H3])."""
-        if src in ('measured', 'normalized') and qty == 'Q':
-            meas_key = ('measurements_piv_normalized' if src == 'normalized'
-                        else 'measurements_piv')
+        if src == 'measured' and qty == 'Q':
+            meas_key = 'measurements_piv'
             m = _best_measurement(d.get(meas_key))
             if m is None:
                 return None
@@ -1418,12 +1414,42 @@ class ReadOnlyMosaicViewer:
             # Fallthrough: unsupported prop for sim_carved → None
             return None
 
+        # ── Reconciled source: DC Q' + tile-aligned AC field (`_h_*_rec`, see _load_reconciliation).
+        # Phases only where the winner tile's time gauge is determined (bootstrap SD ≤ 30°).
+        if src == 'reconciled':
+            if qty != 'Q':
+                return None
+            k_idx = HARMONIC_KEYS.index(self.current_harmonic)
+            if prop == 'rec_dc_sd':
+                sd, dc = _safe_float(d.get('_rec_Qp_sd')), _safe_float(d.get('_h_amp_DC_rec'))
+                return sd / abs(dc) if sd is not None and dc else None
+            if prop == 'rec_gauge_sd':
+                return _safe_float(d.get('_rec_gauge_sd'))
+            if k_idx == 0:
+                dc = _safe_float(d.get('_h_amp_DC_rec'))
+                if dc is None:
+                    return None
+                return dc if prop == 'signed' else (abs(dc) if prop == 'magnitude' else None)
+            amp = _safe_float(d.get(f'_h_amp_H{k_idx}_rec'))
+            if prop == 'magnitude':
+                return amp
+            if prop == 'signed':
+                ph = _safe_float(d.get(f'_h_phase_H{k_idx}_rec'))
+                return amp * np.cos(ph) if amp is not None and ph is not None else None
+            if prop == 'phase':
+                return _safe_float(d.get(f'_h_phase_H{k_idx}_rec')) if d.get('_rec_phase_ok') else None
+            if prop == 'PI':
+                dc = _safe_float(d.get('_h_amp_DC_rec'))
+                if amp is None or not dc:
+                    return None
+                return 2.0 * abs(amp) / abs(dc)
+            return None
+
         # Tile-filter override: when a tile is selected, every measured-Q
         # value is taken from THAT tile's harmonic fit instead of the
         # best-across-tiles graph attrs.  Edges with no measurement on
-        # the filtered tile fall through to None (rendered grey).  Same
-        # for normalized-Q (uses measurements_piv_normalized instead).
-        if (src in ('measured', 'normalized') and qty == 'Q'
+        # the filtered tile fall through to None (rendered grey).
+        if (src == 'measured' and qty == 'Q'
                 and self.current_tile_filter is not None):
             return self._resolve_tile_filtered_value(u, v, d, prop)
 
@@ -1434,7 +1460,7 @@ class ReadOnlyMosaicViewer:
         # one; the multi-tile average is polluted by low-SNR outside-
         # tile measurements that can be π-flipped, which then makes
         # sink stubs look out-of-sync with each other on the map.
-        if (prop == 'phase' and src in ('measured', 'normalized')
+        if (prop == 'phase' and src == 'measured'
                 and qty == 'Q'):
             k_idx_bc = HARMONIC_KEYS.index(self.current_harmonic)
             if k_idx_bc >= 1:
@@ -1503,16 +1529,14 @@ class ReadOnlyMosaicViewer:
             k_idx_pi = HARMONIC_KEYS.index(self.current_harmonic)
             if k_idx_pi == 0:
                 return None  # PI at DC is undefined
-            if src in ('measured', 'normalized') and qty == 'Q':
-                meas_key = ('measurements_piv_normalized'
-                            if src == 'normalized' else 'measurements_piv')
+            if src == 'measured' and qty == 'Q':
+                meas_key = 'measurements_piv'
                 m = _best_measurement(d.get(meas_key))
                 if m is None:
                     return None
                 try:
-                    # Compute from harmonics list (works for both raw and
-                    # normalized measurements — normalized doesn't populate
-                    # the legacy top-level Q_H{k}_amp/Q_DC fields).
+                    # Compute from the harmonics list (falls back to the
+                    # legacy top-level Q_H{k}_amp fields).
                     harms = (MeasurementView(m).harm.harmonics or [])
                     if k_idx_pi - 1 < len(harms):
                         amp_k = harms[k_idx_pi - 1].get('amp')
@@ -1606,9 +1630,8 @@ class ReadOnlyMosaicViewer:
             # Reconstruct Q(t) from DC + harmonics over one period and
             # compute OSI_Q = ½·(1 − |∫Q|/∫|Q|).  Aggregate field — the
             # harmonic selector is ignored.
-            if src in ('measured', 'normalized') and qty == 'Q':
-                meas_key = ('measurements_piv_normalized'
-                            if src == 'normalized' else 'measurements_piv')
+            if src == 'measured' and qty == 'Q':
+                meas_key = 'measurements_piv'
                 m = _best_measurement(d.get(meas_key))
                 if m is None:
                     return None
@@ -1682,10 +1705,6 @@ class ReadOnlyMosaicViewer:
         if prop == 'frequency':
             if src == 'sim':
                 return _safe_float(d.get('_sim_tmp_f0_hz'))
-            if src == 'normalized':
-                # Normalized graphs are on a common canonical f0 (stored
-                # at the graph level by tile_normalize).
-                return _safe_float(self.G.graph.get('f0_canonical_hz'))
             # Measured: top-level edge attr is set during analysis from
             # the best measurement; fall back to scanning the per-tile
             # measurement list if it isn't there.
@@ -1698,17 +1717,13 @@ class ReadOnlyMosaicViewer:
 
         # ── Harmonic-keyed (magnitude / phase / resolution) ──
         k_idx = HARMONIC_KEYS.index(self.current_harmonic)
-        # Cache-field suffix routes 'normalized' to `_h_..._norm` variants
-        # populated by pertile.mosaic.tile_normalize.
-        cache_suffix = '_norm' if src == 'normalized' else ''
+        cache_suffix = ''
         if prop == 'magnitude':
-            if src in ('measured', 'normalized') and qty == 'Q':
+            if src == 'measured' and qty == 'Q':
                 if k_idx == 0:
                     v_ = d.get(f'_h_amp_DC{cache_suffix}')
                     if v_ is None:
-                        meas_key = ('measurements_piv_normalized'
-                                    if src == 'normalized'
-                                    else 'measurements_piv')
+                        meas_key = 'measurements_piv'
                         m = _best_measurement(d.get(meas_key))
                         if m is None:
                             return None
@@ -1756,7 +1771,7 @@ class ReadOnlyMosaicViewer:
         if prop == 'phase':
             if k_idx == 0:
                 return None  # phase at DC undefined
-            if src in ('measured', 'normalized') and qty == 'Q':
+            if src == 'measured' and qty == 'Q':
                 return _safe_float(d.get(f'_h_phase_H{k_idx}{cache_suffix}'))
             if src == 'sim' and qty == 'Q':
                 h = d.get('_sim_tmp_harmonics')
@@ -1770,16 +1785,14 @@ class ReadOnlyMosaicViewer:
                 return float(np.angle(h[k_idx]))
             return None
         if prop == 'resolution':
-            if src in ('measured', 'normalized') and qty == 'Q':
+            if src == 'measured' and qty == 'Q':
                 if k_idx == 0:
                     return _safe_float(d.get(f'_h_Z_DC{cache_suffix}'))
                 return _safe_float(d.get(f'_h_Z_H{k_idx}{cache_suffix}'))
             return None
         if prop == 'snr':
-            # Per-harmonic SNR — canonical (top-level) edge attrs.  Same
-            # SNR under normalized source: gauge scaling is deterministic
-            # and doesn't affect the underlying noise-relative amplitude.
-            if src in ('measured', 'normalized') and qty == 'Q':
+            # Per-harmonic SNR — canonical (top-level) edge attrs.
+            if src == 'measured' and qty == 'Q':
                 if k_idx == 0:
                     return _safe_float(d.get('Q_DC_snr_db'))
                 return _safe_float(d.get(f'Q_H{k_idx}_snr_db'))
@@ -2011,19 +2024,10 @@ class ReadOnlyMosaicViewer:
         the best-quality one) so the f0 is consistent everywhere in
         the view.
 
-        Respects `self.current_source`:
-          - 'measured' / 'sim': read raw `measurements_piv`, native f0
-          - 'normalized':      read `measurements_piv_normalized`,
-                               canonical f0, and apply per-harmonic
-                               gauge corrections for H2/H3 (Q_t alone
-                               only carries H1 time-shift).
+        Reads raw `measurements_piv` at each tile's native f0.
         """
         self._tile_harmonic_cache.clear()
-        src = getattr(self, 'current_source', 'measured')
-        meas_key = ('measurements_piv_normalized' if src == 'normalized'
-                    else 'measurements_piv')
-        F0_canonical = self.G.graph.get('f0_canonical_hz')
-        tile_gauges = self.G.graph.get('tile_gauges') or {}
+        meas_key = 'measurements_piv'
         n = 0
         for u, v, d in self.G.edges(data=True):
             meas = d.get(meas_key) or []
@@ -2039,46 +2043,10 @@ class ReadOnlyMosaicViewer:
             Q_t = np.asarray(mv_tile.Q_t, dtype=float)
             if Q_t.size < 30:
                 continue
-            f0_for_fit = (float(F0_canonical) if src == 'normalized'
-                          and F0_canonical else
-                          float(mv_tile.harm.f0_hz or 2.5))
+            f0_for_fit = float(mv_tile.harm.f0_hz or 2.5)
             full = _harmonic_fit_full(Q_t, f0=f0_for_fit, dt=1.0/250)
             if full is None:
                 continue
-            # Per-harmonic H2/H3 gauge correction — only applies for
-            # normalized source (raw Q_t carries only the H1 time-shift,
-            # so H2/H3 phases from the refit have `k·arg(z_H1)` residual
-            # shift and z_H1_mag scaling that must be corrected to their
-            # own per-harmonic gauge).
-            if src == 'normalized':
-                g_entry = tile_gauges.get(int(tile_id)) or {}
-                z_H1_arg_deg = g_entry.get('z_arg_deg')
-                z_H1_mag = g_entry.get('z_mag')
-                # Only apply the amp `× z_H1_mag/z_Hk_mag` correction if
-                # the pipeline actually divided AC by |z_H1| (i.e. the
-                # `level_ac_amplitude` flag was on).  Otherwise Q_t has
-                # raw AC amplitudes and refitted H2/H3 amps are already
-                # correct — only the H2/H3 PHASE needs undoing/redoing
-                # (since the H1 time-shift always applies at k·ω).
-                did_amp_leveling = bool((self.G.graph.get(
-                    'normalization_params') or {}).get('level_ac_amplitude'))
-                if z_H1_arg_deg is not None and z_H1_mag not in (None, 0):
-                    for k_h in (2, 3):
-                        z_Hk_arg = g_entry.get(f'z_H{k_h}_arg_deg')
-                        z_Hk_mag = g_entry.get(f'z_H{k_h}_mag')
-                        if z_Hk_arg is None or z_Hk_mag in (None, 0):
-                            continue   # H1 fallback for missing gauge
-                        dphi = np.radians(k_h * z_H1_arg_deg - z_Hk_arg)
-                        p0 = full.get(f'phase_H{k_h}')
-                        if p0 is not None and np.isfinite(p0):
-                            pnew = float(p0) + dphi
-                            full[f'phase_H{k_h}'] = float(
-                                ((pnew + np.pi) % (2 * np.pi)) - np.pi)
-                        if did_amp_leveling:
-                            scale = float(z_H1_mag) / float(z_Hk_mag)
-                            a0 = full.get(f'amp_H{k_h}')
-                            if a0 is not None and np.isfinite(a0):
-                                full[f'amp_H{k_h}'] = float(a0) * scale
             self._tile_harmonic_cache[(u, v)] = full
             n += 1
         print(f"  Computed per-tile harmonics for {n} edges in tile "
@@ -2486,6 +2454,8 @@ class ReadOnlyMosaicViewer:
         attribute on G is left as it was loaded.  No edges are added or
         removed.
         """
+        if not self.workbench:
+            return
         import os, pickle, tempfile
         target = Path(self.graph_path).resolve()
         if not target.parent.is_dir():
@@ -2497,7 +2467,7 @@ class ReadOnlyMosaicViewer:
                 prefix='.' + target.stem + '.')
             try:
                 with os.fdopen(fd, 'wb') as f:
-                    pickle.dump(self.G, f,
+                    self._dump_graph(f,
                                  protocol=pickle.HIGHEST_PROTOCOL)
                 os.replace(tmp, target)
                 size_mb = target.stat().st_size / (1024 ** 2)
@@ -2654,7 +2624,7 @@ class ReadOnlyMosaicViewer:
             if tagged == 0:
                 return ("No `radial_uncertain` tags on the graph — nothing "
                         "to carve.  Tag some vessels via the View tab first.")
-            from .carved_sim_backend import find_porous_and_outlets
+            from plexusmech.viewer.carved_sim_backend import find_porous_and_outlets
             U, outlets, outlet_comp, A_a, V_a, comps = find_porous_and_outlets(
                 self.G)
             comp_sizes = [len(c) for c in comps]
@@ -2717,7 +2687,7 @@ class ReadOnlyMosaicViewer:
                 self.viewer.layers['CarveMarkers'].visible = False
             return
         try:
-            from .carved_sim_backend import find_porous_and_outlets
+            from plexusmech.viewer.carved_sim_backend import find_porous_and_outlets
             U, outlets, _, A_a, V_a, _ = find_porous_and_outlets(self.G)
         except Exception:
             return
@@ -2895,7 +2865,7 @@ class ReadOnlyMosaicViewer:
         eta = float(getattr(self, '_carved_eta_spin', None).value()
                      if getattr(self, '_carved_eta_spin', None) is not None else 0.0)
         # Install η monkey-patch (constant-loss-tangent form D_eff = D·(1 − iη))
-        from ..analyze import transmission_line as _tl_c
+        from plexusmech.tl import transmission_line as _tl_c
         if not hasattr(type(self), '_pristine_vessel_admittance'):
             type(self)._pristine_vessel_admittance = _tl_c._vessel_admittance
         _orig_va_c = type(self)._pristine_vessel_admittance
@@ -2906,7 +2876,7 @@ class ReadOnlyMosaicViewer:
             return _orig_va_c(R_m, L_m, omega, mu, rho, D_eff)
         _tl_c._vessel_admittance = _patched_va_c
         try:
-            from .carved_sim_backend import run_carved_sim_full
+            from plexusmech.viewer.carved_sim_backend import run_carved_sim_full
             t0 = time.time()
             self._carved_status.appendPlainText(
                 f"Excluding tiles: {sorted(excl) if excl else 'none'}\n"
@@ -2939,690 +2909,6 @@ class ReadOnlyMosaicViewer:
                 f"FAILED: {e}\n{traceback.format_exc()}")
         finally:
             self._carved_run_btn.setEnabled(True)
-
-    def _build_normalize_tab(self, layout):
-        from qtpy.QtWidgets import (
-            QDoubleSpinBox, QSpinBox, QCheckBox, QGridLayout, QLabel,
-            QPushButton, QGroupBox, QVBoxLayout, QHBoxLayout, QPlainTextEdit,
-            QSizePolicy,
-        )
-
-        # ── Status readout ───────────────────────────────────────────
-        status_group = QGroupBox("Normalization status")
-        status_lay = QVBoxLayout(status_group)
-        self._norm_status_label = QLabel()
-        self._norm_status_label.setWordWrap(True)
-        status_lay.addWidget(self._norm_status_label)
-        layout.addWidget(status_group)
-
-        # ── Parameters ───────────────────────────────────────────────
-        params_group = QGroupBox("Parameters")
-        grid = QGridLayout(params_group)
-        row = 0
-
-        def _spin(default, mn, mx, step=1.0, decimals=2, suffix=""):
-            sp = QDoubleSpinBox()
-            sp.setRange(float(mn), float(mx))
-            sp.setSingleStep(float(step))
-            sp.setDecimals(int(decimals))
-            if suffix:
-                sp.setSuffix(suffix)
-            sp.setValue(float(default))
-            return sp
-
-        def _int_spin(default, mn, mx):
-            sp = QSpinBox(); sp.setRange(int(mn), int(mx))
-            sp.setValue(int(default))
-            return sp
-
-        # H1 primary min-SNR
-        grid.addWidget(QLabel("H1 primary min-SNR (dB)"), row, 0)
-        self._norm_h1_snr = _spin(3.0, -20.0, 30.0, step=0.5, decimals=1, suffix=" dB")
-        self._norm_h1_snr.setToolTip(
-            "Minimum SNR for a shared-vessel observation to enter the "
-            "primary H1 sync.  Lower → more tiles in the primary set, "
-            "noisier gauges.  3 dB is a robust default.")
-        grid.addWidget(self._norm_h1_snr, row, 1); row += 1
-
-        # H2 primary min-SNR
-        grid.addWidget(QLabel("H2 primary min-SNR (dB)"), row, 0)
-        self._norm_h2_snr = _spin(0.0, -20.0, 30.0, step=0.5, decimals=1, suffix=" dB")
-        self._norm_h2_snr.setToolTip(
-            "H2 has 6–12 dB less amplitude than H1, so a lower gate makes "
-            "sense.  0 dB is the default.")
-        grid.addWidget(self._norm_h2_snr, row, 1); row += 1
-
-        # Fill-in gate
-        grid.addWidget(QLabel("Fill-in min-SNR (dB)"), row, 0)
-        self._norm_fillin_snr = _spin(-6.0, -20.0, 20.0, step=0.5, decimals=1, suffix=" dB")
-        self._norm_fillin_snr.setToolTip(
-            "Per-observation gate for the multi-hop fill-in stage.  Below "
-            "-6 dB, phasor noise dominates and estimates become unreliable.")
-        grid.addWidget(self._norm_fillin_snr, row, 1); row += 1
-
-        # Min R̄
-        grid.addWidget(QLabel("Fill-in min R̄ (phase concentration)"), row, 0)
-        self._norm_min_rbar = _spin(0.40, 0.0, 1.0, step=0.05, decimals=2)
-        self._norm_min_rbar.setToolTip(
-            "Reject fill-ins whose per-observation z_est estimates disagree "
-            "too much (Rayleigh concentration below this threshold — random "
-            "phase gives R̄→0, perfect agreement R̄=1).")
-        grid.addWidget(self._norm_min_rbar, row, 1); row += 1
-
-        # Max hops
-        grid.addWidget(QLabel("Max fill-in hops"), row, 0)
-        self._norm_max_hops = _int_spin(5, 1, 10)
-        self._norm_max_hops.setToolTip(
-            "Number of BFS-like hops the fill-in loop will try before falling "
-            "through to the nearest-neighbor-borrow stage.")
-        grid.addWidget(self._norm_max_hops, row, 1); row += 1
-
-        # Checkboxes
-        self._norm_compute_h2 = QCheckBox("Compute H2 gauges")
-        self._norm_compute_h2.setChecked(True)
-        self._norm_compute_h2.setToolTip(
-            "Run a parallel sync at 2·f0.  Costs ~30-60 s more but lets the "
-            "viewer show H2 amplitude/phase fields without falling back to "
-            "the H1 gauge.")
-        grid.addWidget(self._norm_compute_h2, row, 0, 1, 2); row += 1
-
-        self._norm_signflip = QCheckBox("Run sign-flip rescue")
-        self._norm_signflip.setChecked(True)
-        self._norm_signflip.setToolTip(
-            "Post-sync pass that flips any tile whose per-neighbor phase "
-            "residual drops below the threshold below after inversion — "
-            "fixes residual 180° discontinuities in low-SNR regions.")
-        grid.addWidget(self._norm_signflip, row, 0, 1, 2); row += 1
-
-        grid.addWidget(QLabel("Sign-flip max post-flip |resid| (°)"), row, 0)
-        self._norm_signflip_max = _spin(60.0, 20.0, 90.0, step=5.0,
-                                          decimals=0, suffix=" °")
-        self._norm_signflip_max.setToolTip(
-            "A tile flip is COMMITTED only if the post-flip per-neighbor "
-            "phase |resid| lands below this.  Loosening it (60–75°) helps "
-            "for low-pulsatility tiles whose H1 phase is intrinsically "
-            "noisy — flipping to 50° is still a big win over 130°.  "
-            "Tightening it (30°) is stricter and flips fewer tiles.")
-        grid.addWidget(self._norm_signflip_max, row, 1); row += 1
-
-        self._norm_level_ac = QCheckBox(
-            "Level AC amplitude (divide by |z_H1|, |z_H2|)")
-        self._norm_level_ac.setChecked(False)
-        self._norm_level_ac.setToolTip(
-            "OFF (default, recommended for real biology): normalize DC "
-            "and align AC phase, but leave |H1|/|H2| unchanged so per-tile "
-            "pulsatility is preserved as a biological signal.\n\n"
-            "ON: also divide AC by |z_H_k|.  Unified gauge model — forces "
-            "normalized PI ≈ constant across tiles.  Useful for cross-tile "
-            "waveform-shape checks, but destroys regional PI variation "
-            "(e.g. heart-adjacent tiles are truly more pulsatile).")
-        grid.addWidget(self._norm_level_ac, row, 0, 1, 2); row += 1
-
-        # Amp-gauge min SNR
-        grid.addWidget(QLabel("Amp-gauge min-SNR (dB)"), row, 0)
-        self._norm_amp_snr = _spin(6.0, 0.0, 30.0, step=0.5, decimals=1, suffix=" dB")
-        self._norm_amp_snr.setToolTip(
-            "Minimum H1 SNR for a measurement to contribute to the PI_rel "
-            "and CO_rel amplitude leveling.  Independent from the phase "
-            "sync gate; usually stricter since amplitude leveling amplifies "
-            "any bias.")
-        grid.addWidget(self._norm_amp_snr, row, 1); row += 1
-
-        layout.addWidget(params_group)
-
-        # ── Buttons ───────────────────────────────────────────────────
-        btn_row = QHBoxLayout()
-        self._norm_compute_btn = QPushButton("Compute normalization")
-        self._norm_compute_btn.setToolTip(
-            "Run the full pipeline (H1 sync + fill-in + H2 sync + fill-in + "
-            "sign-flip rescue + amp gauges + apply).  Populates "
-            "measurements_piv_normalized on every edge and enables the "
-            "'Normalized' data source.")
-        self._norm_compute_btn.clicked.connect(self._on_normalize_clicked)
-        btn_row.addWidget(self._norm_compute_btn)
-
-        self._norm_show_gauges_btn = QPushButton("Show gauges…")
-        self._norm_show_gauges_btn.setToolTip(
-            "Pop a matplotlib figure summarizing every per-tile gauge "
-            "(G_DC, G_H1, G_H2, f0) with bars color-coded by source "
-            "(primary / fillin / borrowed).  Quick QC of what the pipeline "
-            "recovered — spot outliers, thin-coverage tiles, and sign-flip "
-            "candidates at a glance.")
-        self._norm_show_gauges_btn.setEnabled(self._normalization_available())
-        self._norm_show_gauges_btn.clicked.connect(self._on_show_gauges_clicked)
-        btn_row.addWidget(self._norm_show_gauges_btn)
-
-        self._norm_diag_btn = QPushButton("Show diagnostics…")
-        self._norm_diag_btn.setToolTip(
-            "Pop a diagnostic figure showing per-pair residuals and "
-            "per-tile weighted-mean residuals for each gauge "
-            "(G_DC, G_H1 amp+phase, G_H2 amp+phase).  Residuals are the "
-            "mismatch between observed shared-vessel ratios and what the "
-            "recovered gauges predict — large residuals for a tile mean "
-            "its gauge doesn't explain its data well (unreliable fill-in, "
-            "sign-flip candidate, or genuinely inconsistent).")
-        self._norm_diag_btn.setEnabled(self._normalization_available())
-        self._norm_diag_btn.clicked.connect(self._on_show_diagnostics_clicked)
-        btn_row.addWidget(self._norm_diag_btn)
-
-        self._norm_save_btn = QPushButton("Save normalized graph…")
-        self._norm_save_btn.setToolTip(
-            "Write the graph (raw + normalized fields) to disk as a new "
-            "*_normalized.gpickle so a later viewer launch has the "
-            "normalization ready without re-computing.")
-        self._norm_save_btn.setEnabled(self._normalization_available())
-        self._norm_save_btn.clicked.connect(self._on_save_normalized_clicked)
-        btn_row.addWidget(self._norm_save_btn)
-        layout.addLayout(btn_row)
-
-        # ── Progress log ──────────────────────────────────────────────
-        self._norm_log = QPlainTextEdit()
-        self._norm_log.setReadOnly(True)
-        self._norm_log.setPlaceholderText(
-            "Progress and per-stage results will appear here.")
-        self._norm_log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._norm_log.setMinimumHeight(180)
-        layout.addWidget(self._norm_log)
-
-        # Fill in the status label now
-        self._refresh_normalize_status()
-
-    def _refresh_normalize_status(self):
-        """Update the Normalize-tab status label based on
-        `G.graph['tile_gauges']` and any stored normalization params."""
-        if not hasattr(self, '_norm_status_label'):
-            return
-        tg = self.G.graph.get('tile_gauges') or {}
-        if not tg:
-            self._norm_status_label.setText(
-                "<b>Not computed.</b>  Set parameters below and click "
-                "<i>Compute normalization</i> to run the pipeline.  The "
-                "'Normalized' Data-source radio will unlock afterward.")
-            return
-        f0 = self.G.graph.get('f0_canonical_hz')
-        stats = self.G.graph.get('tile_normalize_stats') or {}
-        n_edges = stats.get('n_edges_touched', '?')
-        n_meas = stats.get('n_measurements', '?')
-        n_fb = stats.get('n_h2_fallback', '?')
-        self._norm_status_label.setText(
-            f"<b>Normalized.</b>  {len(tg)} tiles have gauges; "
-            f"{n_edges} edges normalized ({n_meas} measurements, "
-            f"{n_fb} H2 measurements fell back to H1 gauge). "
-            f"Canonical f0 = {f0:.3f} Hz." if f0 else
-            f"<b>Normalized.</b>  {len(tg)} tiles have gauges.")
-
-    def _log_norm(self, msg: str):
-        """Append a line to the Normalize-tab progress log."""
-        if hasattr(self, '_norm_log'):
-            self._norm_log.appendPlainText(msg)
-            # Process events so the log paints even while a long compute
-            # is running on the UI thread (poor person's threading).
-            try:
-                from qtpy.QtWidgets import QApplication
-                QApplication.processEvents()
-            except Exception:
-                pass
-
-    def _on_normalize_clicked(self):
-        """Run the tile_normalize pipeline in-place on self.G."""
-        from ..mosaic.tile_normalize import (
-            NormalizeParams, normalize_graph_in_place)
-        params = NormalizeParams(
-            min_snr_db_h1=float(self._norm_h1_snr.value()),
-            min_snr_db_h2=float(self._norm_h2_snr.value()),
-            fillin_min_snr_db=float(self._norm_fillin_snr.value()),
-            fillin_min_rbar=float(self._norm_min_rbar.value()),
-            max_hops=int(self._norm_max_hops.value()),
-            compute_h2=bool(self._norm_compute_h2.isChecked()),
-            run_sign_flip_rescue=bool(self._norm_signflip.isChecked()),
-            rescue_final_max_deg=float(self._norm_signflip_max.value()),
-            amp_min_snr_db=float(self._norm_amp_snr.value()),
-            level_ac_amplitude=bool(self._norm_level_ac.isChecked()),
-        )
-        self._norm_log.clear()
-        self._log_norm("Starting normalization with:")
-        for f, v in [
-                ('  H1 min-SNR',    f'{params.min_snr_db_h1} dB'),
-                ('  H2 min-SNR',    f'{params.min_snr_db_h2} dB' if params.compute_h2 else '(H2 disabled)'),
-                ('  Fill-in gate',  f'{params.fillin_min_snr_db} dB'),
-                ('  Min R̄',        f'{params.fillin_min_rbar}'),
-                ('  Max hops',      f'{params.max_hops}'),
-                ('  Sign-flip',     'on' if params.run_sign_flip_rescue else 'off'),
-                ('  Amp min-SNR',   f'{params.amp_min_snr_db} dB'),
-                ('  Level AC amp',  'on (unified gauge)' if params.level_ac_amplitude
-                                     else 'off (preserve PI)'),
-        ]:
-            self._log_norm(f'  {f:<20}{v}')
-        self._log_norm('')
-        self._norm_compute_btn.setEnabled(False)
-        try:
-            def _progress(stage, pct):
-                self._log_norm(f'  [{pct*100:>3.0f}%] {stage}')
-            stats = normalize_graph_in_place(
-                self.G, params, progress=_progress)
-            self._log_norm('')
-            self._log_norm('=== DONE ===')
-            for k, val in stats.items():
-                if isinstance(val, list) and len(val) > 12:
-                    val = f'({len(val)} items)'
-                self._log_norm(f'  {k}: {val}')
-        except Exception as e:
-            import traceback
-            self._log_norm(f'ERROR: {e}')
-            self._log_norm(traceback.format_exc())
-        finally:
-            self._norm_compute_btn.setEnabled(True)
-            # Refresh status, unlock the Normalized radio, and rebuild
-            # anything that depends on the fresh cache.
-            self._refresh_normalize_status()
-            self._refresh_source_radio_enable()
-            self._norm_save_btn.setEnabled(self._normalization_available())
-            self._norm_show_gauges_btn.setEnabled(self._normalization_available())
-            self._norm_diag_btn.setEnabled(self._normalization_available())
-            if hasattr(self, '_tile_harmonic_cache'):
-                self._tile_harmonic_cache.clear()
-                if (getattr(self, 'current_tile_filter', None) is not None
-                        and self.current_tile_filter != 'All'):
-                    self._populate_tile_harmonic_cache(
-                        self.current_tile_filter)
-            self._refresh_edges()
-            self._refresh_nodes()
-            self._refresh_cbar()
-
-    def _on_show_gauges_clicked(self):
-        """Pop a matplotlib figure summarizing all per-tile gauges under
-        the unified `G_DC / G_H1 / G_H2` model.
-
-        Layout (bar plots, one row per gauge quantity):
-          G_DC = CO_rel      (source=amp)
-          |G_H1| = |z_H1|    (source=h1)
-          arg(G_H1)          (source=h1)
-          |G_H2| = |z_H2|    (source=h2)
-          arg(G_H2)          (source=h2)
-          f0_hz              (source=amp)
-        Bars are color-coded by source (primary / fillin / borrowed) so
-        the reliability of each gauge is visible at a glance.
-        """
-        tg = self.G.graph.get('tile_gauges') or {}
-        if not tg:
-            return
-        import matplotlib.pyplot as plt
-        import numpy as np
-        tiles = sorted(tg.keys())
-        n = len(tiles)
-        xs = np.arange(n)
-
-        def _colors(field: str):
-            palette = {
-                'primary': '#2b8cbe',
-                'fillin':  '#fdae6b',
-                'borrowed': '#de2d26',
-                None:      '#bdbdbd',
-            }
-            return [palette.get(tg[t].get(field), '#bdbdbd') for t in tiles]
-
-        def _bar_ax(ax, values, colors, ylabel, title,
-                    baseline: Optional[float] = None):
-            arr = np.array([np.nan if v is None else float(v)
-                            for v in values])
-            ax.bar(xs, arr, color=colors, edgecolor='#333', linewidth=0.4)
-            if baseline is not None:
-                ax.axhline(baseline, color='k', lw=0.7, ls='--', alpha=0.5)
-            ax.set_ylabel(ylabel, fontsize=9)
-            ax.set_title(title, fontsize=10)
-            ax.tick_params(axis='both', labelsize=8)
-            ax.set_xlim(-0.5, n - 0.5)
-            ax.grid(axis='y', alpha=0.3)
-
-        # 6-row layout: G_DC, |G_H1|, arg(G_H1), |G_H2|, arg(G_H2), f0
-        fig = plt.figure(figsize=(14, 14))
-        gs = fig.add_gridspec(6, 1, hspace=0.55)
-
-        # G_DC
-        ax = fig.add_subplot(gs[0, 0])
-        _bar_ax(ax, [tg[t].get('CO_rel') for t in tiles],
-                _colors('source_amp'),
-                'G_DC  (= CO_rel)',
-                'G_DC — per-tile mean_Q leveling factor',
-                baseline=1.0)
-
-        # |G_H1|
-        ax = fig.add_subplot(gs[1, 0])
-        _bar_ax(ax, [tg[t].get('z_mag') for t in tiles],
-                _colors('source_h1'),
-                '|G_H1|',
-                '|G_H1| — H1 amplitude gauge',
-                baseline=1.0)
-
-        # arg(G_H1)
-        ax = fig.add_subplot(gs[2, 0])
-        _bar_ax(ax, [tg[t].get('z_arg_deg') for t in tiles],
-                _colors('source_h1'),
-                'arg(G_H1)  (°)',
-                'arg(G_H1) — H1 phase gauge',
-                baseline=0.0)
-
-        # |G_H2|
-        ax = fig.add_subplot(gs[3, 0])
-        _bar_ax(ax, [tg[t].get('z_H2_mag') for t in tiles],
-                _colors('source_h2'),
-                '|G_H2|',
-                '|G_H2| — H2 amplitude gauge (grey bars = no H2 gauge; H1 fallback used)',
-                baseline=1.0)
-
-        # arg(G_H2)
-        ax = fig.add_subplot(gs[4, 0])
-        _bar_ax(ax, [tg[t].get('z_H2_arg_deg') for t in tiles],
-                _colors('source_h2'),
-                'arg(G_H2)  (°)',
-                'arg(G_H2) — H2 phase gauge (grey bars = no H2 gauge; H1 fallback used)',
-                baseline=0.0)
-
-        # f0
-        ax = fig.add_subplot(gs[5, 0])
-        _bar_ax(ax, [tg[t].get('f0_hz') for t in tiles],
-                _colors('source_amp'),
-                'f0 (Hz)',
-                'f0 — per-tile median fundamental (measured)',
-                baseline=(self.G.graph.get('f0_canonical_hz') or None))
-
-        # X-axis labels only on the last row
-        for i, ax in enumerate(fig.axes):
-            if i < len(fig.axes) - 1:
-                ax.set_xticks(xs)
-                ax.set_xticklabels([])
-            else:
-                ax.set_xticks(xs)
-                ax.set_xticklabels([str(t) for t in tiles],
-                                    rotation=90, fontsize=7)
-                ax.set_xlabel('tile ID', fontsize=9)
-
-        # Legend
-        from matplotlib.patches import Patch
-        handles = [
-            Patch(facecolor='#2b8cbe', edgecolor='#333', label='primary'),
-            Patch(facecolor='#fdae6b', edgecolor='#333', label='fillin'),
-            Patch(facecolor='#de2d26', edgecolor='#333', label='borrowed'),
-            Patch(facecolor='#bdbdbd', edgecolor='#333', label='missing'),
-        ]
-        fig.legend(handles=handles, loc='upper right', ncol=4,
-                    fontsize=9, bbox_to_anchor=(0.98, 0.995))
-        f0c = self.G.graph.get('f0_canonical_hz')
-        fig.suptitle(
-            f"Per-tile normalization gauges  ({n} tiles, "
-            f"f0_canonical = {f0c:.3f} Hz)" if f0c else
-            f"Per-tile normalization gauges ({n} tiles)",
-            fontsize=13, y=0.995)
-        plt.show(block=False)
-        try:
-            _place_figure_top_right(fig)
-        except Exception:
-            pass
-
-    def _on_show_diagnostics_clicked(self):
-        """Compute residuals against the stored gauges and plot per-tile /
-        per-pair diagnostics.  For each gauge, `residual` = mismatch
-        between observed shared-vessel ratios and what the recovered
-        gauge predicts.  A large per-tile residual means that tile's
-        gauge does NOT explain its own shared-vessel data well — either
-        the gauge is wrong (bad fill-in / wrong sign) OR the tile's data
-        is inconsistent with a single-scalar-gauge model.
-        """
-        if not self._normalization_available():
-            return
-        from ..mosaic.tile_normalize import (
-            compute_gauge_diagnostics, NormalizeParams)
-        params = NormalizeParams(
-            fillin_min_snr_db=float(self._norm_fillin_snr.value()),
-            amp_min_snr_db=float(self._norm_amp_snr.value()),
-        )
-        self._log_norm('Computing gauge diagnostics …')
-        diag = compute_gauge_diagnostics(self.G, params)
-        self._log_norm(
-            f'  H1: {len(diag["pair_phase_H1"])} phase pairs, '
-            f'{len(diag["pair_amp_H1"])} amp pairs, '
-            f'{len(diag["per_tile_phase_H1"])} tiles covered')
-        if diag['pair_phase_H2']:
-            self._log_norm(
-                f'  H2: {len(diag["pair_phase_H2"])} phase pairs, '
-                f'{len(diag["per_tile_phase_H2"])} tiles covered')
-        self._log_norm(
-            f'  DC: {len(diag["pair_amp_DC"])} pairs, '
-            f'{len(diag["per_tile_amp_DC"])} tiles covered')
-
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        # Two figures: one for per-pair histograms, one for per-tile bars.
-        # Per-pair histograms are compact; per-tile bars are wide.
-
-        # ── Figure 1: per-pair residual histograms (3 rows × 2 cols) ──
-        fig1, axes = plt.subplots(3, 2, figsize=(13, 9))
-        row_labels = [
-            ('DC log-amp',  diag['pair_amp_DC'],   'log(mean_Q ratio)'),
-            ('H1 log-amp',  diag['pair_amp_H1'],   'log(|Q_H1| ratio)'),
-            ('H2 log-amp',  diag['pair_amp_H2'],   'log(|Q_H2| ratio)'),
-        ]
-        for row, (label, recs, xlab) in enumerate(row_labels):
-            ax = axes[row, 0]
-            if not recs:
-                ax.text(0.5, 0.5, 'no data', ha='center', va='center',
-                        transform=ax.transAxes)
-            else:
-                vals = np.array([r[2] for r in recs])
-                ws = np.array([r[3] for r in recs])
-                ax.hist(vals, bins=50, weights=ws, color='#2b8cbe',
-                        edgecolor='#333', linewidth=0.3)
-                ax.axvline(0, color='k', ls='--', lw=0.7, alpha=0.5)
-                med = float(np.average(np.abs(vals), weights=ws))
-                ax.set_title(f'{label} pair residuals — '
-                             f'weighted mean |resid| = {med:.3f}',
-                             fontsize=9)
-            ax.set_xlabel(xlab, fontsize=8)
-            ax.set_ylabel('weight-sum', fontsize=8)
-            ax.grid(alpha=0.3)
-
-        phase_rows = [
-            ('H1 phase', diag['pair_phase_H1']),
-            ('H2 phase', diag['pair_phase_H2']),
-        ]
-        for i, (label, recs) in enumerate(phase_rows):
-            ax = axes[i, 1]
-            if not recs:
-                ax.text(0.5, 0.5, 'no data', ha='center', va='center',
-                        transform=ax.transAxes)
-            else:
-                vals = np.array([r[2] for r in recs])
-                ws = np.array([r[3] for r in recs])
-                ax.hist(vals, bins=50, weights=ws, color='#fdae6b',
-                        edgecolor='#333', linewidth=0.3, range=(-180, 180))
-                ax.axvline(0, color='k', ls='--', lw=0.7, alpha=0.5)
-                med = float(np.average(np.abs(vals), weights=ws))
-                ax.set_title(f'{label} pair residuals — '
-                             f'weighted mean |resid| = {med:.2f}°',
-                             fontsize=9)
-                ax.set_xlim(-180, 180)
-            ax.set_xlabel('resid (°)', fontsize=8)
-            ax.set_ylabel('weight-sum', fontsize=8)
-            ax.grid(alpha=0.3)
-
-        # Empty bottom-right — put a summary table there
-        ax = axes[2, 1]
-        ax.axis('off')
-        tg = diag['gauges']
-        n_tiles = len(tg)
-        n_prim_amp = sum(1 for g in tg.values() if g.get('source_amp') == 'primary')
-        n_fill_amp = sum(1 for g in tg.values() if g.get('source_amp') == 'fillin')
-        n_brw_amp  = sum(1 for g in tg.values() if g.get('source_amp') == 'borrowed')
-        n_prim_h1 = sum(1 for g in tg.values() if g.get('source_h1') == 'primary')
-        n_fill_h1 = sum(1 for g in tg.values() if g.get('source_h1') == 'fillin')
-        n_brw_h1  = sum(1 for g in tg.values() if g.get('source_h1') == 'borrowed')
-        n_prim_h2 = sum(1 for g in tg.values() if g.get('source_h2') == 'primary')
-        n_fill_h2 = sum(1 for g in tg.values() if g.get('source_h2') == 'fillin')
-        n_brw_h2  = sum(1 for g in tg.values() if g.get('source_h2') == 'borrowed')
-        f0c = self.G.graph.get('f0_canonical_hz')
-        txt = (
-            f'Gauge source counts ({n_tiles} tiles total)\n\n'
-            f'  G_DC :  primary {n_prim_amp:2d}   fillin {n_fill_amp:2d}   borrowed {n_brw_amp:2d}\n'
-            f'  G_H1 :  primary {n_prim_h1:2d}   fillin {n_fill_h1:2d}   borrowed {n_brw_h1:2d}\n'
-            f'  G_H2 :  primary {n_prim_h2:2d}   fillin {n_fill_h2:2d}   borrowed {n_brw_h2:2d}\n\n'
-            f'  f0_canonical = {f0c:.3f} Hz' if f0c else ''
-        )
-        ax.text(0.05, 0.95, txt, family='monospace', fontsize=10,
-                va='top', transform=ax.transAxes)
-        fig1.suptitle('Gauge diagnostics — per-pair residuals '
-                      '(observed offset vs recovered-gauge prediction)',
-                      fontsize=12)
-        fig1.tight_layout()
-        plt.show(block=False)
-        try:
-            _place_figure_top_right(fig1)
-        except Exception:
-            pass
-
-        # ── Figure 2: per-tile weighted-mean residuals as bar plot ──
-        tiles = sorted(tg.keys())
-        n = len(tiles)
-        xs = np.arange(n)
-
-        def _colors(field: str):
-            palette = {
-                'primary': '#2b8cbe', 'fillin': '#fdae6b',
-                'borrowed': '#de2d26', None: '#bdbdbd'}
-            return [palette.get(tg[t].get(field), '#bdbdbd') for t in tiles]
-
-        def _bar_ax(ax, values, colors, ylabel, title, obs_counts=None):
-            arr = np.array([np.nan if v is None else float(v) for v in values])
-            ax.bar(xs, arr, color=colors, edgecolor='#333', linewidth=0.4)
-            ax.axhline(0, color='k', lw=0.5, alpha=0.5)
-            ax.set_ylabel(ylabel, fontsize=9)
-            ax.set_title(title, fontsize=10)
-            ax.tick_params(axis='both', labelsize=8)
-            ax.set_xlim(-0.5, n - 0.5)
-            ax.grid(axis='y', alpha=0.3)
-            if obs_counts is not None:
-                # Annotate obs count below each bar as small numbers
-                ax2 = ax.twinx()
-                ax2.set_ylim(0, 1)
-                ax2.set_yticks([])
-                for i, t in enumerate(tiles):
-                    n_obs = obs_counts.get(t, 0)
-                    if n_obs > 0:
-                        ax2.text(i, 0.02, str(n_obs), ha='center',
-                                  va='bottom', fontsize=6, color='#555')
-
-        fig2 = plt.figure(figsize=(14, 12))
-        gs = fig2.add_gridspec(5, 1, hspace=0.55)
-
-        # DC log-amp per-tile residual
-        pt = diag['per_tile_amp_DC']
-        ax = fig2.add_subplot(gs[0, 0])
-        _bar_ax(ax,
-                [pt.get(t, (None,))[0] for t in tiles],
-                _colors('source_amp'),
-                '|resid|',
-                'G_DC per-tile: weighted mean |log(mean_Q ratio) - log(CO ratio)|. '
-                'Small = gauge explains data; large = inconsistent.',
-                obs_counts=diag['obs_count_DC'])
-
-        # H1 amp
-        pt = diag['per_tile_amp_H1']
-        ax = fig2.add_subplot(gs[1, 0])
-        _bar_ax(ax,
-                [pt.get(t, (None,))[0] for t in tiles],
-                _colors('source_h1'),
-                '|resid|',
-                '|G_H1| per-tile: weighted mean |log(|Q_H1| ratio) - log(|z_H1| ratio)|.',
-                obs_counts=diag['obs_count_H1'])
-
-        # H1 phase
-        pt = diag['per_tile_phase_H1']
-        ax = fig2.add_subplot(gs[2, 0])
-        _bar_ax(ax,
-                [pt.get(t, (None,))[0] for t in tiles],
-                _colors('source_h1'),
-                '|resid| (°)',
-                'arg(G_H1) per-tile: weighted mean |phase resid (°)|. '
-                'Values >45° flag sign-flip / bad-fill candidates.',
-                obs_counts=diag['obs_count_H1'])
-
-        # H2 amp
-        pt = diag['per_tile_amp_H2']
-        ax = fig2.add_subplot(gs[3, 0])
-        _bar_ax(ax,
-                [pt.get(t, (None,))[0] for t in tiles],
-                _colors('source_h2'),
-                '|resid|',
-                '|G_H2| per-tile: weighted mean |log ratio| resid.',
-                obs_counts=diag['obs_count_H2'])
-
-        # H2 phase
-        pt = diag['per_tile_phase_H2']
-        ax = fig2.add_subplot(gs[4, 0])
-        _bar_ax(ax,
-                [pt.get(t, (None,))[0] for t in tiles],
-                _colors('source_h2'),
-                '|resid| (°)',
-                'arg(G_H2) per-tile: weighted mean |phase resid (°)|.',
-                obs_counts=diag['obs_count_H2'])
-
-        for i, ax in enumerate(fig2.axes[::2]):   # only "real" axes, skip twins
-            if i < 4:
-                ax.set_xticks(xs); ax.set_xticklabels([])
-            else:
-                ax.set_xticks(xs)
-                ax.set_xticklabels([str(t) for t in tiles],
-                                    rotation=90, fontsize=7)
-                ax.set_xlabel('tile ID (small grey number = obs count above bar 0)',
-                               fontsize=9)
-
-        from matplotlib.patches import Patch
-        handles = [
-            Patch(facecolor='#2b8cbe', edgecolor='#333', label='primary'),
-            Patch(facecolor='#fdae6b', edgecolor='#333', label='fillin'),
-            Patch(facecolor='#de2d26', edgecolor='#333', label='borrowed'),
-            Patch(facecolor='#bdbdbd', edgecolor='#333', label='missing'),
-        ]
-        fig2.legend(handles=handles, loc='upper right', ncol=4,
-                     fontsize=9, bbox_to_anchor=(0.98, 0.995))
-        fig2.suptitle(
-            'Per-tile weighted-mean residuals — how well each tile\'s '
-            'gauge explains its shared-vessel observations.  Tall bars '
-            '= gauge unreliable.', fontsize=12, y=0.995)
-        plt.show(block=False)
-        try:
-            _place_figure_top_right(fig2)
-        except Exception:
-            pass
-
-    def _on_save_normalized_clicked(self):
-        """Write the current graph (raw + normalized fields) to a
-        `*_normalized.gpickle` file next to the source graph."""
-        from qtpy.QtWidgets import QFileDialog, QMessageBox
-        default_name = self.graph_path.with_name(
-            self.graph_path.stem + '_normalized.gpickle')
-        path, _ = QFileDialog.getSaveFileName(
-            self.viewer.window._qt_window,
-            "Save normalized graph",
-            str(default_name),
-            "Pickled graph (*.gpickle);;All files (*)")
-        if not path:
-            return
-        try:
-            import pickle
-            with open(path, 'wb') as f:
-                pickle.dump(self.G, f)
-            self._log_norm(f'Saved normalized graph → {path}')
-            QMessageBox.information(
-                self.viewer.window._qt_window,
-                "Saved",
-                f"Wrote {path}")
-        except Exception as exc:
-            self._log_norm(f'Save failed: {exc}')
-            QMessageBox.critical(
-                self.viewer.window._qt_window,
-                "Save failed",
-                f"Could not save graph:\n{exc}")
 
     # =================================================================
     # Edit tab: boundary marking + recursive-KCL bc_harmonics extraction.
@@ -3666,11 +2952,11 @@ class ReadOnlyMosaicViewer:
         self._edit_mode_btns = QButtonGroup(panel)
         for label, key, tip in [
             ("Off",              None,     "Read-only mode (default)."),
-            ("Mark source",     'source', "Click a node → tag as arterial 'source' + recursive junction-KCL."),
-            ("Mark sink",       'sink',   "Click a node → tag as venous 'sink' + recursive junction-KCL."),
+            ("Mark source",     'source', "Click a node → tag as arterial 'source' (boundary flow is emergent from the DC reconciliation)."),
+            ("Mark sink",       'sink',   "Click a node → tag as venous 'sink' (boundary flow is emergent from the DC reconciliation)."),
             ("Mark edge",       'edge',   "Click a node → toggle 'edge' tag (no bc_harmonics)."),
             ("Clear at click",  'clear',  "Click a boundary node → remove ITS boundary_type + all its bc_* attrs.  Only the clicked node is affected; other boundaries are untouched."),
-            ("Move junction",   'move_junction', "TWO-CLICK: (1) click a graph node that's adjacent to a boundary node (a 'junction'), (2) click a new node.  Re-routes the boundary edge from (old-junction ↔ boundary) to (new-junction ↔ boundary), then re-runs junction-KCL at the boundary node with the new incident vessel.  Use when the current junction is too deep in a low-signal vein — pick a better-signal node closer to the plexus."),
+            ("Move junction",   'move_junction', "TWO-CLICK: (1) click a graph node that's adjacent to a boundary node (a 'junction'), (2) click a new node.  Re-routes the boundary edge from (old-junction ↔ boundary) to (new-junction ↔ boundary), Use when the current junction is too deep in a low-signal vein — pick a better-signal node closer to the plexus."),
         ]:
             rb = QRadioButton(label)
             rb.setToolTip(tip)
@@ -3680,21 +2966,6 @@ class ReadOnlyMosaicViewer:
             self._edit_mode_btns.addButton(rb)
         lay.addWidget(mode_group)
 
-        # Recursive-KCL parameters
-        kcl_group = QGroupBox("Recursive junction-KCL parameters")
-        kcl_lay = QGridLayout(kcl_group)
-        kcl_lay.addWidget(QLabel("Max depth:"), 0, 0)
-        self._edit_max_depth = QSpinBox(); self._edit_max_depth.setRange(1, 10)
-        self._edit_max_depth.setValue(5)
-        self._edit_max_depth.setToolTip("How deep to walk into the network to characterize unmeasured branches (each hop invokes one more mass-conservation constraint).")
-        kcl_lay.addWidget(self._edit_max_depth, 0, 1)
-        kcl_lay.addWidget(QLabel("SNR threshold (dB):"), 1, 0)
-        self._edit_snr_thresh = QDoubleSpinBox()
-        self._edit_snr_thresh.setRange(0, 30); self._edit_snr_thresh.setSingleStep(1.0)
-        self._edit_snr_thresh.setValue(3.0)
-        self._edit_snr_thresh.setToolTip("Edges below this SNR trigger recursion into the far end.")
-        kcl_lay.addWidget(self._edit_snr_thresh, 1, 1)
-        lay.addWidget(kcl_group)
 
         # Badge-label option: show measured DC flux next to A/V
         badge_group = QGroupBox("Boundary badge labels")
@@ -3766,6 +3037,8 @@ class ReadOnlyMosaicViewer:
 
     def _apply_edit_mode(self, node: int, click_dist_px: float):
         """Execute the current edit mode's action on `node`."""
+        if not self._require_workbench('boundary editing'):
+            return
         mode = getattr(self, '_edit_mode', None)
         if mode is None:
             return
@@ -3798,39 +3071,10 @@ class ReadOnlyMosaicViewer:
         elif mode in ('source', 'sink'):
             self.G.nodes[node]['boundary_type'] = mode
             self.G.nodes[node]['true_tip'] = True
-            try:
-                from ..mosaic.kcl_reconstruct import (
-                    compute_bc_harmonics_recursive)
-                result = compute_bc_harmonics_recursive(
-                    self.G, node, mode,
-                    max_depth=int(self._edit_max_depth.value()),
-                    snr_threshold_db=float(self._edit_snr_thresh.value()))
-            except Exception as e:
-                import traceback; traceback.print_exc()
-                self._edit_status.append(
-                    f"node {node} {pos}: tagged as {mode}, KCL failed: "
-                    f"{type(e).__name__}: {e}")
-                return
-            if result is None:
-                self._edit_status.append(
-                    f"node {node} {pos}: {mode.upper()} but no bc_harmonics "
-                    f"computable (no measured edges reachable)")
-            else:
-                for k in ('bc_harmonics', 'bc_Q_t', 'bc_snr_db',
-                           'bc_source', 'edges_used', 'max_depth_reached',
-                           'n_edges', 'n_recursions'):
-                    v = result.get(k)
-                    if v is not None:
-                        self.G.nodes[node][k] = v
-                bch = result['bc_harmonics']
-                self._edit_status.append(
-                    f"node {node} {pos}: {mode.upper()}  "
-                    f"DC={bch[0].real:+.3f} nL/s  "
-                    f"|H1|={abs(bch[1]):.3f}  "
-                    f"snr={result['bc_snr_db']:.1f}dB  "
-                    f"src={result['bc_source']}  "
-                    f"n_edges={result['n_edges']}  "
-                    f"depth={result['max_depth_reached']}")
+            # Boundary roles only; boundary flows are emergent from the DC reconciliation
+            # (scripts/dc_reconcile.py).  The legacy recursive-KCL bc_harmonics lives in
+            # plexusflow.legacy.kcl_reconstruct.
+            self._edit_status.append(f"node {node} {pos}: → {mode}")
         # Sync boundary lists + refresh the A/V marker layers so the newly
         # tagged node shows up (or the cleared one disappears) immediately.
         self._refresh_boundary_layers()
@@ -3917,6 +3161,8 @@ class ReadOnlyMosaicViewer:
 
     def _save_graph_edits(self):
         """Persist Edit-tab changes to disk (atomic, with backup)."""
+        if not self._require_workbench('saving edits'):
+            return
         from datetime import datetime
         import os, pickle, shutil, tempfile
         target = Path(self.graph_path).resolve()
@@ -3937,7 +3183,7 @@ class ReadOnlyMosaicViewer:
                 suffix='.edit_save.tmp', dir=str(target.parent),
                 prefix='.' + target.stem + '.')
             with os.fdopen(fd, 'wb') as f:
-                pickle.dump(self.G, f, protocol=pickle.HIGHEST_PROTOCOL)
+                self._dump_graph(f, protocol=pickle.HIGHEST_PROTOCOL)
             os.replace(tmp, target)
             size_mb = target.stat().st_size / (1024 ** 2)
             self._edit_status.append(
@@ -4184,23 +3430,23 @@ class ReadOnlyMosaicViewer:
         view_panel = QWidget(); view_layout = QVBoxLayout(view_panel)
         ts_panel = QWidget();   ts_layout = QVBoxLayout(ts_panel)
         sim_panel = QWidget();  sim_layout = QVBoxLayout(sim_panel)
-        norm_panel = QWidget(); norm_layout = QVBoxLayout(norm_panel)
 
         # ══════ Tab 1: VIEW ═══════════════════════════════════════════
         layout = view_layout    # alias for the existing widget code
 
-        # ── Data source: Measured (PIV) / Normalized (tile-gauged) / Simulated ──
+        # ── Data source: Measured (PIV) / Reconciled (conservative DC + aligned AC) / Simulated ──
         from qtpy.QtWidgets import QRadioButton, QButtonGroup
         src_group = QGroupBox("Data source")
         src_lay = QHBoxLayout(src_group)
         self._src_radio_measured = QRadioButton("Measured")
         self._src_radio_measured.setChecked(self.current_source == 'measured')
-        self._src_radio_norm = QRadioButton("Normalized")
-        self._src_radio_norm.setChecked(self.current_source == 'normalized')
-        self._src_radio_norm.setEnabled(self._normalization_available())
-        if not self._normalization_available():
-            self._src_radio_norm.setToolTip(
-                "Compute or load a normalization in the Normalize tab to enable.")
+        self._src_radio_rec = QRadioButton("Reconciled")
+        self._src_radio_rec.setChecked(self.current_source == 'reconciled')
+        self._src_radio_rec.setEnabled(self._reconciliation_available())
+        self._src_radio_rec.setToolTip(
+            "Conservative DC flow Q\u2032 and tile-aligned harmonics (results/dc_reconciled_v2.pkl, ac_field_v2.pkl)."
+            if self._reconciliation_available() else
+            "No reconciliation found: run scripts/dc_reconcile.py and scripts/ac_field.py for this stage.")
         self._src_radio_sim = QRadioButton("Sim (intact)")
         self._src_radio_sim.setChecked(self.current_source == 'sim')
         self._src_radio_sim.setEnabled(self._sim_active)
@@ -4219,15 +3465,15 @@ class ReadOnlyMosaicViewer:
                 "Run the porous-carved sim in the Carved Sim tab to enable.")
         self._src_button_group = QButtonGroup(src_group)
         self._src_button_group.addButton(self._src_radio_measured)
-        self._src_button_group.addButton(self._src_radio_norm)
+        self._src_button_group.addButton(self._src_radio_rec)
         self._src_button_group.addButton(self._src_radio_sim)
         self._src_button_group.addButton(self._src_radio_sim_carved)
         self._src_radio_measured.toggled.connect(self._on_source_change)
-        self._src_radio_norm.toggled.connect(self._on_source_change)
+        self._src_radio_rec.toggled.connect(self._on_source_change)
         self._src_radio_sim.toggled.connect(self._on_source_change)
         self._src_radio_sim_carved.toggled.connect(self._on_source_change)
         src_lay.addWidget(self._src_radio_measured)
-        src_lay.addWidget(self._src_radio_norm)
+        src_lay.addWidget(self._src_radio_rec)
         src_lay.addWidget(self._src_radio_sim)
         src_lay.addWidget(self._src_radio_sim_carved)
         src_lay.addStretch(1)
@@ -4319,6 +3565,7 @@ class ReadOnlyMosaicViewer:
         _ru_lay.addWidget(self._click_to_tag_chk)
 
         _btn_row = QWidget()
+        self._radial_btn_row = _btn_row
         _btn_lay = QHBoxLayout(_btn_row)
         _btn_lay.setContentsMargins(0, 0, 0, 0)
         self._radial_toggle_btn = QPushButton("Toggle on selected  (u)")
@@ -4343,6 +3590,7 @@ class ReadOnlyMosaicViewer:
         # napari layer-lifecycle race that made the old "Rectangle tag…"
         # button stop working after ~two uses.
         _rg_row = QWidget()
+        self._region_row = _rg_row
         _rg_lay = QHBoxLayout(_rg_row)
         _rg_lay.setContentsMargins(0, 0, 0, 0)
         _rg_lay.addWidget(QLabel("Region:"))
@@ -4818,7 +4066,7 @@ class ReadOnlyMosaicViewer:
         self._overlay_source_combo = QComboBox()
         self._overlay_source_combo.addItem("(none)", None)
         self._overlay_source_combo.addItem("measured", "measured")
-        self._overlay_source_combo.addItem("normalized", "normalized")
+        self._overlay_source_combo.addItem("reconciled", "reconciled")
         self._overlay_source_combo.addItem("sim (intact)", "sim")
         self._overlay_source_combo.addItem("sim (carved)", "sim_carved")
         self._overlay_source_combo.setToolTip(
@@ -4849,32 +4097,6 @@ class ReadOnlyMosaicViewer:
             "Enabled only when the selected edge touches a boundary node.")
         self._plot_bnd_kcl_btn.clicked.connect(self._on_plot_boundary_kcl)
         inspect_lay.addWidget(self._plot_bnd_kcl_btn)
-        # Raw vs normalized comparison — 4-panel figure per edge.
-        # Enabled once the graph has been normalized (via the Normalize
-        # tab, or loaded with normalization already applied).  Note the
-        # main "Plot Q(t)" button auto-invokes this same handler when
-        # the active data source is 'Normalized'.
-        self._compare_norm_btn = QPushButton(
-            "Diagnose normalization (raw + norm + phasors)")
-        self._compare_norm_btn.setToolTip(
-            "Pop a 6-panel diagnostic for the selected edge showing how "
-            "the per-tile normalization gauge (CO_rel, z_arg_H1, f0/f0_can) "
-            "brings the tiles into a common frame.\n\n"
-            "Panels:\n"
-            " (top-L) RAW Q(t) per tile, native f0, harmonic fit dashed\n"
-            " (top-M) NORMALIZED Q(t) per tile, canonical f0, plus the\n"
-            "         SNR-weighted mean phasor waveform (purple bold)\n"
-            "         and a CONSISTENCY check from _h_amp/phase_H{k}_norm\n"
-            " (top-R) |amplitude| bars per harmonic  (raw vs normalized)\n"
-            " (bot-L) Per-tile gauges: |z_t|, CO_rel, f0/f0_can with ψ\n"
-            " (bot-M) Cycle-folded overlay — one canonical cycle per tile\n"
-            " (bot-R) Normalized phasors in complex plane, per harmonic\n\n"
-            "If normalization worked, the norm Q(t) traces should overlay\n"
-            "tightly and the phasor markers should cluster on a single\n"
-            "point per harmonic (= no residual per-tile drift).")
-        self._compare_norm_btn.setEnabled(False)
-        self._compare_norm_btn.clicked.connect(self._plot_raw_vs_norm_qt)
-        inspect_lay.addWidget(self._compare_norm_btn)
         # Run Farneback optical flow/PIV on the selected edge from the
         # tile video.  Read-only: no graph mutation, no measurement
         # persistence — just shows Q(t), spectrum, and a curved ROI
@@ -5079,11 +4301,13 @@ class ReadOnlyMosaicViewer:
         layout.addStretch()
 
         # Info label (View tab footer)
+        _mode_txt = ("<b>Workbench</b> — fresh OF, tagging and boundary edits; saves go to the stage graph."
+                     if self.workbench else
+                     "<b>Viewer</b> — read-only: nothing is written, no OF re-runs."
+                     + (" (frozen release)" if self.is_release else ""))
         info = QLabel(
             f"<small>{self.G.number_of_edges()} edges, "
-            f"{self.G.number_of_nodes()} nodes<br>"
-            f"<b>Read-only viewer</b> — no graph edits, no PIV re-runs."
-            f"</small>")
+            f"{self.G.number_of_nodes()} nodes<br>{_mode_txt}</small>")
         info.setWordWrap(True)
         view_layout.addWidget(info)
 
@@ -5095,22 +4319,21 @@ class ReadOnlyMosaicViewer:
         _sim_scroll = QScrollArea()
         _sim_scroll.setWidgetResizable(True)
         _sim_scroll.setWidget(sim_panel)
-        tabs.addTab(_sim_scroll, "Simulate")
+        # Simulations are the modelling side (plexusmech); workbench only.
+        if self.workbench and self.mech_available:
+            tabs.addTab(_sim_scroll, "Simulate")
         # (The Carved Sim tab is now folded into the Simulate tab as the
         # "Carved" source-recipe option — one tab, radio-toggled.)
-        self._build_normalize_tab(norm_layout)
-        _norm_scroll = QScrollArea()
-        _norm_scroll.setWidgetResizable(True)
-        _norm_scroll.setWidget(norm_panel)
-        tabs.addTab(_norm_scroll, "Normalize")
         # Edit tab: boundary-node marking (source/sink/edge/clear) + save.
         # The rest of the viewer stays read-only.
         edit_panel = self._build_edit_panel()
         _edit_scroll = QScrollArea()
         _edit_scroll.setWidgetResizable(True)
         _edit_scroll.setWidget(edit_panel)
-        tabs.addTab(_edit_scroll, "Edit")
+        if self.workbench:
+            tabs.addTab(_edit_scroll, "Edit")
         self._edit_mode = None
+        self._apply_capabilities()
         self.viewer.window.add_dock_widget(tabs, name="Controls", area='right')
         self._selected_edge: Optional[Tuple[int, int]] = None
         # Radial-uncertainty tagging: viewer-editable per-edge flag
@@ -5122,12 +4345,13 @@ class ReadOnlyMosaicViewer:
         # napari keybinding: ``u`` toggles the flag on the currently
         # selected edge.  Registered here (after viewer + selection state
         # exist) so it survives layer rebuilds.
-        try:
-            @self.viewer.bind_key('u', overwrite=True)
-            def _toggle_radial_uncertain_kb(_v):
-                self._toggle_radial_uncertain_on_selected()
-        except Exception:
-            pass
+        if self.workbench:
+            try:
+                @self.viewer.bind_key('u', overwrite=True)
+                def _toggle_radial_uncertain_kb(_v):
+                    self._toggle_radial_uncertain_on_selected()
+            except Exception:
+                pass
         # Build the initial colour bar to reflect current field.
         self._refresh_cbar()
 
@@ -5148,13 +4372,13 @@ class ReadOnlyMosaicViewer:
         # if the percentile changed (handler clears the cache).
         ts_filter_active = (
             float(self.total_snr_pct_filter) > -20.0
-            and self.current_source in ('measured', 'normalized')
+            and self.current_source == 'measured'
             and self.current_quantity == 'Q'
         )
         # Dissipation percentile filter — applies only to measured-Q.
         ds_filter_active = (
             float(self.dissipation_pct_filter) > 0.0
-            and self.current_source in ('measured', 'normalized')
+            and self.current_source == 'measured'
             and self.current_quantity == 'Q'
         )
         ds_threshold: Optional[float] = None
@@ -5182,7 +4406,7 @@ class ReadOnlyMosaicViewer:
         # H2 SNR absolute-dB filter (mirrors H1).
         ts_h2_filter_active = (
             float(self.total_snr_h2_pct_filter) > -20.0
-            and self.current_source in ('measured', 'normalized')
+            and self.current_source == 'measured'
             and self.current_quantity == 'Q'
         )
         ts_h2_threshold: Optional[float] = None
@@ -6515,7 +5739,7 @@ class ReadOnlyMosaicViewer:
             if lp is not None and occl >= 1.0 and lp in bc_override:
                 bc_override[lp] = np.zeros(4, dtype=complex)   # full ligation: Q=0
             D_phys = 1.5e-3
-            from ..analyze.transmission_line import solve_transmission_line  # ported 2026-09-30
+            from plexusmech.tl.transmission_line import solve_transmission_line  # ported 2026-09-30
             result = solve_transmission_line(
                 self.G, D=D_phys, n_harmonics=3, f0_hz=float(state["F0_HZ"]),
                 bc_harmonics_override=bc_override, verbose=False)
@@ -9255,7 +8479,7 @@ class ReadOnlyMosaicViewer:
         # made in this run sees D_eff(ω) = D · (1 − iη). Uses a class-level
         # pristine reference so repeated runs don't double-wrap.
         # Matches lock_D6p5e4_eta0p4.py's convention.
-        from ..analyze import transmission_line as _tl
+        from plexusmech.tl import transmission_line as _tl
         if not hasattr(type(self), '_pristine_vessel_admittance'):
             type(self)._pristine_vessel_admittance = _tl._vessel_admittance
         _orig_va = type(self)._pristine_vessel_admittance
@@ -9493,7 +8717,7 @@ class ReadOnlyMosaicViewer:
         try:
             # Lazy import — keeps viewer startup cheap and avoids
             # pulling in the heavy adaptation module circular chain.
-            from ..analyze.transmission_line import solve_transmission_line  # ported 2026-09-30
+            from plexusmech.tl.transmission_line import solve_transmission_line  # ported 2026-09-30
             t0 = time.time()
             if equal_flux_A:
                 # Two-pass equal-flux:
@@ -9927,7 +9151,7 @@ class ReadOnlyMosaicViewer:
         try:
             import pickle
             with open(path, 'wb') as f:
-                pickle.dump(self.G, f)
+                self._dump_graph(f)
             has_sim = bool(self.G.graph.get('sim_meta'))
             has_norm = bool(self.G.graph.get('tile_gauges'))
             QMessageBox.information(
@@ -10666,14 +9890,6 @@ class ReadOnlyMosaicViewer:
             bt_v = self.G.nodes[v].get('boundary_type')
             self._plot_bnd_kcl_btn.setEnabled(
                 bt_u in ('source', 'sink') or bt_v in ('source', 'sink'))
-        # Enable raw-vs-normalized compare only if this edge has both
-        # measurements_piv (raw) AND measurements_piv_normalized populated
-        # (side-by-side after tile_normalize runs).
-        if hasattr(self, '_compare_norm_btn'):
-            ed = self.G.edges[u, v]
-            has_norm = (self._normalization_available()
-                        and bool(ed.get('measurements_piv_normalized')))
-            self._compare_norm_btn.setEnabled(has_norm)
         self._add_to_comp_btn.setEnabled(True)
         # OF button requires a tile + video; gate it on having both.
         _of_ok = bool(self.tiles) and self.of_video_dir is not None
@@ -12630,6 +11846,8 @@ class ReadOnlyMosaicViewer:
         path — that one only returned `Q_t` + `v_mean`, missing the
         velocity field, vessel mask, radial profile, and ROI bounds
         the figure needs."""
+        if not self._require_workbench('fresh optical flow'):
+            return
         from qtpy.QtWidgets import QApplication
         import time as _time
         if self._selected_edge is None:
@@ -13442,22 +12660,17 @@ class ReadOnlyMosaicViewer:
 
     def _get_edge_harmonics(self, u, v, source):
         """Return [Z_DC, Z_H1, Z_H2, Z_H3] complex phasors for an edge in
-        a given source ∈ {'measured', 'normalized', 'sim', 'sim_carved'}.
+        a given source ∈ {'measured', 'reconciled', 'sim', 'sim_carved'}.
         Returns None if the source has no data for this edge.
         Convention matches compare_waveforms.py: Q(t) = Re(Z0) + Σ Re(Zk·e^{iωkt})."""
         d = self.G.edges[u, v]
         Z = [None, None, None, None]
-        if source == 'normalized':
-            # NOTE: `_h_Z_DC_norm` is a display proxy (|DC|·10, real scale)
-            # and `_h_Z_H{k}_norm` is an SNR ratio 10^(snr/20). Only the
-            # `_h_amp_*_norm` + `_h_phase_*_norm` scalars are the true
-            # per-tile-gauged phasor components.
-            a0 = d.get('_h_amp_DC_norm')
+        if source == 'reconciled':
+            a0 = d.get('_h_amp_DC_rec')
             if a0 is not None and np.isfinite(a0):
                 Z[0] = complex(float(a0), 0.0)
             for k in (1, 2, 3):
-                a = d.get(f'_h_amp_H{k}_norm')
-                p = d.get(f'_h_phase_H{k}_norm')
+                a = d.get(f'_h_amp_H{k}_rec'); p = d.get(f'_h_phase_H{k}_rec')
                 if a is not None and p is not None and np.isfinite(a) and np.isfinite(p):
                     Z[k] = complex(float(a) * np.exp(1j * float(p)))
         elif source == 'sim':
@@ -13585,15 +12798,14 @@ class ReadOnlyMosaicViewer:
             return
         # Source-aware:
         #   'sim'        → plot the reconstructed sim waveform
-        #   'normalized' → open the side-by-side raw vs normalized 4-panel
-        #                  view (was the "Compare raw vs normalized" button)
+        #   'reconciled' → reconciled waveform (Q\u2032 + aligned harmonics) with the per-tile raw traces
         #   'measured'   → the standard 3-row Q(t) + harmonic decomp + FFT
         src = getattr(self, 'current_source', 'measured')
         if src == 'sim':
             self._plot_selected_sim_qt()
             return
-        if src == 'normalized':
-            self._plot_raw_vs_norm_qt()
+        if src == 'reconciled':
+            self._plot_selected_reconciled_qt()
             return
         u, v = self._selected_edge
         meas = self.G.edges[u, v].get('measurements_piv') or []
@@ -13832,443 +13044,57 @@ class ReadOnlyMosaicViewer:
         except Exception:
             pass
 
-    def _plot_raw_vs_norm_qt(self):
-        """4-panel comparison of raw vs normalized Q(t) for the selected edge.
-
-        Reads both `measurements_piv` and `measurements_piv_normalized`
-        off the same graph — populated by the Normalize tab (which calls
-        `pertile.mosaic.tile_normalize.apply_gauges_to_graph`).
-        """
+    def _plot_selected_reconciled_qt(self):
+        """Reconciled waveform of the selected edge — DC Q\u2032 (± ensemble SD) + tile-aligned H1..H3 — over two
+        cycles, next to each tile's raw measured mean flow.  Phases are drawn only if the winner tile's time gauge
+        is determined; otherwise the waveform shape is shown in that tile's own time origin."""
         if self._selected_edge is None:
             return
-        if not self._normalization_available():
-            print('[compare] No normalization has been computed on this graph. '
-                  'Use the Normalize tab first.')
-            return
         u, v = self._selected_edge
-        ms_raw = self.G.edges[u, v].get('measurements_piv') or []
-        ms_norm = self.G.edges[u, v].get('measurements_piv_normalized') or []
-        # Match by tile_id — build a dict per side
-        raw_by_tile = {}
-        for m in ms_raw:
-            tid = m.get('tile_id')
-            if tid is None: continue
-            mv_m = MeasurementView(m)
-            Q_t = mv_m.Q_t
-            if Q_t is not None:
-                raw_by_tile.setdefault(int(tid), []).append(m)
-        norm_by_tile = {}
-        for m in ms_norm:
-            tid = m.get('tile_id')
-            if tid is None: continue
-            mv_m = MeasurementView(m)
-            Q_t = mv_m.Q_t
-            if Q_t is not None:
-                norm_by_tile.setdefault(int(tid), []).append(m)
-        common_tiles = sorted(set(raw_by_tile) & set(norm_by_tile))
-        if not common_tiles:
-            print(f'[compare] no common tile measurements for edge ({u},{v})')
+        d = self.G.edges[u, v]
+        if d.get('_h_amp_DC_rec') is None:
+            from qtpy.QtWidgets import QMessageBox
+            QMessageBox.information(self.viewer.window._qt_window, "Not reconciled",
+                                    f"Edge ({u}, {v}) is not in the carved network (porous region or DA stub).")
             return
-
+        Z = self._get_edge_harmonics(u, v, 'reconciled')
+        t, q = self._reconstruct_qt(Z)
         import matplotlib.pyplot as plt
-        tile_gauges = (self.G.graph.get('tile_gauges') or {})
-        f0_can = float(self.G.graph.get('f0_canonical_hz', 2.838))
-
-        # Colour map: assign one colour per tile so raw + norm curves match.
-        colours = plt.cm.tab10.colors + plt.cm.tab20.colors
-        colour_of = {t: colours[i % len(colours)] for i, t in enumerate(common_tiles)}
-        # 2 x 3 layout — third column split into:
-        #   top    = |H_k| bar chart (raw vs normalized amplitudes per tile)
-        #   bottom = polar-style phasor plot (normalized H_k per tile + mean)
-        fig = plt.figure(figsize=(20, 10))
-        gs = fig.add_gridspec(2, 3, width_ratios=[1.0, 1.0, 0.8])
-        axs = np.array([
-            [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])],
-            [fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])],
-        ])
-        ax_mag = fig.add_subplot(gs[0, 2])
-        ax_phasor = fig.add_subplot(gs[1, 2])
-        def _harm_fit(m, f0_use, T_samples):
-            """Reconstruct Q_fit(t) = DC + Σ_k amp_k cos(2π k f0 t + φ_k)
-            from the stored (amp, phi) on this measurement.  Returns
-            (t_array, Q_fit) or (None, None) if data is missing."""
-            harm_d = m.get('harm') or {}
-            dc = harm_d.get('mean_Q')
-            if dc is None or not np.isfinite(dc):
-                return None, None
-            t_arr = np.arange(T_samples) / 250.0
-            y = np.full(T_samples, float(dc), dtype=float)
-            for h in (harm_d.get('harmonics') or []):
-                a = h.get('amp'); p = h.get('phi'); k = h.get('k')
-                if (a is None or p is None or k is None
-                    or not np.isfinite(a) or not np.isfinite(p)):
-                    continue
-                y = y + float(a) * np.cos(
-                    2.0 * np.pi * float(k) * f0_use * t_arr + float(p))
-            return t_arr, y
-
-        # (0,0): raw Q(t) per tile + per-tile harmonic fits (dashed)
-        ax_raw = axs[0, 0]
-        for tid in common_tiles:
-            m = raw_by_tile[tid][0]
-            Q_t = np.asarray(MeasurementView(m).Q_t, dtype=float)
-            t = np.arange(len(Q_t)) / 250.0
-            ax_raw.plot(t, Q_t, lw=0.7, color=colour_of[tid], alpha=0.45,
-                         label=f'tile {tid}')
-            # Fit uses this tile's own f0 (native).
-            f0_t = float((m.get('harm') or {}).get('f0_hz') or 2.5)
-            _t_fit, Q_fit = _harm_fit(m, f0_t, len(Q_t))
-            if Q_fit is not None:
-                ax_raw.plot(_t_fit, Q_fit, lw=1.6, ls='--',
-                             color=colour_of[tid], alpha=0.95,
-                             label=f'tile {tid} fit (f0={f0_t:.2f}Hz)')
-        ax_raw.set_xlabel('t (s)'); ax_raw.set_ylabel('Q (nL/s)')
-        ax_raw.set_title(f'RAW Q(t)  edge ({u},{v})  —  {len(common_tiles)} tiles\n'
-                          '(faint = raw, dashed = harmonic fit at tile-native f0)')
-        ax_raw.grid(alpha=0.3); ax_raw.legend(fontsize=7, loc='best', ncol=2)
-
-        # (0,1): normalized Q(t) per tile + per-tile fits + SNR-weighted mean
-        ax_norm = axs[0, 1]
-        for tid in common_tiles:
-            m = norm_by_tile[tid][0]
-            Q_t = np.asarray(MeasurementView(m).Q_t, dtype=float)
-            t = np.arange(len(Q_t)) / 250.0
-            ax_norm.plot(t, Q_t, lw=0.7, color=colour_of[tid], alpha=0.4,
-                          label=f'tile {tid}')
-            # Normalized harmonics live at the canonical f0.
-            _t_fit, Q_fit = _harm_fit(m, f0_can, len(Q_t))
-            if Q_fit is not None:
-                ax_norm.plot(_t_fit, Q_fit, lw=1.4, ls='--',
-                              color=colour_of[tid], alpha=0.9,
-                              label=f'tile {tid} fit')
-        # Reconstruct the mean-phasor waveform (what the coloring uses
-        # under Normalize / All-tiles).  Read the cache written by
-        # tile_normalize.apply_gauges_to_graph.
-        ed = self.G.edges[u, v]
-        mean_ph = ed.get('_h_norm_mean_phasors') or {}
-        if mean_ph:
-            n_meas = int(ed.get('_h_norm_mean_n', 0))
-            # Reconstruct on the same time base as the raw traces.
-            first_tile = common_tiles[0]
-            T_ref = len(np.asarray(MeasurementView(norm_by_tile[first_tile][0]).Q_t))
-            t = np.arange(T_ref) / 250.0
-            # amp stored on `harmonics[k]['amp']` is the physical
-            # cosine amplitude sqrt(A² + B²) (see pertile.analysis.
-            # harmonic.fit_harmonics), so reconstruction is
-            #    Q(t) = DC + Σ |H_k| cos(k ω t + arg H_k)
-            # — no factor of 2.
-            dc = complex(mean_ph.get('DC', complex('nan')))
-            y = np.full(T_ref, float(dc.real) if np.isfinite(dc.real) else 0.0)
-            for k in (1, 2, 3):
-                H = complex(mean_ph.get(f'H{k}', complex('nan')))
-                if np.isfinite(H.real) and np.isfinite(H.imag):
-                    y = y + abs(H) * np.cos(
-                        k * 2.0 * np.pi * f0_can * t + np.angle(H))
-            ax_norm.plot(t, y, color='#7a1fa2', lw=2.4, alpha=0.75,
-                          label=f'SNR-wtd mean phasor  (n={n_meas})')
-        # ── Consistency check: reconstruct from the scalar cache used by
-        # BOTH the network colormap AND my overlay code — should overlay
-        # exactly on the purple phasor-mean line above. If it doesn't,
-        # the scalar cache diverges from the mean-phasor cache, and one
-        # or both are being read wrong downstream.
-        _a_dc = ed.get('_h_amp_DC_norm')
-        if _a_dc is not None and np.isfinite(_a_dc):
-            first_tile = common_tiles[0]
-            T_ref = len(np.asarray(MeasurementView(norm_by_tile[first_tile][0]).Q_t))
-            t_sc = np.arange(T_ref) / 250.0
-            y_sc = np.full(T_ref, float(_a_dc))
-            for k in (1, 2, 3):
-                a = ed.get(f'_h_amp_H{k}_norm'); p = ed.get(f'_h_phase_H{k}_norm')
-                if a is None or p is None: continue
-                if not (np.isfinite(a) and np.isfinite(p)): continue
-                y_sc = y_sc + float(a) * np.cos(
-                    k * 2.0 * np.pi * f0_can * t_sc + float(p))
-            ax_norm.plot(t_sc, y_sc, color='#1a9850', lw=1.5, ls=':',
-                          label=r'scalar cache: _h_amp_H{k}_norm + _h_phase_H{k}_norm',
-                          alpha=0.95)
-        ax_norm.axhline(0, color='0.7', lw=0.5, alpha=0.5)
-        ax_norm.set_xlabel('t (s)'); ax_norm.set_ylabel('Q_norm (nL/s)')
-        ax_norm.set_title(
-            f'NORMALIZED Q(t)  (canonical f0={f0_can:.2f} Hz)\n'
-            'NOTE: faint tile traces = raw normalized samples\n'
-            '(may sit ≠ DC-shifted); dashed = per-tile fit at f0_can;\n'
-            'purple = SNR-wtd mean phasor;  '
-            'green dotted = scalar-cache reconstruction (must overlap purple).')
-        ax_norm.grid(alpha=0.3); ax_norm.legend(fontsize=7, loc='best')
-
-        # (1,0): per-tile scalars table (bar plot). H1 gauge in solid,
-        # H2 gauge as thinner overlay so you can see if H1 and H2 agree
-        # or drifted independently under the two spectral_sync passes.
-        ax_gauge = axs[1, 0]
-        xs = np.arange(len(common_tiles))
-        z_mags   = [tile_gauges.get(t, {}).get('z_mag', np.nan) for t in common_tiles]
-        z_H2_mags = [tile_gauges.get(t, {}).get('z_H2_mag', np.nan) for t in common_tiles]
-        co_rels  = [tile_gauges.get(t, {}).get('CO_rel', np.nan) for t in common_tiles]
-        f0s      = [tile_gauges.get(t, {}).get('f0_hz', np.nan) for t in common_tiles]
-        ax_gauge.axhline(1, color='gray', lw=0.4)
-        w = 0.22
-        ax_gauge.bar(xs - 1.5*w, z_mags, w, label='|z_t| (H1)',
-                      color=[colour_of[t] for t in common_tiles], alpha=0.6,
-                      edgecolor='black')
-        ax_gauge.bar(xs - 0.5*w, z_H2_mags, w, label='|z_t| (H2)',
-                      color=[colour_of[t] for t in common_tiles], alpha=0.4,
-                      edgecolor='black', hatch='xx')
-        ax_gauge.bar(xs + 0.5*w, co_rels, w, label='CO_rel (DC)',
-                      color=[colour_of[t] for t in common_tiles], alpha=0.9,
-                      edgecolor='black', hatch='//')
-        ax_gauge.bar(xs + 1.5*w, np.array(f0s) / f0_can, w, label='f0/f0_can',
-                      color=[colour_of[t] for t in common_tiles], alpha=0.3,
-                      edgecolor='black', hatch='..')
-        ax_gauge.set_xticks(xs)
-        ax_gauge.set_xticklabels([str(t) for t in common_tiles])
-        ax_gauge.set_xlabel('tile'); ax_gauge.set_ylabel('gauge value (× reference)')
-        ax_gauge.set_title(
-            'Per-tile gauges — magnitude: H1 and H2 use their own |z_t|; '
-            'PHASE: only ψ₁ is applied (2·ψ₁ for H2, 3·ψ₁ for H3 — single '
-            'time-shift per tile)\n'
-            'ψ₂_meas is shown for diagnostic only: how well H2\'s independent '
-            'sync agrees with the applied 2·ψ₁ (small |ψ₂_meas − 2·ψ₁| = '
-            'sync is self-consistent)')
-        ax_gauge.legend(fontsize=7, ncol=2); ax_gauge.grid(axis='y', alpha=0.3)
-        def _wrap180(x):
-            return ((x + 180) % 360) - 180
-        for i, tid in enumerate(common_tiles):
-            psi_h1 = tile_gauges.get(tid, {}).get('z_arg_deg', np.nan)
-            psi_h2_meas = tile_gauges.get(tid, {}).get('z_H2_arg_deg', np.nan)
-            top_y = max([v for v in [z_mags[i], z_H2_mags[i], co_rels[i],
-                                       (f0s[i] or f0_can)/f0_can]
-                         if v is not None and np.isfinite(v)] or [1.0])
-            lbl_parts = []
-            if np.isfinite(psi_h1):
-                # ψ₁ applied to H1
-                lbl_parts.append(f'ψ₁={psi_h1:+.0f}°')
-                # 2·ψ₁ applied to H2 (single time-shift, linear in k)
-                lbl_parts.append(f'2ψ₁={_wrap180(2*psi_h1):+.0f}°')
-            if np.isfinite(psi_h2_meas):
-                # ψ₂_meas: what H2's independent sync computed; NOT applied
-                lbl_parts.append(f'ψ₂ᵐ={psi_h2_meas:+.0f}°')
-                # Δ = ψ₂_meas − 2·ψ₁: self-consistency check
-                if np.isfinite(psi_h1):
-                    lbl_parts.append(f'Δ={_wrap180(psi_h2_meas - 2*psi_h1):+.0f}°')
-            if lbl_parts:
-                ax_gauge.text(i, top_y + 0.05, '\n'.join(lbl_parts),
-                               fontsize=6.5, ha='center')
-
-        # (1,1): CYCLE-FOLDED overlay — collapse all cycles onto ONE canonical
-        # period.  If normalization worked, tiles should overlay tightly on
-        # the single-cycle window.
-        ax_ov = axs[1, 1]
-        cycle_samples = int(round(250 / f0_can))   # samples per canonical cycle
-        phase_axis = np.arange(cycle_samples) / cycle_samples   # 0..1 within a cycle
-        for tid in common_tiles:
-            Q_t = np.asarray(MeasurementView(norm_by_tile[tid][0]).Q_t, dtype=float)
-            n_cycles = len(Q_t) // cycle_samples
-            if n_cycles < 1: continue
-            folded = Q_t[:n_cycles * cycle_samples].reshape(n_cycles, cycle_samples)
-            # Faint traces of individual cycles + bold mean
-            for cyc in folded:
-                ax_ov.plot(phase_axis, cyc, color=colour_of[tid], lw=0.4, alpha=0.25)
-            mean_cycle = folded.mean(axis=0)
-            ax_ov.plot(phase_axis, mean_cycle, color=colour_of[tid], lw=2.5,
-                        alpha=0.95, label=f'tile {tid}  (mean of {n_cycles} cycles)')
-        # SNR-weighted mean phasor reconstruction on the same phase axis.
-        mean_ph_ov = self.G.edges[u, v].get('_h_norm_mean_phasors') or {}
-        if mean_ph_ov:
-            t_cycle = phase_axis / f0_can   # seconds within one cycle
-            dc = complex(mean_ph_ov.get('DC', complex('nan')))
-            y = np.full(cycle_samples,
-                         float(dc.real) if np.isfinite(dc.real) else 0.0)
-            for k in (1, 2, 3):
-                H = complex(mean_ph_ov.get(f'H{k}', complex('nan')))
-                if np.isfinite(H.real) and np.isfinite(H.imag):
-                    y = y + abs(H) * np.cos(
-                        k * 2.0 * np.pi * f0_can * t_cycle + np.angle(H))
-            n_meas = int(self.G.edges[u, v].get('_h_norm_mean_n', 0))
-            ax_ov.plot(phase_axis, y, color='#7a1fa2', lw=2.5, alpha=0.8,
-                        label=f'SNR-wtd mean phasor  (n={n_meas})')
-        ax_ov.set_xlabel('cardiac phase  (fraction of one cycle at canonical f0)')
-        ax_ov.set_ylabel('Q_norm (nL/s)')
-        ax_ov.set_title('Cycle-folded overlay  (bold = mean cycle per tile)')
-        ax_ov.grid(alpha=0.3); ax_ov.legend(fontsize=8, loc='best')
-
-        # ── Phasor panel (right column, full height) ─────────────────────
-        # Plots each tile's NORMALIZED H_k phasor in complex plane, with
-        # H1 (circle), H2 (square), H3 (triangle).  Also draws the
-        # SNR-weighted mean phasor (thick black marker + arrow from origin).
-        # If normalization aligned the tiles perfectly, all tiles should
-        # cluster on a single point per harmonic and the mean should sit
-        # exactly there.  Phase mismatch shows up as angular spread; the
-        # mean sits at the centroid of the tile points (weighted by SNR).
-        harm_markers = {1: 'o', 2: 's', 3: '^'}
-        max_r = 0.0
-
-        def _phasors_at(mm):
-            """Return {k: complex H_k} from a measurement dict."""
-            out = {}
-            hs = ((mm.get('harm') or {}).get('harmonics') or [])
-            for k in (1, 2, 3):
-                ix = k - 1
-                if ix >= len(hs) or hs[ix] is None:
-                    continue
-                a = hs[ix].get('amp'); p = hs[ix].get('phi')
-                if a is None or p is None or not np.isfinite(a) or not np.isfinite(p):
-                    continue
-                out[k] = float(a) * np.exp(1j * float(p))
-            return out
-
-        # Pull Z/2 sign-map (which tiles got flipped by per-edge sign
-        # resolution before the aggregate mean was computed). Marked with
-        # an extra X hatch + a "×(-1)" annotation next to the marker.
-        _mp_signs = self.G.edges[u, v].get('_h_norm_mean_phasors') or {}
-        signs_by_k = {k: (_mp_signs.get(f'H{k}_signs') or {}) for k in (1, 2, 3)}
-        for tid in common_tiles:
-            H_norm = _phasors_at(norm_by_tile[tid][0])
-            for k in (1, 2, 3):
-                if k not in H_norm:
-                    continue
-                H = H_norm[k]
-                max_r = max(max_r, abs(H))
-                sign = int(signs_by_k.get(k, {}).get(int(tid), 1))
-                ax_phasor.plot([0, H.real], [0, H.imag],
-                                color=colour_of[tid], lw=0.6, alpha=0.4)
-                # Base marker at the RAW per-tile phasor location
-                ax_phasor.plot(H.real, H.imag,
-                                marker=harm_markers[k], ms=9,
-                                markerfacecolor=colour_of[tid],
-                                markeredgecolor='black' if sign > 0 else 'red',
-                                mew=(0.5 if sign > 0 else 1.5),
-                                linestyle='None')
-                # If flipped, also draw the ALIGNED (flipped) phasor as an
-                # open marker at -H, and a thin dashed arrow connecting
-                # them so it's obvious which raw phasor was inverted.
-                if sign < 0:
-                    ax_phasor.plot([0, -H.real], [0, -H.imag],
-                                    color=colour_of[tid], lw=0.6, ls=':', alpha=0.4)
-                    ax_phasor.plot(-H.real, -H.imag,
-                                    marker=harm_markers[k], ms=9,
-                                    markerfacecolor='none',
-                                    markeredgecolor=colour_of[tid],
-                                    mew=1.5, linestyle='None')
-                    ax_phasor.annotate('', xy=(-H.real, -H.imag),
-                                        xytext=(H.real, H.imag),
-                                        arrowprops=dict(
-                                            arrowstyle='->',
-                                            color='red', alpha=0.5,
-                                            lw=0.8, ls='dashed'))
-        # SNR-weighted mean phasors from the cache
-        mean_ph_pan = self.G.edges[u, v].get('_h_norm_mean_phasors') or {}
-        for k in (1, 2, 3):
-            H_mean = complex(mean_ph_pan.get(f'H{k}', complex('nan')))
-            if not (np.isfinite(H_mean.real) and np.isfinite(H_mean.imag)):
+        fig, (ax, ax2) = plt.subplots(1, 2, figsize=(12, 4.6), facecolor='white',
+                                      gridspec_kw=dict(width_ratios=[2.2, 1]))
+        dc, sd = float(d['_h_amp_DC_rec']), float(d.get('_rec_Qp_sd') or 0.0)
+        ax.plot(t, q, color='#2ca02c', lw=2.2, label='reconciled')
+        ax.axhspan(dc - sd, dc + sd, color='#2ca02c', alpha=0.12, lw=0)
+        ax.axhline(dc, color='#2ca02c', ls=':', lw=0.9)
+        ax.axhline(0, color='0.6', lw=0.6)
+        ac = d.get('_h_amp_H1_rec') is not None
+        tag = []
+        if d.get('_rec_unstable'):
+            tag.append('DC unstable across ensemble')
+        if not ac:
+            tag.append('no AC field (not eligible)')
+        elif not d.get('_rec_phase_ok'):
+            tag.append(f"phase not determined (tile {d.get('_rec_tile')} gauge SD {d.get('_rec_gauge_sd', float('nan')):.0f}°)")
+        ax.set_title(f"Edge ({u}, {v})   Q\u2032 = {dc:+.3f} ± {sd:.3f} nL/s (u→v)"
+                     + (f"   winner tile {d.get('_rec_tile')}" if ac else ''), fontsize=11)
+        if tag:
+            ax.text(0.02, 0.03, ';  '.join(tag), transform=ax.transAxes, fontsize=9, color='#b03030')
+        ax.set_xlabel('cycles'); ax.set_ylabel('Q (nL/s), + = u→v'); ax.grid(alpha=0.3)
+        # per-tile raw mean flow, oriented u→v, vs the reconciled value
+        rows = []
+        for m in d.get('measurements_piv') or []:
+            qm = m.get('Q_kl', m.get('mean_Q'))
+            if qm is None or not np.isfinite(qm):
                 continue
-            max_r = max(max_r, abs(H_mean))
-            ax_phasor.plot([0, H_mean.real], [0, H_mean.imag],
-                            color='#7a1fa2', lw=2.0, alpha=0.85)
-            ax_phasor.plot(H_mean.real, H_mean.imag,
-                            marker=harm_markers[k], ms=14,
-                            markerfacecolor='#7a1fa2', markeredgecolor='white',
-                            mew=1.2, linestyle='None')
-        # Axes cosmetics
-        R = max(max_r * 1.15, 1e-6)
-        ax_phasor.set_xlim(-R, R); ax_phasor.set_ylim(-R, R)
-        ax_phasor.set_aspect('equal', adjustable='box')
-        ax_phasor.axhline(0, color='gray', lw=0.4)
-        ax_phasor.axvline(0, color='gray', lw=0.4)
-        # Unit-magnitude reference ring at R/2 and R for phase reading
-        theta = np.linspace(0, 2*np.pi, 200)
-        for r in (R/2, R):
-            ax_phasor.plot(r * np.cos(theta), r * np.sin(theta),
-                            color='gray', lw=0.3, alpha=0.5)
-        ax_phasor.set_xlabel('Re(H)  [nL/s]')
-        ax_phasor.set_ylabel('Im(H)  [nL/s]')
-        ax_phasor.set_title('Normalized phasors  (H1=○, H2=□, H3=△)\n'
-                              'purple = SNR-weighted mean')
-        ax_phasor.grid(alpha=0.25)
-        # Legend: one entry per tile (H1 marker) + a mean entry
-        from matplotlib.lines import Line2D
-        legend_handles = []
-        for tid in common_tiles:
-            legend_handles.append(Line2D([0], [0], marker='o', color='w',
-                                          markerfacecolor=colour_of[tid],
-                                          markeredgecolor='black', mew=0.5,
-                                          markersize=9, label=f'tile {tid}'))
-        legend_handles.append(Line2D([0], [0], marker='o', color='w',
-                                      markerfacecolor='#7a1fa2',
-                                      markeredgecolor='white', mew=1.2,
-                                      markersize=12, label='SNR-wtd mean'))
-        ax_phasor.legend(handles=legend_handles, fontsize=8, loc='best')
-
-        # ── Magnitude bar chart (top-right) ─────────────────────────────
-        # Groups: DC, H1, H2, H3.  Within each group: pairs of bars for
-        # each tile: (raw, normalized).  Overplot the SNR-weighted mean
-        # normalized magnitude as a dashed reference line per harmonic.
-        def _amps(mm):
-            """Return {DC, H1, H2, H3} magnitudes from a measurement."""
-            out = {'DC': float('nan'), 'H1': float('nan'),
-                    'H2': float('nan'), 'H3': float('nan')}
-            hh = mm.get('harm') or {}
-            dc = hh.get('mean_Q')
-            if dc is not None and np.isfinite(dc):
-                out['DC'] = abs(float(dc))
-            for h in (hh.get('harmonics') or []):
-                k = int(h.get('k', 0))
-                a = h.get('amp')
-                if a is not None and np.isfinite(a) and 1 <= k <= 3:
-                    out[f'H{k}'] = abs(float(a))
-            return out
-
-        keys = ['DC', 'H1', 'H2', 'H3']
-        x_base = np.arange(len(keys))
-        n_tiles = len(common_tiles)
-        # 2 bars per tile per group, tucked into unit-wide slot
-        slot_w = 0.8 / max(1, 2 * n_tiles)
-        for i, tid in enumerate(common_tiles):
-            raw_amps = _amps(raw_by_tile[tid][0])
-            norm_amps = _amps(norm_by_tile[tid][0])
-            offset_r = -0.4 + (2 * i) * slot_w
-            offset_n = offset_r + slot_w
-            ax_mag.bar(x_base + offset_r,
-                        [raw_amps[k] for k in keys], slot_w,
-                        color=colour_of[tid], alpha=0.35,
-                        edgecolor=colour_of[tid], linewidth=0.6)
-            ax_mag.bar(x_base + offset_n,
-                        [norm_amps[k] for k in keys], slot_w,
-                        color=colour_of[tid], alpha=0.85,
-                        edgecolor='black', linewidth=0.4)
-        # Style-only proxy entries in the legend (tile colours are
-        # already visible in the other panels).
-        from matplotlib.patches import Patch
-        ax_mag.add_artist(ax_mag.legend(
-            handles=[Patch(facecolor='gray', alpha=0.35, edgecolor='gray',
-                            label='raw'),
-                      Patch(facecolor='gray', alpha=0.85, edgecolor='black',
-                            label='normalized')],
-            fontsize=7, loc='upper right'))
-        # SNR-weighted mean amplitudes as horizontal reference marks
-        mean_ph_bar = self.G.edges[u, v].get('_h_norm_mean_phasors') or {}
-        if mean_ph_bar:
-            mean_amps = [abs(complex(mean_ph_bar.get('DC', complex('nan'))))]
-            for k in (1, 2, 3):
-                mean_amps.append(abs(complex(mean_ph_bar.get(f'H{k}', complex('nan')))))
-            for xi, ma in zip(x_base, mean_amps):
-                if np.isfinite(ma):
-                    ax_mag.hlines(ma, xi - 0.42, xi + 0.42,
-                                    colors='#7a1fa2', lw=2.2, alpha=0.9,
-                                    zorder=5)
-        ax_mag.set_xticks(x_base); ax_mag.set_xticklabels(keys)
-        ax_mag.set_ylabel('|amplitude|  [nL/s]')
-        ax_mag.set_title('Magnitudes: raw (faint) vs normalized (bold)\n'
-                          'purple bar = SNR-wtd mean normalized')
-        ax_mag.grid(axis='y', alpha=0.3)
-
-        fig.suptitle(f'Raw vs normalized  edge ({u},{v})   '
-                      f'[{len(common_tiles)} tiles]', fontsize=12)
-        fig.tight_layout()
-        plt.show(block=False)
-        try:
-            _place_figure_top_right(fig)
-        except Exception:
-            pass
+            sgn = 1.0 if (m.get('flow_from'), m.get('flow_to')) != (v, u) else -1.0
+            rows.append((int(m.get('tile_id', -1)), sgn * abs(float(qm)) if m.get('flow_from') is not None else float(qm)))
+        if rows:
+            rows.sort()
+            ax2.barh(range(len(rows)), [r[1] for r in rows], color='0.55')
+            ax2.set_yticks(range(len(rows))); ax2.set_yticklabels([f"tile {r[0]}" for r in rows], fontsize=8)
+        ax2.axvline(dc, color='#2ca02c', lw=2); ax2.axvline(0, color='0.6', lw=0.6)
+        ax2.set_xlabel('raw per-tile mean Q (nL/s, u→v)'); ax2.set_title('measurements', fontsize=10)
+        fig.tight_layout(); fig.show()
 
     def _plot_selected_sim_qt(self):
         """Single-edge plot of the SIMULATED waveform (View tab Source =
@@ -14560,6 +13386,8 @@ class ReadOnlyMosaicViewer:
 
     def _toggle_radial_uncertain_on_selected(self):
         """Flip the ``radial_uncertain`` flag on ``self._selected_edge``."""
+        if not self._require_workbench('tagging'):
+            return
         if self._selected_edge is None:
             self._info_box.setPlainText(
                 "No edge selected — click an edge first, then press "
@@ -14718,6 +13546,8 @@ class ReadOnlyMosaicViewer:
         few sessions napari's mouse-event dispatcher was ending up on the
         Edges or Mosaic layer (whichever was frontmost) and reading the
         drag as a pan/zoom instead of a shape-add."""
+        if not self._require_workbench('region tagging'):
+            return
         from qtpy.QtWidgets import QApplication
         shape_mode = self._region_shape_combo.currentData()   # 'add_rectangle' / 'add_polygon_lasso'
         self._region_action_pending = action
@@ -14781,11 +13611,13 @@ class ReadOnlyMosaicViewer:
 
     def _save_radial_uncertain_tags(self):
         """Write the current graph back to disk with updated flags."""
+        if not self._require_workbench('saving tags'):
+            return
         import pickle
         from qtpy.QtWidgets import QMessageBox
         try:
             with open(self.graph_path, 'wb') as f:
-                pickle.dump(self.G, f)
+                self._dump_graph(f)
             self._radial_tags_dirty = False
             self._refresh_radial_status()
             n = sum(1 for _, _, dd in self.G.edges(data=True)
@@ -14805,7 +13637,7 @@ class ReadOnlyMosaicViewer:
     def _on_source_change(self, _checked=None):
         # Four-way exclusive group; only act when EXACTLY one is checked
         radios = [self._src_radio_measured,
-                  getattr(self, '_src_radio_norm', None),
+                  getattr(self, '_src_radio_rec', None),
                   self._src_radio_sim,
                   getattr(self, '_src_radio_sim_carved', None)]
         checked = [r for r in radios if r is not None and r.isChecked()]
@@ -14816,9 +13648,9 @@ class ReadOnlyMosaicViewer:
             new_src = 'sim_carved'
         elif self._src_radio_sim.isChecked():
             new_src = 'sim'
-        elif (getattr(self, '_src_radio_norm', None) is not None
-              and self._src_radio_norm.isChecked()):
-            new_src = 'normalized'
+        elif (getattr(self, '_src_radio_rec', None) is not None
+              and self._src_radio_rec.isChecked()):
+            new_src = 'reconciled'
         else:
             new_src = 'measured'
         if new_src == self.current_source:
@@ -14842,12 +13674,104 @@ class ReadOnlyMosaicViewer:
         self._refresh_nodes()
         self._refresh_cbar()
 
-    def _normalization_available(self) -> bool:
-        """True if the loaded graph already has normalized fields."""
+    _IN_MEMORY_PREFIXES = ('_rec_',)
+
+    def _dump_graph(self, f, protocol=None):
+        """Pickle self.G without the viewer's in-memory reconciliation attrs (`_h_*_rec`, `_rec_*`)."""
+        import pickle as _pk
+        stash = []
+        for u, v, d in self.G.edges(data=True):
+            ks = [k for k in d if k.startswith(self._IN_MEMORY_PREFIXES) or (k.startswith('_h_') and k.endswith('_rec'))]
+            if ks:
+                stash.append((d, {k: d.pop(k) for k in ks}))
         try:
-            return bool(self.G.graph.get('tile_gauges'))
-        except Exception:
-            return False
+            if protocol is None:
+                _pk.dump(self.G, f)
+            else:
+                _pk.dump(self.G, f, protocol=protocol)
+        finally:
+            for d, kv in stash:
+                d.update(kv)
+
+    def _require_workbench(self, what: str) -> bool:
+        """Guard for anything that writes or recomputes; the read-only viewer refuses."""
+        if self.workbench:
+            return True
+        print(f"  (read-only viewer: {what} needs `plexusflow workbench <stage>`)")
+        return False
+
+    def _apply_capabilities(self):
+        """Hide the controls that write or recompute when not in workbench mode."""
+        if self.workbench:
+            return
+        for name in ('_click_to_tag_chk', '_radial_btn_row', '_region_row',
+                     '_run_of_btn', '_of_merge_chk', '_of_refine_chk', '_clear_of_region_btn'):
+            w = getattr(self, name, None)
+            if w is not None:
+                w.setVisible(False)
+
+    def _reconciliation_available(self) -> bool:
+        """True if reconciliation outputs were found and attached to the graph."""
+        return bool(getattr(self, '_rec', None))
+
+    def _results_dir(self):
+        """results/ next to the graph's stage (or $PLEXUSFLOW_RESULTS when it points at this stage's results)."""
+        import os
+        stage = self.graph_path.parent.parent
+        env = os.environ.get('PLEXUSFLOW_RESULTS')
+        cands = ([Path(env).expanduser()] if env else []) + [stage / 'results']
+        for c in cands:
+            if (c / 'dc_reconciled_v2.pkl').exists():
+                return c
+        return None
+
+    def _load_reconciliation(self) -> dict:
+        """Attach the reconciliation outputs to the in-memory graph (never written back):
+        `_h_amp_DC_rec` (signed Q\u2032 along the stored edge orientation), `_rec_Qp_sd`, `_rec_unstable`,
+        `_h_{amp,phase}_H{k}_rec` (tile-aligned AC field, eligible edges), `_rec_tile`, `_rec_gauge_sd`,
+        `_rec_phase_ok` (winner tile gauge SD ≤ 30°).  Returns a small summary dict ({} if absent)."""
+        res = self._results_dir()
+        if res is None:
+            return {}
+        import pickle as _pk
+        try:
+            D = _pk.loads((res / 'dc_reconciled_v2.pkl').read_bytes())
+            A = _pk.loads((res / 'ac_field_v2.pkl').read_bytes()) if (res / 'ac_field_v2.pkl').exists() else None
+        except Exception as exc:
+            print(f"  reconciliation: could not read {res}: {exc}")
+            return {}
+        edges = [tuple(e) for e in D['edges']]
+        missing = sum(1 for (u, v) in edges if not self.G.has_edge(u, v))
+        if missing:
+            print(f"  reconciliation: {missing} of {len(edges)} edges not in this graph — results belong to "
+                  f"another graph version; 'Reconciled' source disabled")
+            return {}
+        Qp = np.asarray(D['Qp'], float)
+        sd = np.asarray(D.get('Qp_sd', np.full(len(edges), np.nan)), float)
+        uns = np.asarray(D.get('unstable', np.zeros(len(edges), bool)), bool)
+        for i, (u, v) in enumerate(edges):
+            d = self.G.edges[u, v]
+            d['_h_amp_DC_rec'] = float(Qp[i]); d['_rec_Qp_sd'] = float(sd[i]); d['_rec_unstable'] = bool(uns[i])
+        n_ac = n_ph = 0
+        f_ref = float('nan')
+        if A is not None and [tuple(e) for e in A['edges']] == edges:
+            from ..ac.field import phase_determined
+            ph_ok = phase_determined(A, 30.0)
+            gsd = A.get('gauge_sd_deg') or {}
+            f_ref = float(A.get('f_ref', float('nan')))
+            for i, (u, v) in enumerate(edges):
+                if not A['elig'][i]:
+                    continue
+                d = self.G.edges[u, v]; t = int(A['tile'][i])
+                for k in range(A['H'].shape[0]):
+                    h = complex(A['H'][k, i])
+                    d[f'_h_amp_H{k + 1}_rec'] = abs(h); d[f'_h_phase_H{k + 1}_rec'] = float(np.angle(h))
+                d['_rec_tile'] = t; d['_rec_gauge_sd'] = float(gsd.get(t, np.nan)); d['_rec_phase_ok'] = bool(ph_ok[i])
+                n_ac += 1; n_ph += int(ph_ok[i])
+        print(f"  reconciliation ({res}): DC on {len(edges)} carved edges ({int(uns.sum())} flagged unstable); "
+              f"AC field on {n_ac} edges, phase-determined {n_ph}")
+        return dict(results_dir=res, n_dc=len(edges), n_ac=n_ac, n_phase=n_ph, f_ref=f_ref,
+                    metrics=D.get('metrics', {}))
 
     def _carved_sim_data_available(self) -> bool:
         """True if any edge carries `_h_*_sim_carved` fields from a
@@ -14870,21 +13794,6 @@ class ReadOnlyMosaicViewer:
                     self._src_radio_sim_carved.setToolTip("")
         except Exception:
             pass
-
-    def _refresh_source_radio_enable(self):
-        """Call after normalization runs (or is cleared) to update the
-        Normalized radio's enabled state + tooltip."""
-        if not hasattr(self, '_src_radio_norm'):
-            return
-        avail = self._normalization_available()
-        self._src_radio_norm.setEnabled(avail)
-        self._src_radio_norm.setToolTip(
-            "" if avail else
-            "Compute or load a normalization in the Normalize tab to enable.")
-        if not avail and self.current_source == 'normalized':
-            # Fall back to measured
-            self.current_source = 'measured'
-            self._src_radio_measured.setChecked(True)
 
     # ── Custom-BC helpers ────────────────────────────────────────────
     def _on_bc_source_change(self, _checked=None):
@@ -15442,6 +14351,8 @@ def main():
                         help="Wipe any existing harmonic_class values and "
                              "recompute from scratch.  Useful if PIV was "
                              "re-run and the cached values are stale.")
+    parser.add_argument('--workbench', action='store_true',
+                        help="Editing tools (fresh OF, tagging, boundary edits, saves); default is read-only view.")
     parser.add_argument('--rotate-cw', action='store_true',
                         help="Rotate the graph 90° clockwise on startup.")
     parser.add_argument('--rotate-ccw', action='store_true',
@@ -15533,6 +14444,7 @@ def main():
         of_video_pattern=of_video_pattern,
         initial_field=args.initial_field,
         cache_harmonic_class=not args.no_cache_harmonic_class,
+        mode='workbench' if args.workbench else 'view',
         force_recompute_harmonic_class=args.force_recompute_harmonic_class,
         rotate_cw=args.rotate_cw,
         rotate_ccw=args.rotate_ccw,

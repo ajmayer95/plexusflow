@@ -119,3 +119,30 @@ def sync_mismatch(field, aligned=True):
             ha, hb = ha * np.exp(-1j * psi[a]), hb * np.exp(-1j * psi[b])
         out.append(abs(np.angle(ha * np.conj(hb))))
     return float(np.degrees(np.median(out)))
+
+
+def junction_residuals(field, dom, seed=0):
+    """Median junction residual |Σ s Ĥ_k| / Σ |Ĥ_k| at interior junctions (degree ≥ 3) whose edges are all AC-eligible.
+
+    Returns (n_junctions, {k: {'aligned', 'unaligned', 'random'}}) for k = 1, 2: the tile-aligned field, the same
+    phasors with the tile gauge undone, and a random-phase null with the aligned magnitudes."""
+    el, Hf, nE = field["elig"], field["H"], len(field["edges"])
+    B = dom["B"].tocsr(); absB = abs(B); interior = np.setdiff1d(np.arange(B.shape[0]), dom["bnd"])
+    n_bad = np.asarray(absB @ (~el).astype(float)).ravel(); deg = np.asarray(absB.sum(axis=1)).ravel()
+    nodes_ok = interior[(n_bad[interior] == 0) & (deg[interior] >= 3)]; rng = np.random.default_rng(seed)
+    r = lambda H: float(np.median(np.abs((B @ H)[nodes_ok]) / np.maximum((absB @ np.abs(H))[nodes_ok], 1e-30)))
+    out = {}
+    for k in (1, 2):
+        Hk = np.where(el, Hf[k - 1], 0)
+        Hun = np.where(el, np.array([Hf[k - 1, i] * np.exp(1j * k * field["psi"][field["tile"][i]]) if el[i] else 0
+                                     for i in range(nE)]), 0)
+        Hrnd = np.where(el, np.abs(Hk) * np.exp(1j * rng.uniform(0, 2 * np.pi, nE)), 0)
+        out[k] = dict(aligned=r(Hk), unaligned=r(Hun), random=r(Hrnd))
+    return len(nodes_ok), out
+
+
+def phase_determined(field, max_sd_deg=30.0):
+    """AC-eligible vessels whose winner tile has a well-determined time gauge (bootstrap SD ≤ max_sd_deg); only these
+    phases are comparable across tiles."""
+    gsd = field.get("gauge_sd_deg") or {}
+    return field["elig"] & np.array([t >= 0 and gsd.get(int(t), np.inf) <= max_sd_deg for t in field["tile"]])

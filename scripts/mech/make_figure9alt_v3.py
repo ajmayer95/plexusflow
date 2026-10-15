@@ -27,10 +27,10 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.collections import LineCollection
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import plexusflow.paths as _paths
 from plexusflow.reconcile import carved_domain
-from plexusflow.ac.model import build_context, solve
+from plexusmech.ac.model import build_context, solve
 
 D_MAIN, ETA_MAIN, VEIN_BC = 3.5e-4, 0.0, 'flux'
 GAUGE_SD_MAX = 30.0     # deg: tiles with a less certain time gauge are greyed in the measured phase maps

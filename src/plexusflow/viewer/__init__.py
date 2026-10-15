@@ -1,7 +1,8 @@
-"""napari-based read-only viewer for plexusflow stages.
+"""napari-based viewer for plexusflow stages and releases.
 
-Entry point:
-    plexusflow view <STAGE_ROOT>
+Entry points:
+    plexusflow view <STAGE_ROOT>        read-only (also frozen releases)
+    plexusflow workbench <STAGE_ROOT>   + fresh OF, tagging, boundary edits (stage folders only)
 """
 from __future__ import annotations
 

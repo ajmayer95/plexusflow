@@ -51,6 +51,7 @@ dev = [
 
 [project.scripts]
 plexusflow = "plexusflow.cli:app"
+plexusmech = "plexusmech.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/ajmayer95/plexusflow"
@@ -58,7 +59,7 @@ Documentation = "https://github.com/ajmayer95/plexusflow"
 Issues = "https://github.com/ajmayer95/plexusflow/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/plexusflow"]
+packages = ["src/plexusflow", "src/plexusmech"]
 
 [tool.ruff]
 line-length = 100
