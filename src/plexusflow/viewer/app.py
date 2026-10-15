@@ -1853,6 +1853,8 @@ class ReadOnlyMosaicViewer:
         print(f"Loading graph: {self.graph_path}")
         with open(self.graph_path, 'rb') as f:
             G = pickle.load(f)
+        from ..paths import attach_external_traces      # release graphs keep Q(t) in export/traces.npz
+        G = attach_external_traces(G, self.graph_path)
         print(f"  {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
         return G
 
