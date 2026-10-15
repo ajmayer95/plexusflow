@@ -77,20 +77,24 @@ proj.qc().write_report("qc/report.html")
 
 MIT — see [LICENSE](LICENSE).
 
-## Quickstart for collaborators (frozen release)
+## Quickstart for collaborators (frozen data releases)
 
-You need: access to this repository, a copy of the data release (`PlexusFlow21S_release_v1/`, ~375 MB — shared
-separately), and Python ≥ 3.10.
+Frozen data releases for 15, 21 and 27 somites are attached to the GitHub release
+[`data-v2`](https://github.com/ajmayer95/plexusflow/releases/tag/data-v2) (repository access required). Each stage has a
+**core** archive (graph, exports, mosaic, final results; 62–103 MB) and an optional **extras** archive (viewer video
+playback, Kloosterman inputs); both extract into the same folder.  You need Python ≥ 3.10 and the GitHub CLI (`gh`).
 
 Paste-safe commands (zsh does not accept `#` comments interactively, so none are inline):
 
 ```bash
-git clone -b pipeline https://github.com/ajmayer95/plexusflow.git
+gh release download data-v2 --repo ajmayer95/plexusflow --pattern 'PlexusFlow21S_release_v2.core.tar.gz'
+tar -xzf PlexusFlow21S_release_v2.core.tar.gz
+git clone https://github.com/ajmayer95/plexusflow.git
 cd plexusflow
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-export PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S_release_v1
+export PLEXUSFLOW_STAGE="$PWD/../PlexusFlow21S_release_v2"
 export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results
 export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
 python examples/quickstart.py
@@ -98,19 +102,21 @@ python examples/quickstart.py
 
 | Command | What it does |
 |---|---|
-| `python examples/quickstart.py` | load graph → reliability fit → DC reconciliation → 2 plots (~1 min) |
+| `python examples/quickstart.py` | load graph → reliability fit → DC reconciliation → 2 plots |
 | `python scripts/dc_reconcile.py` | full DC pipeline (writes `reliability_model_v1.json`, `dc_reconciled_v2.pkl`) |
-| `python scripts/make_dc_emergent_figure_v2.py`, `python scripts/make_figure8alt_v3.py` | DC figures (after `dc_reconcile`) |
-| `python scripts/ac_field.py` | AC harmonic field (after `dc_reconcile`) |
+| `python scripts/ac_field.py --ref-tile 21` | aligned waveform (AC) field — 27S: `--ref-tile 43`; 15S: `--ref-tile 15 --f0-band 10` |
+| `python scripts/make_figure8alt_v3.py`, `python scripts/make_figure9alt_v3.py` | figures 8 and 9 (after the two above) |
 | `python scripts/ac_estimate.py` | joint (D, η) estimate — slow (tens of minutes) |
-| `pip install -e ".[gui]"` then `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"` | read-only viewer (napari) |
+| `pip install -e ".[gui]"` then `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"` | read-only viewer (napari; video playback needs the extras archive) |
 
-`python3` must be ≥ 3.10 (on macOS, e.g. Homebrew's `python3.11`).  Once the `pipeline` branch is merged, drop `-b pipeline`.
+Working without Python: `graph/export/` in a release holds the graph, every measurement and the per-tile heart rates as
+CSV + npz (`SCHEMA.md` explains the columns); `results/` holds the reconciled flows and the waveform field as CSV.
 
-Working without Python: `graph/export/` in the release holds the graph and every measurement as CSV + npz
-(`SCHEMA.md` explains the columns); `results/` holds the reconciled flows and AC field as CSV.
-The release's `results/` were produced with this code; re-running reproduces them exactly in the environment recorded in
-its `MANIFEST.json`, and to ~0.3 % with other numpy/scipy versions.
+Reproducibility: each release records the code commit it was built with (`MANIFEST.json`).  Re-running the scripts in a
+fresh environment reproduces the reconciled flows of every vessel not flagged `unstable` to ≤ 0.6 % with no direction
+changes (`results/dc_reconciled_edges.csv`: `Q_reconciled_sd`, `unstable` — weakly determined loop and near-zero flows,
+0.03–0.12 % of vessels), and the tile phases of every tile with `phase_determined` waveforms exactly.  Waveform phases are
+only comparable across tiles whose phase uncertainty is ≤ 30° (`results/summary.json`: `tile_time_gauge_sd_deg`).
 
 ## Repository layout (2026-10)
 
