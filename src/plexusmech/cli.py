@@ -162,3 +162,7 @@ def simulate(stage_root: Path = typer.Argument(...),
     with open(out, 'wb') as f:
         pickle.dump(G, f)
     print(f"[simulate] wrote {out.stat().st_size/1024/1024:.0f} MB")
+
+
+if __name__ == "__main__":
+    app()
