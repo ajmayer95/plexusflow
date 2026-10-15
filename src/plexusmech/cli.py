@@ -12,6 +12,12 @@ from plexusflow.config import StageConfig
 app = typer.Typer(add_completion=False, help="Vascular mechanics models on plexusflow reconstructions.")
 
 
+@app.callback()
+def _main() -> None:
+    """Vascular mechanics models on plexusflow reconstructions."""
+    # A callback keeps `simulate` a subcommand (typer collapses single-command apps into the root command).
+
+
 @app.command()
 def simulate(stage_root: Path = typer.Argument(...),
               src: Path = typer.Option(None,
