@@ -1,140 +1,90 @@
-# plexusflow — Claude Code Instructions
+# plexusflow — instructions for Claude Code (any machine)
 
-**plexusflow is the primary codebase as of 2026-08-21** (see memory
-`plexusflow_is_primary`).  All new figure, inference, and normalization
-work goes here.  The sibling `../PerTileFlow` tree is kept only for the
-read-only napari viewer, a few legacy inference-diagnostic scripts, and
-the pertile source still referenced from the viewer.
+Whole-organ vascular flow from yolk-sac videos: per-tile optical flow → per-vessel flux → conservation-consistent
+reference field (paper 1). Modelling on top of it (two-port network, D/η inference) is `plexusmech` (paper 2).
+Owner: Alex Mayer. Two machines: office Mac (raw videos live there) and laptop. Code syncs through GitHub, data through
+Google Drive.
 
-## Launching the viewer
+## Where everything is
 
-Plexusflow has its own viewer stack under `plexusflow.cli`.  Full list
-of commands is in [`LAUNCH.md`](LAUNCH.md) — copy/paste commands.
-Most useful:
+| What | Where |
+|---|---|
+| Code (this repo) | `~/code/plexusflow` — GitHub `ajmayer95/plexusflow` (private). Pull at start; Alex pushes at the end. |
+| Stage data (graphs, mosaics, results, figures) | Google Drive `My Drive/PlexusFlow15S`, `PlexusFlow21S`, `PlexusFlow27S` (`graph/`, `fuse/`, `results/`, `figures/`). Office Mac path: `/Users/amayer/Library/CloudStorage/GoogleDrive-amayer@flatironinstitute.org/My Drive/` — on the laptop find it with `ls ~/Library/CloudStorage/`. |
+| Frozen data releases (read-only!) | `My Drive/PlexusFlow{15S,21S,27S}_release_v2` + GitHub release `data-v2`. **Never write into a release folder.** |
+| Diagnostics / experiments | `sandbox/` = symlink to Drive `My Drive/Python/Yolk Sac Code/plexusflow-sandbox` (gitignored). On a new machine: `ln -s "<Drive>/My Drive/Python/Yolk Sac Code/plexusflow-sandbox" ~/code/plexusflow/sandbox`. Logs are `sandbox/run_*.log`. |
+| Raw videos | office Mac only (`~/Desktop/ImageData/...`). Fresh OF, `analyze` and benchmark-bundle building need them; nothing else does. |
+| Claude memory notes (decisions, gotchas) | snapshot on Drive: `My Drive/Python/Yolk Sac Code/claude-memory/` (start with `MEMORY.md`; `README.txt` says how to link it). Read the relevant notes before changing methods. |
+| Old Drive code folder `My Drive/Python/Yolk Sac Code/plexusflow` | archive only — do not develop there. `../PerTileFlow` = legacy. |
 
-```bash
-# Read-only mosaic viewer (default stage root path shown)
-python3 -m plexusflow.cli view "/Users/amayer/Library/CloudStorage/GoogleDrive-amayer@flatironinstitute.org/My Drive/PlexusFlow21S"
+Scripts find data through `plexusflow.paths`: set `PLEXUSFLOW_STAGE` to a stage folder (results default to
+`<stage>/results`, figures to `<stage>/figures`; override with `PLEXUSFLOW_RESULTS` / `PLEXUSFLOW_FIGURES`, e.g. when
+working from a release or writing to scratch).
 
-# Threshold + paint mask editor
-python3 -m plexusflow.cli mask ".../PlexusFlow21S"
+## Environments
 
-# Unified mask + vectorize + preview (one window)
-python3 -m plexusflow.cli mve  ".../PlexusFlow21S"
+- **System `python3` (3.9, numpy 1.26)** — default for pipeline scripts and the napari viewer:
+  `PYTHONPATH=src python3 scripts/...` (the package says ≥ 3.10, so it is not pip-installed there).
+  **Write graph gpickles only from this Python** — pickles saved under numpy 2 are unreadable by numpy 1.26.
+- **`.venv` (3.11, numpy 2)** — tests, ruff, the synthetic benchmark (`pip install -e ".[dev,bench]"`).
+  Tests: `PYTHONPATH=src .venv/bin/python -m pytest -q tests`; lint (as CI): `.venv/bin/ruff check src tests`.
+  On a machine without the venv: `python3.11 -m venv .venv && .venv/bin/pip install -e ".[dev,bench]"`.
 
-# Graph editor (net3)
-python3 -m plexusflow.cli edit ".../PlexusFlow21S"
-```
+## Working rules (agreed with Alex)
 
-The viewer entry point in source is
-`plexusflow/src/plexusflow/viewer/app.py` (one large file; CLI dispatch
-is in `plexusflow/src/plexusflow/cli.py`).
+- Work on a branch, never commit to `main` directly. Commit messages end with
+  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. **Alex runs `git push`** and merges PRs.
+- The repo holds functional pipeline code only. One-off diagnostics, sweeps and comparisons go in `sandbox/`, never committed.
+- Long jobs (> ~30 s): run in the background with `python3 -u`, timestamped progress lines, hard caps on every
+  loop/optimizer, output to `sandbox/run_<name>.log`; tell Alex the log path and an ETA. Never run long jobs in the
+  foreground through `| grep | tee` (buffers everything; looks frozen).
+- Prefer established, citable formulations over bespoke numerics; justify any method change by a measured failure of the
+  simpler version, one change at a time.
+- Alex is Alex Mayer (not Adam). Use they/them for people whose pronouns are unknown.
 
-The legacy napari viewer at `../PerTileFlow/pertile/viewer/mosaic_readonly_app.py`
-is still functional and some diagnostic scripts import from it — don't
-delete, just don't start new work on it.
-
-## Layout
-
-- `src/plexusflow/` — library (`viewer/`, `mosaic/`, `inference/`,
-  `normalize/`, `simulate/`, etc.)
-- `scripts/` — ALL figure-generation scripts, diagnostics,
-  experiments, re-aggregators.  Everything new goes here (never in a
-  scratchpad).  Representative current scripts (2026-10):
-  - `make_figure{6v2,7v3,8v4,8alt,9v3,10v2}.py` — the main-paper
-    figures
-  - `renormalize_to_tile21.py` — rerun normalization anchored at tile 21
-  - `shift_tile21_anchor_by_half_period.py` — cosmetic T/2 shift
-  - `reaggregate_coherent_h2_gauge.py` — fixes the independent-H2
-    gauge bug (see memory [[coherent_h2_gauge_2026-10-05]])
-  - `exp_pairwise_h1h2_coherence.py` — gauge-free H1/H2 pairwise test
-  - `trace_single_vessel.py`, `trace_outlet_23072.py`,
-    `diagnose_outlet_waveform_aggregation.py` — diagnostics
-  - `plot_reconciled_bcs_tile14.py`, `plot_bcs_and_adjacent_vessels.py`,
-    `plot_da_vs_carve_outlets.py` — reconciliation plots
-  - `run_sim_carved_outlets.py` — carved TL sim driver
-- `notebooks/` — exploration (now including
-  `explore_normalization.ipynb` — interactive gauge/display playground)
-- `docs/`, `examples/`, `tests/`, `runs/`, `renders/` — standard
-
-Scripts expect to be run with the current working directory being
-either `plexusflow/` itself or the sibling `PerTileFlow/`.  They use
-`ROOT = Path(__file__).resolve().parents[2]` plus hard-coded absolute
-`STAGE` paths, so cwd rarely matters — just invoke as
-`python3 scripts/make_figure....py`.
-
-## Canonical data location
-
-Stage data lives OUTSIDE this folder, at:
+## Layout (2026-10)
 
 ```
-/Users/amayer/Library/CloudStorage/GoogleDrive-amayer@flatironinstitute.org/My Drive/PlexusFlow21S/
-  graph/      — gpickles (base, normalized, carved sims)
-  fuse/       — organ_fusion_close.tif (mosaic)
-  figures/    — all figure outputs, including figures/diagnostics/
+src/plexusflow/   analyze/ (OF + Kloosterman batch), reconcile/ (DC), ac/ (AC field), release.py (release loader),
+                  viewer/ (view = read-only, workbench = editing), synthetic/ (known-truth benchmark), legacy/ (2026-09
+                  tile_normalize / KCL, unused), cli.py, paths.py, config.py, upstream stages (preprocess … condense)
+src/plexusmech/   modelling: ac/ (two-port model, likelihood, (D, η) estimate), tl/ (TL simulator), inference/ (legacy carved sim)
+scripts/          dc_reconcile.py → ac_field.py → make_figure8alt_v3.py, make_figure_ac_field.py; make_release.py;
+                  benchmark/ (known-truth benchmark); mech/ (ac_estimate.py, make_figure9alt_v3.py)
+tests/            pytest; test_package_boundary.py: plexusflow never imports plexusmech or legacy (except lazy hooks)
 ```
 
-**Current canonical graphs** (see memory [[canonical_files_2026-10-01]]
-for the base set; [[coherent_h2_gauge_2026-10-05]] for the recent H2
-fix):
+Viewer: `PYTHONPATH=src python3 -m plexusflow.cli view "<stage>"` (read-only) or `... workbench "<stage>"` (fresh OF,
+tagging, boundary edits; refuses release folders). Other commands: `LAUNCH.md`.
 
-- `graph_vessels_piv_normalized_tile21anchor_REAL.gpickle` — baseline
-  tile-21-anchored normalized graph.
-- `graph_vessels_piv_normalized_tile21anchor_REAL_cohH2.gpickle` —
-  same, but every edge's H2 phasor re-aggregated with the coherent
-  gauge (ψ⁽²⁾ := 2·ψ⁽¹⁾).  DA/V bc_harmonics are preserved from the
-  KCL reconstruction, with coherent-gauge phase applied to the H2/H3
-  components (magnitude kept).
-- `graph_vessels_piv_normalized_tile21anchor_REAL_cohH2_t5shifted.gpickle` —
-  cohH2 plus a cosmetic T/2 time-origin shift so cardiac peaks land
-  near t=0.5 (cosmetic only; a global shift that preserves all
-  relative phase).
-- `graph_vessels_piv_state.carved_outlets_tile21_local_r.gpickle` —
-  carved sim built from the pre-cohH2 graph (needs re-running with
-  cohH2 to propagate the fix downstream).
+## Current methods and decisions (read before changing anything)
 
-## Memory
+- **DC reconciliation is FROZEN** (`reconcile/dc.py`): one winner measurement per vessel (smallest reliability c);
+  weights relative to the *reconciled* flow, w = 1/(c²Q′² + s0²); damped re-weighting settles into a small limit cycle →
+  cycle average over an 8-run ensemble, `unstable` flags. Output = a **conservation-consistent reference field**
+  (measurements are asynchronous; not an instantaneous snapshot). Justification (sandbox ladder, 2026-10-15): manuscript
+  weights 0.2|y| bias the field low (21S right arterial entry 1.4 vs 4.75 measured); uniform / quality-only weights flip
+  20–29 % of measured directions; reconciled-scale relative weights are best on held-out data, 3–4 % flips.
+  Heteroscedastic ML, joint calibration, fixed-σ variants, boundary sign constraints, bounded re-weighting: tested and
+  rejected — do not reopen without new evidence (memory `dc_estimator_frozen_2026-10-15`).
+- **The venous boundary is effectively unmeasured.** 21S: arterial entry measured 6.5 nL/s, the two V stubs 0.5 (DC
+  under-read ~10×; their waveforms are trusted). Conservation routes the venous return to the head-end veins; that routing
+  in the upper lobes is not determined by the data (repeat measurements of one vessel differ by a median 2–2.6×). Fig 8
+  panel A draws "conservation-imputed" vessels (unmeasured, or |Q′| > 5× their measurement) faint. Leave V-stub values as they are.
+- **AC field** (`ac/field.py`): tile time gauge ψ by ρ-weighted angular synchronisation (all valid pairs, bootstrap SD;
+  phases compared only where SD ≤ 30°), coherent k·ψ; Ĥ_k = (|Q′|/|a0|) e^{−ikψ} H_k from the AC winner (smallest per-beat
+  scatter). Harmonics are deliberately NOT conservation-projected (distributed compliance: endpoint flows differ at ω > 0);
+  the junction residual is an independent check.
+- **Fig 9 control** (sandbox `ac_boundary_distance_control.py`): forcing donors do not carry the agreement; compare against
+  a constant-phase baseline — 21S H1 skill over constant phase is small, H2 large; 27S beats all baselines; 15S has no
+  interior skill (its agreement comes from near-boundary vessels).
+- Calibration junctions touching porous vessels balance 2× worse — restrict to the carve if the reliability fit is ever refit.
 
-Project memory lives at
-`~/.claude/projects/<project-dir>/memory/`.  The memory folder is
-symlinked between the `PerTileFlow` and `plexusflow` project dirs so
-both sessions see the same notes.  **ALWAYS READ** `methods.md` before
-touching batch analysis, SNR gating, or sign conventions.
+## Open items (2026-10-15)
 
-Current-default notes to know (in `MEMORY.md`):
-
-- [[coherent_h2_gauge_2026-10-05]] — THE active gauge-bug fix.
-  tile_normalize solves z_H2 independently of z_H1; this changes
-  waveform shape.  Validated by pairwise ε test; coherent gauge
-  ψ⁽ⁿ⁾ := n·ψ⁽¹⁾ is correct.
-- [[fig9v3_bc_pipeline_2026-10-02]] — Fig 9v3 master BC pipeline.
-- [[canonical_files_2026-10-01]] — current canonical set.
-- [[simple_normalization_recipe]] — per-tile has ONLY CO_rel +
-  z_arg_H1 (reinforced by coherent-gauge finding).
-- [[plexusflow_is_primary]] — plexusflow is primary since 2026-08-21.
-
-When modifying normalization, batch analysis, SNR gating, quality
-tiers, or sign conventions, update `memory/methods.md` immediately.
-
-## Inference tab in the viewer
-
-The viewer's inference tab (`_inference_run` in `app.py`) implements:
-
-- Forward model: distributed two-port polynomial O(C_e) form:
-  `Y_self = G·(1 + κ²/3)`, `Y_trans = G·(1 − κ²/6)`.  Edge flow
-  `Q = Y_self·p_u − Y_trans·p_v`.
-- D-grid cap: `max_e C_e ≤ 0.3`.
-- Noise: white-residual phasor variance; σ_b log-uniform grid for the
-  boundary forcing prior; `s²` noise-floor marginalisation.
-- A/V→BC promotion: nodes with `boundary_type ∈ {'source','sink'}`
-  in the carve interior get promoted to boundary.
-- Per-tile matched (Q, SNR) read from `measurements_piv[tile_id]`,
-  never top-level canonical fields.
-
-Known identifiability: data identify `D·|b̂_H1|` and the SHAPE of b̂
-across BC nodes.  Absolute D₀ falls in `[10⁻⁴, 10⁻³] /Pa` across σ_b ∈
-`[3, 30] Pa` — point value is one slice of a structural ridge, see
-"Identifiability note" in the Show Priors panel.
-
-Shapes of b̂_H1, b̂_DC, and D̂ tile-ratios are σ_b-invariant and are
-the publishable identified quantities.
+1. 15S: label uncertain regions arterial vs venous (its venous return leaves through carve regions; inflow ≈ 0 until labelled).
+2. 27S: 4 injecting V nodes / strong-oscillation boundary nodes; fit D for 27S and 15S.
+3. AC inference weights: replace DC-based c with AC uncertainties (harmonic-fit covariance + k²σ_ψ²) before the (D, η) fit.
+4. Benchmark bundle: attach `PlexusFlow21S_benchmark_v1` to the `data-v2` release (rebuild on the office Mac with
+   `scripts/benchmark/make_bundle.py` — needs raw videos). Branch `synthetic-benchmark` holds the benchmark code.
+5. Condense keeps parallel loops; viewer `app.py` (14k lines) has dead tab builders to remove.

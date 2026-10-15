@@ -46,6 +46,7 @@ from plexusflow.reconcile import carved_domain, passive
 STAGE = _paths.STAGE
 MOSAIC_P = _paths.MOSAIC
 OUT_DIR = _paths.FIGURES / 'fig8alt_v3'
+IMPUTED_RATIO = 5.0      # reconciled flow > this × the vessel's own measurement → drawn as conservation-imputed
 SCHEME, RADIUS, N_SHUFFLE = 'irls', 'consensus', 10
 
 
@@ -60,6 +61,8 @@ def main():
     rec = dict(length=D['length'])
     Qp, Qs, fb, imaged, r = D['Qp'], D['Qs'], D['fb'], D['imaged'], D['radius']
     K = r ** 4 / D['length']; nodes = dom['nodes']
+    print(f"[fig8alt_v3] conservation-imputed edges drawn faint: {int((~imaged).sum())} unmeasured + "
+          f"{int((imaged & (np.abs(Qp) > IMPUTED_RATIO * np.abs(D['Qm']))).sum())} measured with |Q'| > {IMPUTED_RATIO:g}× measurement")
     print(f"[fig8alt_v3] carved: {len(idx)} edges ({int(imaged.sum())} measured); "
           f"Σ in {fb[dom['inj']].sum():.2f}; V {fb[dom['out']]}")
 
@@ -90,11 +93,16 @@ def main():
         for n in G.graph['boundary']['V']:
             ax.plot(*nxy[n], marker='*', color='#1f5fa8', ms=15, markeredgecolor='white', mew=1.2, zorder=6)
 
+    # conservation-imputed: unmeasured, or reconciled flow > IMPUTED_RATIO × its own measurement (the flow there is set by
+    # conservation, not by the measurement — e.g. the venous return routed to the head-end veins; repeat measurements of one
+    # vessel differ by a median ~2×, so that routing is not determined by the data)
+    imputed = ~imaged | (np.abs(Qp) > IMPUTED_RATIO * np.abs(D['Qm']))
+
     def field(ax, Q, faint_unimaged):
         cols, lws = [], []
         for c in range(len(idx)):
             col = cAB(nAB(min(max(abs(Q[c]), vmin), vmax)))
-            if faint_unimaged and not imaged[c]:
+            if faint_unimaged and imputed[c]:
                 col = (*col[:3], 0.35); lws.append(0.6)
             else:
                 lws.append(1.3)
@@ -109,7 +117,8 @@ def main():
     # A
     axA = fig.add_subplot(gs[0, 0]); bg(axA); field(axA, Qp, True); markers(axA)
     axA.set_title("A   Conservative mean-flow field  $|Q'|$", fontsize=14, loc='left', fontweight='bold', pad=6)
-    axA.plot([], [], color=cAB(0.6), lw=0.6, alpha=0.35, label='imputed (unimaged) edge')
+    axA.plot([], [], color=cAB(0.6), lw=0.6, alpha=0.35,
+             label=f'conservation-imputed (unmeasured, or > {IMPUTED_RATIO:g}× its measurement)')
     axA.legend(loc='lower right', fontsize=10, frameon=True)
 
     # B
