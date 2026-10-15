@@ -147,10 +147,10 @@ def export_results(res_dir, out):
     D = pickle.loads((res_dir / "dc_reconciled_v2.pkl").read_bytes())
     with open(out / "dc_reconciled_edges.csv", "w", newline="") as f:
         w = csv.writer(f); w.writerow(("u", "v", "Q_measured", "Q_reconciled", "Q_passive", "c", "sigma", "imaged", "winner_tile", "radius_px", "length_px",
-                                       "unstable"))
-        un = D.get("unstable", np.zeros(len(D["edges"]), bool))
+                                       "Q_reconciled_sd", "unstable"))
+        un = D.get("unstable", np.zeros(len(D["edges"]), bool)); sd = D.get("Qp_sd", np.full(len(D["edges"]), np.nan))
         for i, (u, v) in enumerate(D["edges"]):
-            w.writerow((u, v) + tuple(scalar(D[k][i]) for k in ("Qm", "Qp", "Qs", "c", "sigma", "imaged", "tile", "radius", "length")) + (int(un[i]),))
+            w.writerow((u, v) + tuple(scalar(D[k][i]) for k in ("Qm", "Qp", "Qs", "c", "sigma", "imaged", "tile", "radius", "length")) + (scalar(sd[i]), int(un[i])))
     with open(out / "dc_boundary.csv", "w", newline="") as f:
         w = csv.writer(f); w.writerow(("node", "kind", "side", "flux_out_nL_s"))
         for k, i in enumerate(D["inj"]):

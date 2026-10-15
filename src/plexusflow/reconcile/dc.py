@@ -16,7 +16,7 @@ PX_UM = 1.7
 
 
 def reconcile_dc(G, model, M, dom=None, damping=0.3, tol=1e-6, max_iter=500, n_shuffle=10, seed=0, n_avg=100,
-                 n_check=500, stable_rtol=0.02):
+                 n_ens=8, perturb=1e-9, stable_rtol=0.02):
     dom = dom or carved_domain(G)
     win = {}
     for (t, e), m in M.items():
@@ -28,38 +28,38 @@ def reconcile_dc(G, model, M, dom=None, damping=0.3, tol=1e-6, max_iter=500, n_s
     for i, e in enumerate(sub):
         if e in win:
             m, c = win[e]; Qm[i], C[i], imaged[i], tile_w[i] = m["Q"], c, True, m["tile"]
-    s0 = 0.01 * np.median(np.abs(Qm[imaged])); Cw = np.where(imaged, C, 1.0); ref = None; n_it = 0
+    s0 = 0.01 * np.median(np.abs(Qm[imaged])); Cw = np.where(imaged, C, 1.0)
     from collections import deque
-    tail = deque(maxlen=n_avg); converged = False
-    for n_it in range(1, max_iter + 1):
-        w = np.ones_like(Qm) if ref is None else 1 / (Cw ** 2 * ref ** 2 + s0 ** 2)
-        w = np.where(imaged, w / np.median(w[imaged]), EPS_UNIMAGED)
-        new = project(Qm, w, dom)
-        if ref is None:
-            ref = new; continue
-        upd = damping * new + (1 - damping) * ref; ch = np.linalg.norm(upd - ref) / np.linalg.norm(upd); ref = upd
-        tail.append(ref)
-        if ch < tol:
-            converged = True; break
-    # The reweighting can settle into a limit cycle instead of converging (weights ∝ 1/Q'² let a vessel whose flow passes
-    # near zero pin itself there, which moves its neighbours, and so on); the iterate at the cap then depends on rounding.
-    # Report the average over the last n_avg iterates (still exactly conservative: a convex combination of conservative
-    # fields) and flag vessels whose direction changes within that window.
-    T = np.array(tail)
-    Qp = ref if converged else T.mean(axis=0)
-    dir_unstable = np.zeros(me, bool) if converged else (np.any(T > 0, axis=0) & np.any(T < 0, axis=0))
-    cycle_sd = np.zeros(me) if converged else T.std(axis=0)
-    # Reproducibility check: continue n_check more iterations and average again; vessels whose averaged flow moves by
-    # > stable_rtol (relative) or changes direction are weakly determined (mostly unmeasured loop flows and near-zero
-    # vessels) — flagged `unstable`; their values can differ across platforms / iteration counts.
-    unstable = dir_unstable.copy()
-    if not converged and n_check > 0:
-        tail2 = deque(maxlen=n_avg)
-        for _ in range(n_check):
-            w = 1 / (Cw ** 2 * ref ** 2 + s0 ** 2); w = np.where(imaged, w / np.median(w[imaged]), EPS_UNIMAGED)
-            ref = damping * project(Qm, w, dom) + (1 - damping) * ref; tail2.append(ref)
-        Q2 = np.array(tail2).mean(axis=0); scale = np.maximum(np.abs(Qp), 1e-6)
-        unstable |= (np.abs(Q2 - Qp) / scale > stable_rtol) | (np.sign(Q2) != np.sign(Qp))
+
+    def irls(q):
+        """One reweighted projection run → (cycle-averaged Q', iterations, converged)."""
+        ref = None; tail = deque(maxlen=n_avg); n_it = 0
+        for n_it in range(1, max_iter + 1):
+            w = np.ones_like(q) if ref is None else 1 / (Cw ** 2 * ref ** 2 + s0 ** 2)
+            w = np.where(imaged, w / np.median(w[imaged]), EPS_UNIMAGED)
+            new = project(q, w, dom)
+            if ref is None:
+                ref = new; continue
+            upd = damping * new + (1 - damping) * ref; ch = np.linalg.norm(upd - ref) / np.linalg.norm(upd); ref = upd
+            tail.append(ref)
+            if ch < tol:
+                return ref, n_it, True
+        return np.array(tail).mean(axis=0), n_it, False
+
+    # The reweighting (weights ∝ 1/(c²Q'² + s0²)) settles into a limit cycle rather than converging, and for ~0.1–2 % of
+    # vessels (unmeasured loop flows, near-zero vessels) its outcome is sensitive to rounding: a 1e-9 perturbation of the
+    # data moves them by percent-level amounts or flips their direction (found by reproducing the releases on another
+    # numpy).  So: an ensemble of n_ens runs on the data perturbed by `perturb` (fixed seeds), each averaged over its
+    # last n_avg iterates.  Q' = ensemble mean (exactly conservative — an average of conservative fields); Qp_sd = spread;
+    # `unstable` = runs disagree in direction or spread > stable_rtol·|Q'|.  Unflagged vessels reproduce to < 1 % with no
+    # direction changes across independent ensembles (27S: 99th pct 0.3 %).
+    runs = []
+    for k in range(n_ens):
+        q = Qm if k == 0 else Qm * (1 + perturb * np.random.default_rng(1000 + k).standard_normal(me))
+        runs.append(irls(q))
+    E = np.array([r[0] for r in runs]); n_it = runs[0][1]; converged = all(r[2] for r in runs)
+    Qp = E.mean(axis=0); Qp_sd = E.std(axis=0)
+    unstable = (np.any(E > 0, axis=0) & np.any(E < 0, axis=0)) | (Qp_sd > stable_rtol * np.maximum(np.abs(Qp), 1e-6))
     fb = emergent(Qp, dom)
     rg = np.array([G.edges[e]["radius"] for e in sub], float)
     def _median_rkl(e):
@@ -75,4 +75,4 @@ def reconcile_dc(G, model, M, dom=None, damping=0.3, tol=1e-6, max_iter=500, n_s
                 sigma=np.sqrt(Cw ** 2 * Qp ** 2 + s0 ** 2), c=C, imaged=imaged, tile=tile_w, radius=r, length=L,
                 inj=dom["inj"], out=dom["out"], side=dom["side"], metrics=met, shuffled_corr=shuf,
                 n_iter=n_it, sigma0_floor=s0, dom=dom,
-                converged=converged, dir_unstable=dir_unstable, Qp_cycle_sd=cycle_sd, unstable=unstable)
+                converged=converged, Qp_sd=Qp_sd, unstable=unstable, n_ens=n_ens)
