@@ -4109,6 +4109,14 @@ class ReadOnlyMosaicViewer:
         def _on_click(viewer, event):
             if event.type != 'mouse_press' or len(event.position) < 2:
                 return
+            # Region tag/untag armed: clicks belong to the shape being
+            # drawn.  Inspecting here would rebuild the highlight layer,
+            # which napari makes the active layer — stealing the clicks
+            # from the region layer after a couple of presses.
+            _rl = getattr(self, '_region_tag_layer', None)
+            if (_rl is not None and _rl in self.viewer.layers
+                    and str(_rl.mode).startswith('add_')):
+                return
             row, col = self._world_to_mosaic_data(event.position)
             # Edit-tab boundary marking takes priority — when a mode is
             # active, every click is a node-tag action.
@@ -4338,9 +4346,12 @@ class ReadOnlyMosaicViewer:
         _rg_lay.addWidget(QLabel("Region:"))
         self._region_shape_combo = QComboBox()
         self._region_shape_combo.addItem("Rectangle", userData="add_rectangle")
+        self._region_shape_combo.addItem("Ellipse", userData="add_ellipse")
         self._region_shape_combo.addItem("Lasso", userData="add_polygon_lasso")
+        self._region_shape_combo.addItem("Polygon", userData="add_polygon")
         self._region_shape_combo.setToolTip(
-            "Rectangle: drag a box.  Lasso: freehand-draw a closed loop.")
+            "Rectangle / Ellipse: drag.  Lasso: click, trace, click to "
+            "close.  Polygon: click corners, double-click to close.")
         _rg_lay.addWidget(self._region_shape_combo)
         self._region_tag_btn = QPushButton("Tag")
         self._region_tag_btn.setToolTip(
@@ -4356,6 +4367,11 @@ class ReadOnlyMosaicViewer:
         self._region_untag_btn.clicked.connect(
             lambda: self._start_region_action("untag"))
         _rg_lay.addWidget(self._region_untag_btn)
+        self._region_stop_btn = QPushButton("Stop")
+        self._region_stop_btn.setToolTip(
+            "Leave region drawing and return to normal click behaviour.")
+        self._region_stop_btn.clicked.connect(self._reset_region_layer)
+        _rg_lay.addWidget(self._region_stop_btn)
         _rg_lay.addStretch(1)
         _ru_lay.addWidget(_rg_row)
 
@@ -5208,7 +5224,7 @@ class ReadOnlyMosaicViewer:
             # Edge width ≈ vessel radius (NOT diameter — keeps neighbour
             # edges from overlapping at large radii while still being
             # visually proportional).
-            r_px = float(d.get('radius', 1.0))
+            r_px = float(d.get('radius') or 1.0)
             widths.append(float(np.clip(r_px,
                                          EDGE_WIDTH_MIN, EDGE_WIDTH_MAX)))
             usable = _measurement_usable(m)
@@ -14626,55 +14642,55 @@ class ReadOnlyMosaicViewer:
         )
         self._region_tag_layer = lyr
 
-        def _on_region_drag(_lyr, event):
-            """Generator: yield through the drag, then apply on release.
-            Reads self._region_action_pending + self._region_shape_pending
-            (set by the button click) so tag vs untag and shape vs shape
-            are chosen at press time."""
-            import numpy as np
-            p0 = [float(c) for c in event.position[-2:]]   # (row, col) at press
-            yield
-            while event.type == 'mouse_move':
-                yield
-            p1 = [float(c) for c in event.position[-2:]]   # at release
+        # Act on each shape only once napari has fully committed it
+        # (data event, action 'added'), deferred to the next event-loop
+        # tick.  The old mouse-drag callback fired on the FIRST release of
+        # a click-trace-click lasso, cleared the layer while napari was
+        # still building the shape, and crashed napari's lasso handler.
+        from qtpy.QtCore import QTimer
 
-            mode = getattr(self, '_region_shape_pending', 'add_rectangle')
-            action = getattr(self, '_region_action_pending', 'tag')
+        def _on_region_data(event):
+            if str(getattr(event, 'action', '')) == 'added':
+                QTimer.singleShot(0, self._on_region_shape_added)
 
-            if mode == 'add_rectangle':
-                r_lo, r_hi = sorted((p0[0], p1[0]))
-                c_lo, c_hi = sorted((p0[1], p1[1]))
-                if (r_hi - r_lo) < 2 or (c_hi - c_lo) < 2:
-                    self._info_box.setPlainText(
-                        "Region cancelled (box too small).")
-                    self._reset_region_layer()
-                    return
-                poly_rc = np.array([[r_lo, c_lo], [r_lo, c_hi],
-                                     [r_hi, c_hi], [r_hi, c_lo]])
-            else:
-                # Lasso: freehand polygon lands as the last shape on the layer.
-                if not len(_lyr.data):
-                    self._reset_region_layer()
-                    return
-                poly_rc = np.asarray(_lyr.data[-1])
-                if len(poly_rc) < 3:
-                    self._info_box.setPlainText(
-                        "Region cancelled (polygon too small).")
-                    self._reset_region_layer()
-                    return
+        lyr.events.data.connect(_on_region_data)
+        return lyr
 
+    def _on_region_shape_added(self):
+        """Apply the pending tag/untag to the shape just drawn (rectangle,
+        ellipse, lasso or polygon), clear it, and stay armed for the next."""
+        import numpy as np
+        lyr = getattr(self, '_region_tag_layer', None)
+        if lyr is None or lyr not in self.viewer.layers or not len(lyr.data):
+            return
+        poly_rc = np.asarray(lyr.data[-1], dtype=float)[:, -2:]
+        if lyr.shape_type[-1] == 'ellipse' and len(poly_rc) == 4:
+            c = poly_rc.mean(axis=0)
+            a = 0.5 * (poly_rc[1] + poly_rc[2]) - c
+            b = 0.5 * (poly_rc[2] + poly_rc[3]) - c
+            t = np.linspace(0, 2 * np.pi, 96, endpoint=False)[:, None]
+            poly_rc = c + np.cos(t) * a + np.sin(t) * b
+        action = getattr(self, '_region_action_pending', 'tag')
+        if len(poly_rc) >= 3:
             n = self._apply_region_action(poly_rc, action)
-            self._radial_tags_dirty = True
+            if n:
+                self._radial_tags_dirty = True
             verb = "Tagged" if action == "tag" else "Untagged"
             self._info_box.setPlainText(
-                f"{verb} {n} vessel(s) via region.  Press Tag/Untag again "
-                f"to draw another.")
+                f"{verb} {n} vessel(s) via region.  Draw another region to "
+                f"{action} more, or press Stop.")
             self._refresh_edges()
             self._refresh_radial_status()
-            self._reset_region_layer()
-
-        lyr.mouse_drag_callbacks.append(_on_region_drag)
-        return lyr
+        try:
+            mode = lyr.mode
+            lyr.data = []
+            idx = self.viewer.layers.index(lyr)
+            if idx != len(self.viewer.layers) - 1:
+                self.viewer.layers.move(idx, len(self.viewer.layers) - 1)
+            self.viewer.layers.selection.active = lyr
+            lyr.mode = mode
+        except Exception:
+            pass
 
     def _reset_region_layer(self):
         """Clear scratch shapes and drop out of draw mode so accidental
@@ -14731,10 +14747,10 @@ class ReadOnlyMosaicViewer:
         lyr.mode = shape_mode
         shape_label = self._region_shape_combo.currentText()
         self._info_box.setPlainText(
-            f"{shape_label} {action}: draw a region on the canvas; "
-            f"release to apply.  Every edge whose midpoint is inside "
-            f"gets ``radial_uncertain`` "
-            f"{'set' if action == 'tag' else 'cleared'}.")
+            f"{shape_label} {action}: draw regions on the canvas — each "
+            f"is applied when the shape closes.  Every edge whose midpoint "
+            f"is inside gets ``radial_uncertain`` "
+            f"{'set' if action == 'tag' else 'cleared'}.  Press Stop when done.")
 
     def _apply_region_action(self, poly_rc, action: str):
         """poly_rc: (N, 2) polygon vertices in display (row, col) coords.
