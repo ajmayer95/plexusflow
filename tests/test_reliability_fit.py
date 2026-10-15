@@ -1,8 +1,8 @@
 """Reliability-model likelihood: exact gradient and a well-posed, reproducible fit on synthetic junctions."""
 import numpy as np
-from scipy.optimize import check_grad, minimize
+from scipy.optimize import check_grad
 
-from plexusflow.reconcile.reliability import _nll
+from plexusflow.reconcile.reliability import _fit_theta, _nll
 
 
 def _synthetic(n_tiles=6, n_junctions=300, seed=0):
@@ -25,9 +25,6 @@ def test_gradient_matches_finite_differences():
 
 def test_fit_independent_of_start():
     d, nT = _synthetic()
-    sols = []
-    for start in (np.log(0.05), np.log(0.2)):
-        x0 = np.r_[np.full(nT, start), np.log(0.5), np.log(0.5), np.log(1e-3)]
-        r = minimize(_nll, x0, args=(d, nT), jac=True, method="L-BFGS-B", options=dict(ftol=1e-15, gtol=1e-9, maxiter=100000))
-        sols.append(r.x)
-    assert np.max(np.abs(np.exp(sols[0]) - np.exp(sols[1])) / np.exp(sols[0])) < 1e-4
+    a, b = _fit_theta(d, nT, jitters=(0.0,)), _fit_theta(d, nT, jitters=(0.7,))
+    assert a.success and b.success
+    assert np.max(np.abs(np.exp(a.x) - np.exp(b.x)) / np.exp(a.x)) < 1e-4

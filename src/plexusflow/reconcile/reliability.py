@@ -90,6 +90,20 @@ def _nll(th, d, nT, tau=1.0, grad=True):
     return val, g
 
 
+def _fit_theta(d, nT, tau=1.0, jitters=(0.0, 0.3, -0.3)):
+    """Bounded L-BFGS-B with exact gradient from a few starts; returns the best scipy result."""
+    qmed = float(np.median(d[1])) if len(d[1]) else 1.0
+    bounds = [(np.log(1e-4), np.log(10.0))] * (nT + 2) + [(np.log(1e-4 * qmed), np.log(10.0 * qmed))]
+    x0 = np.r_[np.full(nT, np.log(0.1)), np.log(0.5), np.log(0.1), np.log(max(5e-3, 2e-4 * qmed))]
+    best = None
+    for jit in jitters:
+        x = np.clip(x0 + jit, [b[0] for b in bounds], [b[1] for b in bounds])
+        r = minimize(_nll, x, args=(d, nT, tau), jac=True, method="L-BFGS-B", bounds=bounds,
+                     options=dict(ftol=1e-15, gtol=1e-9, maxiter=100000, maxcor=50))
+        best = r if best is None or r.fun < best.fun else best
+    return best
+
+
 def fit_reliability(G, M, tau=1.0):
     """ML fit of (c_T per tile, c_f, c_a, σ0) on all same-tile junctions.  Returns (model dict, junction list).
 
@@ -102,15 +116,7 @@ def fit_reliability(G, M, tau=1.0):
     for t in tiles:
         J += [(t, j) for j in same_tile_junctions(G, t, {e for (tt, e) in M if tt == t})]
     d = _arrays(J, M, tiles)
-    qmed = float(np.median(d[1])) if len(d[1]) else 1.0
-    bounds = [(np.log(1e-4), np.log(10.0))] * (nT + 2) + [(np.log(1e-4 * qmed), np.log(10.0 * qmed))]
-    x0 = np.r_[np.full(nT, np.log(0.1)), np.log(0.5), np.log(0.1), np.log(max(5e-3, 2e-4 * qmed))]
-    best = None
-    for jit in (0.0, 0.3, -0.3):
-        x = np.clip(x0 + jit, [b[0] for b in bounds], [b[1] for b in bounds])
-        r = minimize(_nll, x, args=(d, nT, tau), jac=True, method="L-BFGS-B", bounds=bounds,
-                     options=dict(ftol=1e-15, gtol=1e-9, maxiter=100000, maxcor=50))
-        best = r if best is None or r.fun < best.fun else best
+    best = _fit_theta(d, nT, tau)
     th = best.x
     model = dict(c_T={int(t): float(np.exp(th[i])) for i, t in enumerate(tiles)}, c_f=float(np.exp(th[nT])),
                  c_a=float(np.exp(th[nT + 1])), sigma0=float(np.exp(th[-1])), n_junctions=len(J),
