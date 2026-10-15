@@ -47,7 +47,7 @@ from scipy.sparse.linalg import spsolve
 # at the first downstream junction and boundary-arm edges are marked
 # ``scaffold=True`` so this solver skips them.  Under the legacy
 # convention, these helpers pass through and read leaf-side attributes.
-from ..mosaic.scaffold import (
+from .scaffold import (
     effective_boundary_nodes as _effective_boundary_nodes,
     effective_boundary_type as _effective_boundary_type,
     is_active_edge as _is_active_edge,
@@ -332,7 +332,7 @@ def _get_edge_geometry(G: nx.Graph, u: int, v: int,
     If *radii_m* is provided, use the override radius (already in meters)
     instead of reading from the graph.  Length always comes from the graph.
     """
-    from .constants import PX_SIZE_UM
+    from plexusflow.analyze.constants import PX_SIZE_UM
     px_to_m = PX_SIZE_UM * 1e-6  # µm/px * m/µm
 
     data = G.edges[u, v]
@@ -539,7 +539,7 @@ def _extract_boundary_harmonics(
         Q_dc is real (mean flow in nL/s)
         Q_k is complex (A_k - i*B_k convention)
     """
-    from .harmonic import fit_harmonics
+    from plexusflow.analyze.harmonic import fit_harmonics
 
     boundary_Q = {}
 
@@ -794,7 +794,7 @@ def solve_transmission_line(
     -------
     TransmissionLineResult
     """
-    from .constants import FRAME_DT_S
+    from plexusflow.analyze.constants import FRAME_DT_S
 
     # Thin-wall compliance model: D(R) = 2R / (E_wall * h_wall)
     if E_wall is not None:

@@ -3,7 +3,7 @@ simulation pipeline reads, plus a small caching layer keyed on the
 current ``radial_uncertain`` tagging.
 
 Ported from ``plexusflow/scripts/inference/pipeline_state.py`` on
-2026-09-30 as part of the migration into a proper ``plexusflow.inference``
+2026-09-30 as part of the migration into ``plexusflow.inference`` (now ``plexusmech.inference``, 2026-10 split)
 package. The bookkeeping is unchanged:
 
   * Bucket 1 — independent of tagging (normalization scalars, tile
@@ -16,7 +16,7 @@ package. The bookkeeping is unchanged:
     Fully regenerable; dropped on rebuild.
 
 Usage:
-    from plexusflow.inference import PipelineState
+    from plexusmech.inference import PipelineState
     ps = PipelineState.load()                    # default: viewer graph
     print(ps.summary())
     U, outlets, outlet_comp, A_a, V_a, comps = ps.outlets()   # cached

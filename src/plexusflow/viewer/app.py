@@ -97,7 +97,7 @@ except Exception:
 # promotions (ed['mean_Q_piv'], ...) are being removed downstream; go
 # through MeasurementView so a schema bump doesn't require re-editing
 # every read site.
-from ..mosaic.measurement_view import MeasurementView
+from ..io.measurement_view import MeasurementView
 
 
 # ── Defaults / constants ───────────────────────────────────────────────
@@ -2654,7 +2654,7 @@ class ReadOnlyMosaicViewer:
             if tagged == 0:
                 return ("No `radial_uncertain` tags on the graph — nothing "
                         "to carve.  Tag some vessels via the View tab first.")
-            from .carved_sim_backend import find_porous_and_outlets
+            from plexusmech.viewer.carved_sim_backend import find_porous_and_outlets
             U, outlets, outlet_comp, A_a, V_a, comps = find_porous_and_outlets(
                 self.G)
             comp_sizes = [len(c) for c in comps]
@@ -2717,7 +2717,7 @@ class ReadOnlyMosaicViewer:
                 self.viewer.layers['CarveMarkers'].visible = False
             return
         try:
-            from .carved_sim_backend import find_porous_and_outlets
+            from plexusmech.viewer.carved_sim_backend import find_porous_and_outlets
             U, outlets, _, A_a, V_a, _ = find_porous_and_outlets(self.G)
         except Exception:
             return
@@ -2895,7 +2895,7 @@ class ReadOnlyMosaicViewer:
         eta = float(getattr(self, '_carved_eta_spin', None).value()
                      if getattr(self, '_carved_eta_spin', None) is not None else 0.0)
         # Install η monkey-patch (constant-loss-tangent form D_eff = D·(1 − iη))
-        from ..analyze import transmission_line as _tl_c
+        from plexusmech.tl import transmission_line as _tl_c
         if not hasattr(type(self), '_pristine_vessel_admittance'):
             type(self)._pristine_vessel_admittance = _tl_c._vessel_admittance
         _orig_va_c = type(self)._pristine_vessel_admittance
@@ -2906,7 +2906,7 @@ class ReadOnlyMosaicViewer:
             return _orig_va_c(R_m, L_m, omega, mu, rho, D_eff)
         _tl_c._vessel_admittance = _patched_va_c
         try:
-            from .carved_sim_backend import run_carved_sim_full
+            from plexusmech.viewer.carved_sim_backend import run_carved_sim_full
             t0 = time.time()
             self._carved_status.appendPlainText(
                 f"Excluding tiles: {sorted(excl) if excl else 'none'}\n"
@@ -3165,7 +3165,7 @@ class ReadOnlyMosaicViewer:
 
     def _on_normalize_clicked(self):
         """Run the tile_normalize pipeline in-place on self.G."""
-        from ..mosaic.tile_normalize import (
+        from ..legacy.tile_normalize import (
             NormalizeParams, normalize_graph_in_place)
         params = NormalizeParams(
             min_snr_db_h1=float(self._norm_h1_snr.value()),
@@ -3370,7 +3370,7 @@ class ReadOnlyMosaicViewer:
         """
         if not self._normalization_available():
             return
-        from ..mosaic.tile_normalize import (
+        from ..legacy.tile_normalize import (
             compute_gauge_diagnostics, NormalizeParams)
         params = NormalizeParams(
             fillin_min_snr_db=float(self._norm_fillin_snr.value()),
@@ -3799,7 +3799,7 @@ class ReadOnlyMosaicViewer:
             self.G.nodes[node]['boundary_type'] = mode
             self.G.nodes[node]['true_tip'] = True
             try:
-                from ..mosaic.kcl_reconstruct import (
+                from ..legacy.kcl_reconstruct import (
                     compute_bc_harmonics_recursive)
                 result = compute_bc_harmonics_recursive(
                     self.G, node, mode,
@@ -6515,7 +6515,7 @@ class ReadOnlyMosaicViewer:
             if lp is not None and occl >= 1.0 and lp in bc_override:
                 bc_override[lp] = np.zeros(4, dtype=complex)   # full ligation: Q=0
             D_phys = 1.5e-3
-            from ..analyze.transmission_line import solve_transmission_line  # ported 2026-09-30
+            from plexusmech.tl.transmission_line import solve_transmission_line  # ported 2026-09-30
             result = solve_transmission_line(
                 self.G, D=D_phys, n_harmonics=3, f0_hz=float(state["F0_HZ"]),
                 bc_harmonics_override=bc_override, verbose=False)
@@ -9255,7 +9255,7 @@ class ReadOnlyMosaicViewer:
         # made in this run sees D_eff(ω) = D · (1 − iη). Uses a class-level
         # pristine reference so repeated runs don't double-wrap.
         # Matches lock_D6p5e4_eta0p4.py's convention.
-        from ..analyze import transmission_line as _tl
+        from plexusmech.tl import transmission_line as _tl
         if not hasattr(type(self), '_pristine_vessel_admittance'):
             type(self)._pristine_vessel_admittance = _tl._vessel_admittance
         _orig_va = type(self)._pristine_vessel_admittance
@@ -9493,7 +9493,7 @@ class ReadOnlyMosaicViewer:
         try:
             # Lazy import — keeps viewer startup cheap and avoids
             # pulling in the heavy adaptation module circular chain.
-            from ..analyze.transmission_line import solve_transmission_line  # ported 2026-09-30
+            from plexusmech.tl.transmission_line import solve_transmission_line  # ported 2026-09-30
             t0 = time.time()
             if equal_flux_A:
                 # Two-pass equal-flux:

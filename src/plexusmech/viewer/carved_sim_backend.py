@@ -269,7 +269,7 @@ def run_carved_sim_full(G: nx.Graph,
     TL sim, and write `_h_*_sim_carved` fields back to G.  Returns a
     dict of stats and result."""
     # Load the standalone sim module (ported to plexusflow 2026-09-30)
-    from ..analyze.transmission_line import solve_transmission_line
+    from plexusmech.tl.transmission_line import solve_transmission_line
     from importlib import import_module
     scripts_dir = Path(__file__).resolve().parents[3] / "scripts"
     sys.path.insert(0, str(scripts_dir))

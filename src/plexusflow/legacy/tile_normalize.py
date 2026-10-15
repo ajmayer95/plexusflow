@@ -79,7 +79,7 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
-from .measurement_view import MeasurementView
+from ..io.measurement_view import MeasurementView
 
 # =============================================================================
 # Parameters

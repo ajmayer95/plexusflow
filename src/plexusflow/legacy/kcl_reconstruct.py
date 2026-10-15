@@ -57,7 +57,7 @@ from typing import Iterable, List, Optional, Set, Tuple
 import networkx as nx
 import numpy as np
 
-from .measurement_view import MeasurementView
+from ..io.measurement_view import MeasurementView
 
 
 DEFAULT_SNR_THRESHOLD_DB = 15.0

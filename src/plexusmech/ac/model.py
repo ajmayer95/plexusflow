@@ -84,7 +84,7 @@ def response(C, k, D, eta, bnd):
 
 def ac_reliability(G, field, model):
     """DC reliability c (reconcile.reliability) of each edge's AC-winner measurement; nan where not AC-eligible."""
-    from ..reconcile.reliability import c_of_measurement
+    from plexusflow.reconcile.reliability import c_of_measurement
     c = np.full(len(field["edges"]), np.nan)
     for i, (e, t) in enumerate(zip(field["edges"], field["tile"])):
         if t >= 0:
