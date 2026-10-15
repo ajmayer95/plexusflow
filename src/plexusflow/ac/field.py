@@ -24,6 +24,10 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND):
     from joblib import Parallel, delayed
     tf0 = G.graph["tile_f0_piv"]; f_ref = tf0[ref_tile]
     band = {t for t, f in tf0.items() if abs(f / f_ref - 1) <= f0_band}
+    # per-tile heart-rate status (graph['tile_f0_status'], set after review): tiles with no detectable pulsatility carry
+    # an assumed rate only — never used for harmonics
+    _st = G.graph.get("tile_f0_status") or {}
+    band = {t for t in band if (_st.get(t) or {}).get("status") not in ("no_signal", "excluded", "no measurements")}
     sub = dc["edges"]; eix = {e: i for i, e in enumerate(sub)}
     items = []
     for e in sub:
@@ -50,11 +54,14 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND):
     sc_w = np.full(nE, np.nan); rho_w = np.full(nE, np.nan)
     for e, d in meas.items():
         i = eix[e]
-        cand = [(t, x) for t, x in d.items() if abs(x["a0"]) > Q_DET and x["rho"] >= RHO_MIN and np.sign(x["a0"]) == np.sign(Qp[i])
-                and np.isfinite(x["scatter"])]
+        cand = [(t, x) for t, x in d.items() if abs(x["a0"]) > Q_DET and x["rho"] >= RHO_MIN and np.sign(x["a0"]) == np.sign(Qp[i])]
+        if not cand or abs(Qp[i]) <= Q_DET:     # reconciled flow ~0 (e.g. forced to zero by conservation): Option-A scale vanishes
+            continue
         if not cand:
             continue
-        t, x = min(cand, key=lambda c: c[1]["scatter"])
+        # winner: smallest per-beat H1 scatter; recordings with < 3 complete beats (slow early hearts, 15S) have no scatter,
+        # so they rank after any candidate that has one, by harmonic coherence ρ
+        t, x = min(cand, key=lambda c: (0, c[1]["scatter"]) if np.isfinite(c[1]["scatter"]) else (1, -c[1]["rho"]))
         Hf[:, i] = abs(Qp[i]) / abs(x["a0"]) * x["H"] * np.exp(-1j * np.arange(1, 4) * psi[t]); win_t[i] = t; elig[i] = True
         sc_w[i] = x["scatter"]; rho_w[i] = x["rho"]
     return dict(edges=sub, H=Hf, elig=elig, tile=win_t, psi=psi, scatter=sc_w, rho=rho_w, f_ref=f_ref, band=sorted(band),

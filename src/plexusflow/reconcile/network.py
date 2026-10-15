@@ -47,10 +47,24 @@ def emergent(Qp, dom):
     return fb
 
 
+def _gauge_nodes(dom):
+    """One pressure-gauge node per connected piece of the carved network (uncertain tags can split it): a V node
+    if the piece has one, else a boundary node, else its first node.  A piece without a gauge makes L singular."""
+    import scipy.sparse.csgraph as cg
+    B = dom["B"]; n, lab = cg.connected_components(abs(B) @ abs(B).T, directed=False)
+    pref = list(dom["out"]) + list(dom["inj"]); g = {}
+    for i in pref:
+        g.setdefault(lab[i], i)
+    for i in range(B.shape[0]):
+        g.setdefault(lab[i], i)
+    return np.array(sorted(g.values()))
+
+
 def passive(K, fb, dom):
-    """Passive flow with flux fb imposed at every node (Σ fb = 0); one V pressure pinned as gauge."""
+    """Passive flow with flux fb imposed at every node (Σ fb = 0 per connected piece); one pressure pinned per piece
+    (a V node where available) as gauge."""
     B = dom["B"]; L = (B @ sp.diags(K) @ B.T).tocsc()
-    free = np.setdiff1d(np.arange(B.shape[0]), [dom["out"][0]])
+    free = np.setdiff1d(np.arange(B.shape[0]), _gauge_nodes(dom))
     P = np.zeros(B.shape[0]); P[free] = spla.spsolve(L[free][:, free], fb[free])
     return K * (B.T @ P)
 

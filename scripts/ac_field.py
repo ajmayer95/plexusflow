@@ -15,9 +15,19 @@ from plexusflow.reconcile import carved_domain
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--ref-tile", type=int, default=REF_TILE,
+                    help=f"reference tile for the f0 band and the phase gauge (default {REF_TILE}, the 21S choice)")
+    ap.add_argument("--f0-band", type=float, default=F0_BAND,
+                    help=f"keep tiles whose heart rate is within ± this fraction of the reference tile's (default {F0_BAND}); "
+                         "large (e.g. 10) = every tile with a beat — for stages whose rate wanders between tiles (15S)")
+    args = ap.parse_args(); ref = args.ref_tile
     G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
-    A = build_ac_field(G, D)
-    print(f"f0 band (±{F0_BAND:.0%} of tile {REF_TILE}, {A['f_ref']:.2f} Hz): {len(A['band'])} tiles;  "
+    A = build_ac_field(G, D, ref_tile=ref, f0_band=args.f0_band)
+    A["f0_band"] = args.f0_band
+    A["ref_tile"] = ref
+    print(f"f0 band (±{args.f0_band:.0%} of tile {ref}, {A['f_ref']:.2f} Hz): {len(A['band'])} tiles;  "
           f"H1 phase mismatch over {len(A['_pairs'])} cross-tile pairs {sync_mismatch(A, False):.1f}° → aligned {sync_mismatch(A):.1f}°")
     el, Hf, nE = A["elig"], A["H"], len(A["edges"])
     print(f"AC-eligible carved edges {el.sum()} of {nE} ({el.mean():.0%});  winner per-beat H1 scatter median "

@@ -25,9 +25,11 @@ def main():
     dom, met, C, im = D.pop("dom"), D["metrics"], D["c"], D["imaged"]
     print(f"[2] carved network: {len(D['edges'])} edges, boundary {len(dom['inj'])} carve + {len(dom['out'])} V;  measured {im.sum()} "
           f"({im.mean():.0%}): trusted {np.sum(im & (C < 0.5))}, weak {np.sum(im & (C >= 0.5) & (C < 0.8))}, untrusted {np.sum(im & (C >= 0.8))}")
-    V1, V2 = met["V"]
+    V = np.array(met["V"])
+    v_txt = (f"V1/V2 {V[0]:+.2f}/{V[1]:+.2f} (L {100 * V[0] / V.sum():.1f}%)" if len(V) == 2 else
+             f"{len(V)} V nodes: total {V.sum():+.2f} nL/s ({np.sum(V < 0)} withdrawing, {np.sum(V > 0)} injecting)")
     print(f"[3] IRLS {D['n_iter']} iterations;  inflow {met['total_in']:.2f} nL/s (L {met['inj_L']:.2f} / R {met['inj_R']:.2f}, "
-          f"withdrawing carve nodes {met['n_withdraw']});  V1/V2 {V1:+.2f}/{V2:+.2f} (L {100 * V1 / (V1 + V2):.1f}%)")
+          f"withdrawing carve nodes {met['n_withdraw']});  {v_txt}")
     print(f"    moved median {met['move_p50']:.2f}, sign flips {met['flips']:.1%};  passive corr {met['corr_lin']:.3f} "
           f"(log {met['corr_log']:.3f}), shuffled radii {D['shuffled_corr']:.3f};  loop share {met['loop_share']:.2f}")
     paths.RESULTS.mkdir(parents=True, exist_ok=True)
