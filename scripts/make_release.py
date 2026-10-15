@@ -146,9 +146,11 @@ def downsample_videos(src_dir, dst_dir, spatial, n_frames):
 def export_results(res_dir, out):
     D = pickle.loads((res_dir / "dc_reconciled_v2.pkl").read_bytes())
     with open(out / "dc_reconciled_edges.csv", "w", newline="") as f:
-        w = csv.writer(f); w.writerow(("u", "v", "Q_measured", "Q_reconciled", "Q_passive", "c", "sigma", "imaged", "winner_tile", "radius_px", "length_px"))
+        w = csv.writer(f); w.writerow(("u", "v", "Q_measured", "Q_reconciled", "Q_passive", "c", "sigma", "imaged", "winner_tile", "radius_px", "length_px",
+                                       "unstable"))
+        un = D.get("unstable", np.zeros(len(D["edges"]), bool))
         for i, (u, v) in enumerate(D["edges"]):
-            w.writerow((u, v) + tuple(scalar(D[k][i]) for k in ("Qm", "Qp", "Qs", "c", "sigma", "imaged", "tile", "radius", "length")))
+            w.writerow((u, v) + tuple(scalar(D[k][i]) for k in ("Qm", "Qp", "Qs", "c", "sigma", "imaged", "tile", "radius", "length")) + (int(un[i]),))
     with open(out / "dc_boundary.csv", "w", newline="") as f:
         w = csv.writer(f); w.writerow(("node", "kind", "side", "flux_out_nL_s"))
         for k, i in enumerate(D["inj"]):
@@ -157,13 +159,17 @@ def export_results(res_dir, out):
             w.writerow((D["nodes"][i], "vein", "", scalar(D["fb"][i])))
     A = pickle.loads((res_dir / "ac_field_v2.pkl").read_bytes())
     with open(out / "ac_field_edges.csv", "w", newline="") as f:
-        w = csv.writer(f); w.writerow(("u", "v", "eligible", "winner_tile", "H1_amp", "H1_phase", "H2_amp", "H2_phase", "beat_scatter_H1", "rho"))
+        w = csv.writer(f); w.writerow(("u", "v", "eligible", "winner_tile", "H1_amp", "H1_phase", "H2_amp", "H2_phase", "beat_scatter_H1", "rho",
+                                       "tile_gauge_sd_deg", "phase_determined"))
+        gsd = A.get("gauge_sd_deg") or {}
         for i, (u, v) in enumerate(A["edges"]):
-            H = A["H"][:, i]
-            w.writerow((u, v, int(A["elig"][i]), int(A["tile"][i]), scalar(abs(H[0])), scalar(np.angle(H[0])), scalar(abs(H[1])), scalar(np.angle(H[1])),
-                        scalar(A["scatter"][i]), scalar(A["rho"][i])))
+            H = A["H"][:, i]; t = int(A["tile"][i]); sd = gsd.get(t, np.nan) if t >= 0 else np.nan
+            w.writerow((u, v, int(A["elig"][i]), t, scalar(abs(H[0])), scalar(np.angle(H[0])), scalar(abs(H[1])), scalar(np.angle(H[1])),
+                        scalar(A["scatter"][i]), scalar(A["rho"][i]), scalar(sd), int(bool(A["elig"][i]) and np.isfinite(sd) and sd <= 30.0)))
     json.dump(dict(metrics=D["metrics"], shuffled_corr=float(D["shuffled_corr"]), f_ref_hz=float(A["f_ref"]),
-                   tile_time_gauge_psi=A["psi"]), open(out / "summary.json", "w"), indent=1, default=float)
+                   dc_converged=bool(D.get("converged", False)), dc_unstable_vessels=int(np.sum(D.get("unstable", []))),
+                   tile_time_gauge_psi=A["psi"], tile_time_gauge_sd_deg=A.get("gauge_sd_deg", {}),
+                   phase_determined_rule="tile gauge bootstrap SD <= 30 deg"), open(out / "summary.json", "w"), indent=1, default=float)
 
 
 def main():

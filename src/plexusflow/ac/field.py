@@ -19,7 +19,26 @@ def _measure(q, f0):
     return a0, H, beat_scatter(q, f0), coherence(q, f0)
 
 
-def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND):
+def _sync(pa, pb, pw, pz, nT, ref_i, start=None, n_iter=2000):
+    """Tile time gauge from vessel pairs: maximise Σ w·Re(z_ab e^{i(ψ_b − ψ_a)}) with ψ_ref = 0.  Spectral start (or
+    `start`), then per-tile normalised fixed-point iteration (generalised power method)."""
+    W = np.zeros((nT, nT), complex)
+    np.add.at(W, (pa, pb), pw * pz); np.add.at(W, (pb, pa), pw * np.conj(pz))
+    if start is None:
+        _, V = np.linalg.eigh(W + np.diag(np.full(nT, 1e-12 + np.abs(W).sum(1).max())))
+        z = V[:, -1] / np.maximum(np.abs(V[:, -1]), 1e-300)
+    else:
+        z = np.exp(1j * np.asarray(start))
+    for _ in range(n_iter):
+        zn = W @ z; nz = np.abs(zn) > 0
+        zn = np.where(nz, zn / np.where(nz, np.abs(zn), 1), z)
+        done = np.max(np.abs(np.angle(zn * np.conj(z)))) < 1e-10; z = zn
+        if done:
+            break
+    return np.angle(z * np.conj(z[ref_i]))
+
+
+def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=50):
     """dc: output of reconcile_dc (needs edges, Qp).  Returns the field dict (H is 3 × nE, u→v frame)."""
     from joblib import Parallel, delayed
     tf0 = G.graph["tile_f0_piv"]; f_ref = tf0[ref_tile]
@@ -39,16 +58,39 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND):
     for (e, t, _), (a0, H, sc, rho) in zip(items, res):
         meas.setdefault(e, {})[t] = dict(a0=a0, H=H, scatter=sc, rho=rho)
 
-    tiles = sorted(band); ti = {t: i for i, t in enumerate(tiles)}; Mx = np.zeros((len(tiles), len(tiles)), complex); pairs = []
-    for e, d in meas.items():
-        ok = [t for t, x in d.items() if x["rho"] >= RHO_SYNC and abs(x["H"][0]) > 0]
+    # Tile time gauge ψ (phase synchronisation over vessels seen in two tiles).  Every pair of valid measurements of the
+    # same vessel contributes u_a·conj(u_b) (unit H1 phasors) weighted by ρ_a·ρ_b, so weakly pulsatile tiles still link
+    # through many vessels (21S tiles 16–18: individual ρ ~0.01, yet 17↔16 over 228 vessels is coherent at p ~ 1e-23).
+    # Solved by per-tile normalised fixed-point iteration (generalised power method) from the spectral start: deterministic,
+    # and a weakly linked group's phase is set by its own consistent links rather than by a near-degenerate eigenvector.
+    # History: the first Option-A version (2026-10-06) kept only pairs with both ρ ≥ 0.1, unweighted; that discarded most
+    # vessels linking the two halves of the 21S yolk sac and put the second half ~65° off the earlier tile_normalize
+    # gauge (its "median 5°" check hid the 90th percentile).  Using all pairs, weighted, agrees with tile_normalize (2–5°).
+    tiles = sorted(band); ti = {t: i for i, t in enumerate(tiles)}; nT = len(tiles)
+    pa, pb, pw, pz, pv, pairs = [], [], [], [], [], []
+    for vi, (e, d) in enumerate(meas.items()):
+        ok = [t for t, x in d.items() if t in ti and abs(x["H"][0]) > 0 and np.isfinite(x["rho"])]
         for i in range(len(ok)):
             for j in range(i + 1, len(ok)):
                 a, b = ok[i], ok[j]; ua = d[a]["H"][0] / abs(d[a]["H"][0]); ub = d[b]["H"][0] / abs(d[b]["H"][0])
-                Mx[ti[a], ti[b]] += ua * np.conj(ub); Mx[ti[b], ti[a]] += ub * np.conj(ua); pairs.append((e, a, b))
-    Mx += np.diag(np.full(len(tiles), 1e-9 + np.abs(Mx).sum(1).max()))
-    _, V = np.linalg.eigh(Mx); vec = V[:, -1]
-    psi = {t: float(np.angle(vec[ti[t]] / vec[ti[ref_tile]])) for t in tiles}
+                pa.append(ti[a]); pb.append(ti[b]); pw.append(max(d[a]["rho"], 0.0) * max(d[b]["rho"], 0.0))
+                pz.append(ua * np.conj(ub)); pv.append(vi)
+                if d[a]["rho"] >= RHO_SYNC and d[b]["rho"] >= RHO_SYNC:
+                    pairs.append((e, a, b))
+    pa, pb, pw, pz, pv = map(np.asarray, (pa, pb, pw, pz, pv))
+    psi_vec = _sync(pa, pb, pw, pz, nT, ti[ref_tile])
+    psi = {t: float(psi_vec[ti[t]]) for t in tiles}
+    # per-tile gauge uncertainty: bootstrap over vessels (a vessel's pairs are resampled together)
+    rng = np.random.default_rng(0); nv = int(pv.max()) + 1 if len(pv) else 0; boots = []
+    for _ in range(n_boot if nv else 0):
+        cnt = np.bincount(rng.integers(0, nv, nv), minlength=nv)
+        boots.append(_sync(pa, pb, pw * cnt[pv], pz, nT, ti[ref_tile], start=psi_vec))
+    if boots:
+        dev = np.exp(1j * (np.array(boots) - psi_vec[None, :]))
+        sd = np.degrees(np.sqrt(-2 * np.log(np.clip(np.abs(dev.mean(axis=0)), 1e-12, 1))))   # circular SD
+    else:
+        sd = np.full(nT, np.nan)
+    gauge_sd_deg = {t: float(sd[ti[t]]) for t in tiles}
 
     Qp = dc["Qp"]; nE = len(sub); Hf = np.full((3, nE), np.nan + 0j); win_t = np.full(nE, -1); elig = np.zeros(nE, bool)
     sc_w = np.full(nE, np.nan); rho_w = np.full(nE, np.nan)
@@ -65,7 +107,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND):
         Hf[:, i] = abs(Qp[i]) / abs(x["a0"]) * x["H"] * np.exp(-1j * np.arange(1, 4) * psi[t]); win_t[i] = t; elig[i] = True
         sc_w[i] = x["scatter"]; rho_w[i] = x["rho"]
     return dict(edges=sub, H=Hf, elig=elig, tile=win_t, psi=psi, scatter=sc_w, rho=rho_w, f_ref=f_ref, band=sorted(band),
-                Qp=Qp, _meas=meas, _pairs=pairs)
+                Qp=Qp, gauge_sd_deg=gauge_sd_deg, _meas=meas, _pairs=pairs)
 
 
 def sync_mismatch(field, aligned=True):

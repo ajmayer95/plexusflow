@@ -33,6 +33,7 @@ from plexusflow.reconcile import carved_domain
 from plexusflow.ac.model import build_context, solve
 
 D_MAIN, ETA_MAIN, VEIN_BC = 3.5e-4, 0.0, 'flux'
+GAUGE_SD_MAX = 30.0     # deg: tiles with a less certain time gauge are greyed in the measured phase maps
 OUT_DIR = _paths.FIGURES / 'fig9alt_v3'
 
 
@@ -60,8 +61,12 @@ def main():
     C = build_context(D, A, dom)
     e, Qp, Qdc_s = C['elig'], C['Qp'], C['Qs_dc']
     Hm_ = C['H']; rho = A['rho']
+    # phases are only comparable across tiles whose time gauge is well determined (bootstrap SD ≤ GAUGE_SD_MAX)
+    gsd = A.get('gauge_sd_deg') or {}
+    ph_ok = e & np.array([gsd.get(int(t), 0.0) <= GAUGE_SD_MAX if t >= 0 else False for t in A['tile']])
     Hs = {k: solve(C, k, D_MAIN, ETA_MAIN, VEIN_BC) for k in (1, 2)}
     edges = dom['edges']; nE = len(edges)
+    print(f'[fig9alt_v3] phase-determined vessels {int(ph_ok.sum())} of {int(e.sum())} eligible (tile gauge SD ≤ {GAUGE_SD_MAX:.0f}°)')
     print(f'[fig9alt_v3] {_paths.STAGE.name}: carved edges {nE}, AC-eligible {int(e.sum())}; ref tile '
           f'{A.get("ref_tile", "?")} ({C["f0"]:.2f} Hz); D={D_MAIN:g}, η={ETA_MAIN}')
 
@@ -73,8 +78,8 @@ def main():
     rms_m = np.sqrt(sum(np.abs(Hm_[k]) ** 2 for k in (1, 2)))
     rms_s = np.sqrt(sum(np.abs(Hs[k]) ** 2 for k in (1, 2)))
     lc = lambda a, b: np.corrcoef(np.log(a), np.log(b))[0, 1]
-    dphi = lambda k: np.degrees(np.median(np.abs(np.angle(np.exp(1j * (np.angle(Hm_[k][e] * np.sign(Qp[e]))
-                                                                        - np.angle(Hs[k][e] * np.sign(Qdc_s[e]))))))))
+    dphi = lambda k: np.degrees(np.median(np.abs(np.angle(np.exp(1j * (np.angle(Hm_[k][ph_ok] * np.sign(Qp[ph_ok]))
+                                                                        - np.angle(Hs[k][ph_ok] * np.sign(Qdc_s[ph_ok]))))))))
     ok = e & (pf_m > 0) & (pf_s > 0)
     stats = dict(pf_corr=lc(pf_m[ok], pf_s[ok]), rms_corr=lc(rms_m[e & (rms_s > 0)], rms_s[e & (rms_s > 0)]),
                  h1_dphi_deg=dphi(1), h2_dphi_deg=dphi(2), pires=np.median(pires[e]))
@@ -135,13 +140,13 @@ def main():
     nPF = mcolors.LogNorm(0.05, 0.6); cPF = plt.cm.magma
     nPH = mcolors.Normalize(0, np.pi); cPH = plt.cm.hsv
     allmask = np.ones(nE, bool); axes_A = {}
-    for row, (side, pf, H1, H2, mask) in enumerate((('measured', pf_m, Hm_[1], Hm_[2], e),
-                                                    ('simulated', pf_s, Hs[1], Hs[2], allmask))):
+    for row, (side, pf, H1, H2, mask, pmask) in enumerate((('measured', pf_m, Hm_[1], Hm_[2], e, ph_ok),
+                                                           ('simulated', pf_s, Hs[1], Hs[2], allmask, allmask))):
         for col in range(3):
             ax = fig.add_subplot(gA[row, col]); bg(ax); axes_A[row, col] = ax
             if col == 0: edgemap(ax, pf, mask, nPF, cPF, 1.3)
-            elif col == 1: edgemap(ax, ph(H1), mask, nPH, cPH, 1.1)
-            else: edgemap(ax, ph(H2), mask, nPH, cPH, 1.1)
+            elif col == 1: edgemap(ax, ph(H1), pmask, nPH, cPH, 1.1)
+            else: edgemap(ax, ph(H2), pmask, nPH, cPH, 1.1)
             if row == 0:
                 ax.set_title(['pulsatility fraction', r'$H_1$ phase lag', r'$H_2$ phase lag'][col],
                              fontsize=13, fontweight='bold', pad=5)
