@@ -11,7 +11,7 @@ branch.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
@@ -23,6 +23,30 @@ from .kloosterman import kloosterman_scalar
 
 
 # ── Preprocessing helpers ─────────────────────────────────────────────
+
+def _choose_dt(frames_u8, centerline, fb_kwargs, dt_max, target_disp_px, n_pilot=120, peak_factor=2.0):
+    """Adaptive OF frame spacing for one vessel: (dt, d_peak).
+
+    Speed comes from the TIME-AVERAGED dt=1 flow VECTOR at each centreline pixel (median over the centreline):
+    Farneback noise at dt=1 is ~1 px in magnitude but has no preferred direction, so it averages out of the
+    vector mean while real flow does not.  (Per-pair magnitudes read the noise floor as speed and kept slow
+    vessels at dt=1.)  Peak displacement ≈ peak_factor × mean speed; dt = clip(round(target / d_peak), 1, dt_max)."""
+    import cv2
+    T, H, W = frames_u8.shape
+    if T < 3:
+        return 1, float("nan")
+    rr = np.clip(np.round(centerline[:, 0]).astype(int), 0, H - 1)
+    cc = np.clip(np.round(centerline[:, 1]).astype(int), 0, W - 1)
+    vsum = np.zeros((len(rr), 2)); n = 0
+    for t in np.unique(np.linspace(0, T - 2, min(n_pilot, T - 1)).astype(int)):
+        fl = cv2.calcOpticalFlowFarneback(frames_u8[t], frames_u8[t + 1], None, **fb_kwargs)
+        vsum += fl[rr, cc, :2]; n += 1
+    v_mean = float(np.median(np.hypot(*(vsum / max(n, 1)).T)))
+    d_peak = peak_factor * v_mean
+    if not np.isfinite(d_peak) or d_peak <= 0:
+        return int(dt_max), d_peak
+    return int(np.clip(round(target_disp_px / d_peak), 1, int(dt_max))), d_peak
+
 
 def _normalise_for_of(frames: np.ndarray, bg_percentile: int = 10) -> np.ndarray:
     """Background-subtract float frames + rescale to uint8 for Farneback.
@@ -202,7 +226,15 @@ def compute_of_profile_and_Q(
     fb_poly_n: int = 5,
     fb_poly_sigma: float = 1.1,
     fb_pyr_scale: float = 0.5,
-    dt: int = 1,
+    dt: Union[int, str] = 1,
+    # dt="auto": per-vessel frame spacing.  A pilot of ~40 dt=1 pairs measures
+    # the vessel's peak centreline displacement d95 (px/frame); the run then
+    # uses dt = clip(round(target_disp_px / d95), 1, dt_max), so fast vessels
+    # stay at dt=1 (no aliasing through Farneback's ~1–2 px capture range) and
+    # very slow ones get enough displacement to rise above the OF noise floor
+    # (at dt=1 sub-pixel noise is rectified into spurious flow).
+    dt_max: int = 12,
+    target_disp_px: float = 1.0,
     # Profile
     n_bins: int = 30,
     fit_fraction: float = 0.75,
@@ -335,6 +367,11 @@ def compute_of_profile_and_Q(
         vmax = float(np.percentile(frames, 99))
         frames_u8 = np.clip((frames - vmin) / max(vmax - vmin, 1e-8) * 255,
                              0, 255).astype(np.uint8)
+
+    # ── 1b. Adaptive frame spacing ───────────────────────────────────
+    of_pilot_disp = float("nan")
+    if isinstance(dt, str):
+        dt, of_pilot_disp = _choose_dt(frames_u8, centerline, fb_kwargs, dt_max, target_disp_px)
 
     # ── 2. Centreline geometry / optional refinement ────────────────
     cl_shift = 0.0
@@ -602,6 +639,7 @@ def compute_of_profile_and_Q(
         n_vessel_px=n_vessel_px,
         fb_winsize=fb_winsize,
         roi_offset=(r0, c0),
+        of_dt=int(dt), of_pilot_disp_px=of_pilot_disp,
         # Kloosterman per-cross-section scalar Q
         Q_kloosterman=_kl.get("Q_char", float("nan")),
         R_kloosterman=_kl.get("R_char", float("nan")),

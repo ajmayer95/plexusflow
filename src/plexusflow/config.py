@@ -53,7 +53,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 import json
 import yaml
 
@@ -96,6 +96,8 @@ class StageConfig:
     # Fill mask holes of area ≤ N pixels before feeding net3.  Applied to
     # a temp copy so mask.tif on disk is preserved.  Set 0 to disable.
     vectorize_fill_holes: int = 20
+    # Close 1-px background slits (3×3-cross closing) on the temp copy before net3 — see vectorize._prep_mask_for_net3.
+    vectorize_close_slits: bool = True
     # Downsampled per-tile videos for viewer playback.  When
     # ``videos_realtime/`` exists under the stage root, the viewer uses it
     # as the display video source (fast enough for realtime playback) and
@@ -104,6 +106,18 @@ class StageConfig:
     videos_realtime_spatial_ds: int = 2
     # 250 fps raw → 62.5 fps playback at ×4 (matches display refresh).
     videos_realtime_temporal_ds: int = 4
+    # Flow analysis.  Heart-rate search band (Hz) for per-tile f0 and its sanity check.
+    f0_min_hz: float = 0.8
+    f0_max_hz: float = 3.5
+    # Optical-flow frame spacing: 1, an integer, or "auto" (per-vessel: pilot at dt=1, then
+    # dt = clip(round(of_target_disp_px / peak displacement), 1, of_dt_max)).
+    of_dt: Union[int, str] = 1
+    of_dt_max: int = 12
+    of_target_disp_px: float = 1.0
+    # Per-tile override of of_dt, e.g. {30: 12, 31: 12} (yaml keys may be ints or strings).
+    of_dt_by_tile: dict = field(default_factory=dict)
+    # Tiles never used for flow measurement (e.g. no detectable flow); their stored measurements are dropped on analyze.
+    exclude_tiles: list = field(default_factory=list)
 
     # ----- resolved paths (populated in __post_init__) -----
     tiles_std_clahe_dir: Path = field(init=False)

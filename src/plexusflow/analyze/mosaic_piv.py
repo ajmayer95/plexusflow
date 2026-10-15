@@ -394,7 +394,7 @@ def _smooth_path_inplace(pts, sigma=1.5):
 
 def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
                      f0, pt, ridge_mask=None, ridge_edt=None,
-                     keep_kl_inputs=False):
+                     keep_kl_inputs=False, of_overrides=None):
     """Run merged OF on one vessel in one tile.  Returns a clean
     measurement dict or None if the vessel isn't sufficiently in-FOV
     or OF fails.  ``keep_kl_inputs`` attaches ``_kl_inputs`` (time-mean
@@ -456,7 +456,7 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
             stack, cl_rc, R_px, f0_hz=f0,
             frame_dt_s=pt["FRAME_DT_S"],
             ridge_mask=ridge_mask,
-            **FB_KWARGS)
+            **{**FB_KWARGS, **(of_overrides or {})})
         seg = pt["_rebin_profile"](u, cl_rc, R_px,
                                     n_bins=30, fit_fraction=0.75)
     except Exception:
@@ -575,7 +575,9 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
                   "n_cross_sections": int(len(cl_rc)),
                   "R_free_um": float(u.get("R_fit_free", np.nan))
                                 * pt["PX_SIZE_UM"],
-                  "cl_shift_px": float(u.get("cl_shift", 0.0))},
+                  "cl_shift_px": float(u.get("cl_shift", 0.0)),
+                  "of_dt": int(u.get("of_dt", FB_KWARGS["dt"])),
+                  "of_pilot_disp_px": float(u.get("of_pilot_disp_px", np.nan))},
     }
     # Per-measurement quality record — enough to recompute the reliability
     # scale c (f, alignment, tile) after the batch without re-running OF.
@@ -640,7 +642,7 @@ def _tile_spatial_neighbors(G: nx.Graph, k: int = 6) -> dict:
 
 def _tile_qt_spectrum_peak(G: nx.Graph, tile: int, fs: float = 250.0,
                             f_lo: float = 0.8, f_hi: float = 3.5,
-                            n_top: int = 40) -> Optional[float]:
+                            n_top: int = 20) -> Optional[float]:
     """Tile heart rate from its own traces: stacked, peak-normalised Hann
     periodograms of the ``n_top`` strongest Q(t) traces (by |mean Q|), most
     prominent peak in [f_lo, f_hi] — the same estimator the batch uses for f0.
@@ -654,8 +656,13 @@ def _tile_qt_spectrum_peak(G: nx.Graph, tile: int, fs: float = 250.0,
                 continue
             q = m.get("Q_t"); mq = (m.get("harm") or {}).get("mean_Q")
             if q is not None and len(q) > 64 and mq is not None and np.isfinite(mq):
-                cand.append((abs(float(mq)), np.asarray(q, float)))
+                q = np.asarray(q, float); q = q[np.isfinite(q)]
+                if q.size > 64:     # linear detrend: with few beats, drift leaks into the low-f band
+                    tt = np.arange(q.size); q = q - np.polyval(np.polyfit(tt, q, 1), tt)
+                cand.append((abs(float(mq)), q))
     cand.sort(key=lambda x: -x[0])
+    if cand:                                   # ≥ 1 full beat per recording: floor the search at 1/T
+        f_lo = max(f_lo, fs / float(np.median([len(q) for _, q in cand[:n_top]])))
     pgs = []
     for _, q in cand[:n_top]:
         q = q[np.isfinite(q)]
@@ -698,46 +705,57 @@ def _refit_tile_harm(G: nx.Graph, tile: int, f0_hz: float,
     return n
 
 
+def _tile_beat_r2(G: nx.Graph, tile: int, f0: float, fs: float = 250.0, n_top: int = 20) -> float:
+    """Beat strength: median R² of a DC + H1 + H2 fit at f0 over the tile's n_top strongest Kloosterman-valid traces."""
+    from .harmonic import fit_harmonics
+    ms = sorted([m for *_, d in G.edges(data=True) for m in (d.get("measurements_piv") or [])
+                 if m.get("tile_id") == tile and (m.get("quality") or {}).get("kl_ok") and m.get("Q_t") is not None],
+                key=lambda m: -abs((m.get("harm") or {}).get("mean_Q") or 0))[:n_top]
+    r = []
+    for m in ms:
+        q = np.asarray(m["Q_t"], float); q = q[np.isfinite(q)]
+        if q.size < 50 or q.var() == 0:
+            continue
+        hr = fit_harmonics(q, 1.0 / fs, f0, K=2, loss="huber", include_dc=True)
+        res = np.asarray(hr["resid"], float); res = res[np.isfinite(res)]
+        r.append(1 - res.var() / q.var())
+    return float(np.median(r)) if r else float("nan")
+
+
 def _sanity_check_tile_f0(G: nx.Graph, self_tol: float = 0.05,
                            agree_frac: float = 0.15,
-                           verbose: bool = True, refit: bool = True) -> int:
-    """Check each tile's stored f0 against its OWN heart rate (stacked
-    periodogram of its strongest traces, `_tile_qt_spectrum_peak`).
+                           verbose: bool = True, refit: bool = True,
+                           f_lo: float = 0.8, f_hi: float = 3.5,
+                           r2_min: float = 0.3, r2_gain: float = 0.05) -> int:
+    """Check each tile's stored f0 against its OWN traces and replace it when the evidence says so.
 
-    * stored f0 within ``self_tol`` of the tile's own peak → keep.
-    * otherwise, if the own peak is within ``agree_frac`` of the 6-nearest
-      spatial neighbours' median → replace by the own peak and refit `harm`.
-    * otherwise keep the stored value and warn (unresolved).
+    Estimate (benchmarked 2026-10-14 against user-reviewed 15S rates and clear 21S/27S tiles: 98/102 correct, no octave
+    errors): stacked periodograms of the tile's strongest traces, linear-detrended, search floor max(f_lo, 1/T) so every
+    recording holds ≥ 1 full beat (`_tile_qt_spectrum_peak`).
 
-    Neighbours are only a plausibility check, never a substitute: tile id
-    follows acquisition order and heart rate drifts over the acquisition
-    (early tiles ~1 Hz), so spatial neighbours imaged at other times can
-    differ by >30% legitimately.  (Before 2026-10-07 the neighbour median
-    was substituted; with a 30% gate that let tile 53's wrong 2.50 Hz through,
-    and a tighter gate would have overwritten tiles 1–4 with neighbour values.)
-    Decisions are made on the original f0 map, then applied.
-    Returns the number of tiles refit."""
+    Acceptance is by the tile's own data, not its neighbours (heart rate varies between tiles legitimately — warm-up,
+    the 27S dip, the wandering 15S rate): replace the stored f0 when the new rate gives a clear beat (median R² of a
+    DC+H1+H2 fit ≥ ``r2_min``) that beats the stored rate's by ≥ ``r2_gain``.  Tiles reviewed by hand
+    (graph['tile_f0_status'][t]['user_checked']) are never changed.  Returns the number of tiles refit."""
     tf = G.graph.get("tile_f0_piv") or {}
     if not tf:
         return 0
-    nbrs = _tile_spatial_neighbors(G, k=6)
+    status = G.graph.get("tile_f0_status") or {}
     orig = dict(tf); changes = {}
     for t, f0 in orig.items():
-        peak = _tile_qt_spectrum_peak(G, t)
-        if peak is None or not np.isfinite(peak):
+        if (status.get(t) or {}).get("user_checked"):
             continue
-        if abs(float(f0) - peak) / peak <= self_tol:
+        peak = _tile_qt_spectrum_peak(G, t, f_lo=f_lo, f_hi=f_hi)
+        if peak is None or not np.isfinite(peak) or abs(float(f0) - peak) / peak <= self_tol:
             continue
-        neigh = [orig[n] for n in nbrs.get(t, []) if n in orig]
-        med = float(np.median(neigh)) if len(neigh) >= 3 else float("nan")
-        if np.isfinite(med) and abs(peak - med) / med <= agree_frac:
+        r_old, r_new = _tile_beat_r2(G, t, float(f0)), _tile_beat_r2(G, t, peak)
+        if np.isfinite(r_new) and r_new >= r2_min and (not np.isfinite(r_old) or r_new >= r_old + r2_gain):
             changes[t] = peak
             if verbose:
-                print(f"[sanity] tile {t}: f0 {float(f0):.3f} → {peak:.3f} Hz (own spectrum peak; "
-                      f"neighbour median {med:.3f})")
+                print(f"[sanity] tile {t}: f0 {float(f0):.3f} → {peak:.3f} Hz (own traces; beat R² {r_old:.2f} → {r_new:.2f})")
         elif verbose:
-            print(f"[sanity] tile {t}: stored f0 {float(f0):.3f} disagrees with own spectrum peak {peak:.3f} "
-                  f"but the peak is not confirmed by neighbours (median {med:.3f}) — left unchanged, check manually")
+            print(f"[sanity] tile {t}: stored f0 {float(f0):.3f} vs own-trace estimate {peak:.3f} Hz — kept "
+                  f"(beat R² {r_old:.2f} vs {r_new:.2f}; not a clear improvement)")
     for t, f in changes.items():
         tf[t] = float(f)
         if refit:
@@ -746,7 +764,6 @@ def _sanity_check_tile_f0(G: nx.Graph, self_tol: float = 0.05,
                 print(f"[sanity]   refit {n} measurements on tile {t}")
     G.graph["tile_f0_piv"] = tf
     return len(changes)
-
 
 def analyze_stage(cfg: StageConfig,
                     tile_ids: Optional[Iterable[int]] = None,
@@ -770,6 +787,20 @@ def analyze_stage(cfg: StageConfig,
     — supports resume).
     """
     pt = _import_pertile()
+    # Heart-rate search band and OF frame spacing come from the stage config (plexusflow.yaml).
+    # Default band widened 2026-08-24 from [1.2, 4.5] (early, cold tiles ~0.9–1.1 Hz locked onto H2 as fundamental).
+    F0_FMIN_HZ = float(cfg.f0_min_hz)     # default 0.8; 15S (heart just started, ~0.6–1.2 Hz) uses 0.5–1.6
+    F0_FMAX_HZ = float(cfg.f0_max_hz)     # default 3.5
+    def _of_spec(spec):
+        if str(spec).lower() == "auto":
+            return dict(dt="auto", dt_max=int(cfg.of_dt_max), target_disp_px=float(cfg.of_target_disp_px))
+        return dict(dt=int(spec))
+    of_overrides = _of_spec(cfg.of_dt)
+    _by_tile = {int(k): v for k, v in (cfg.of_dt_by_tile or {}).items()}
+
+    def _of_for(tid):
+        """Per-tile OF frame spacing: of_dt_by_tile[tid] if set, else the stage-wide of_dt."""
+        return _of_spec(_by_tile[int(tid)]) if int(tid) in _by_tile else of_overrides
 
     src = cfg.graph_vessels_path
     if not src.exists():
@@ -800,6 +831,18 @@ def analyze_stage(cfg: StageConfig,
     if tile_ids is None:
         tile_ids = list(all_tile_ids)
     tile_ids = sorted(set(int(t) for t in tile_ids))
+    # Tiles excluded from flow measurement (stage config ``exclude_tiles``, e.g. no detectable flow): never measured,
+    # and any measurements already stored from them are dropped so those vessels count as unimaged downstream.
+    _excl = {int(t) for t in (cfg.exclude_tiles or [])}
+    if _excl:
+        tile_ids = [t for t in tile_ids if t not in _excl]
+        _n_drop = 0
+        for _a, _b, _d in G.edges(data=True):
+            if _d.get("measurements_piv"):
+                _keep = [mm for mm in _d["measurements_piv"] if int(mm.get("tile_id", -1)) not in _excl]
+                _n_drop += len(_d["measurements_piv"]) - len(_keep); _d["measurements_piv"] = _keep
+        if verbose:
+            print(f'  exclude_tiles {sorted(_excl)}: not measured; dropped {_n_drop} stored measurements')
 
     # Peek shapes for EVERY discoverable tile — the mosaic bbox must
     # be computed from all tiles, not just the subset we'll process
@@ -841,19 +884,12 @@ def analyze_stage(cfg: StageConfig,
     # flow tangent, so a wrong f0 must not reach the new measurements.
     if f0_by_tile and not skip_analyzed:
         try:
-            _n0 = _sanity_check_tile_f0(G, verbose=verbose, refit=False)
+            _n0 = _sanity_check_tile_f0(G, verbose=verbose, refit=False, f_lo=F0_FMIN_HZ, f_hi=F0_FMAX_HZ)
             f0_by_tile = G.graph["tile_f0_piv"]
             if verbose and _n0:
                 print(f"[sanity pre-pass] corrected cached f0 on {_n0} tile(s) before measuring")
         except Exception as _e:
             print(f"[sanity pre-pass] skipped: {_e}")
-    # Widened 2026-08-24: was [1.2, 4.5] which cut off tiles imaged early
-    # in the acquisition (embryo cold, HR ~0.9-1.1 Hz). At [1.2, 4.5] the
-    # detector locks onto H2 as fundamental for those tiles → downstream
-    # per-edge harmonic fits collapse (SNR falls ~20 dB below true).
-    F0_FMIN_HZ = 0.8
-    F0_FMAX_HZ = 3.5
-
     def _f0(tid):
         v = f0_by_tile.get(tid, f0_by_tile.get(str(tid)))
         return float(v) if v is not None and np.isfinite(float(v)) \
@@ -887,7 +923,8 @@ def analyze_stage(cfg: StageConfig,
                     A, B, _path_a_to_b(G, A, B, d["path"]),
                     d.get("radius"),
                     geom_, tid_, stack, float(default_f0_hz), pt,
-                    ridge_mask=ridge_mask_, ridge_edt=ridge_edt_)
+                    ridge_mask=ridge_mask_, ridge_edt=ridge_edt_,
+                    of_overrides=_of_for(tid_))
             except Exception:
                 continue
             if m is None:
@@ -1004,12 +1041,12 @@ def analyze_stage(cfg: StageConfig,
         _jobs = [(A, B, _path_a_to_b(G, A, B, d["path"]), d.get("radius"))
                  for A, B, d in cand_edges]
 
-        def _work(A, B, path_xy, radius, _rm=ridge_mask_tile, _re=ridge_edt_tile):
+        def _work(A, B, path_xy, radius, _rm=ridge_mask_tile, _re=ridge_edt_tile, _ov=_of_for(tid)):
             return _analyze_vessel(
                 A, B, path_xy, radius,
                 geom, tid, stack, f0, pt,
                 ridge_mask=_rm, ridge_edt=_re,
-                keep_kl_inputs=_keep)
+                keep_kl_inputs=_keep, of_overrides=_ov)
 
         if Parallel is not None and n_workers > 1:
             results = Parallel(n_jobs=n_workers, backend="loky")(
@@ -1074,7 +1111,7 @@ def analyze_stage(cfg: StageConfig,
     # neighbors — refits every measurement's `harm` at the corrected f0.
     if not dry_run:
         try:
-            _n_fixed = _sanity_check_tile_f0(G, verbose=verbose)
+            _n_fixed = _sanity_check_tile_f0(G, verbose=verbose, f_lo=F0_FMIN_HZ, f_hi=F0_FMAX_HZ)
             if verbose and _n_fixed:
                 print(f'[sanity] refit measurements on {_n_fixed} tile(s) '
                       f'whose f0 was inconsistent with spatial neighbors')
