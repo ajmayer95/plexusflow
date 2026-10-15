@@ -471,17 +471,9 @@ def edit(stage_root: Path = typer.Argument(...),
     raise typer.Exit(rc)
 
 
-@app.command()
-def view(stage_root: Path = typer.Argument(...),
-         field: str = typer.Option("mean_Q",
-             help='Field to colour edges by on startup')
-         ) -> None:
-    """Launch the read-only mosaic viewer.
-
-    Resolves graph + fuse image + tile positions + per-tile videos
-    from the stage folder's StageConfig, then invokes the
-    ported-from-pertile ReadOnlyMosaicViewer with those paths.
-    """
+def _launch_viewer(stage_root: Path, field: str, mode: str) -> None:
+    """Resolve graph + fuse image + tile positions + per-tile videos from the stage folder's StageConfig and open
+    the mosaic viewer in the given capability mode ('view' or 'workbench')."""
     from .viewer import ReadOnlyMosaicViewer
     cfg = StageConfig.load(stage_root)
     graph_path = cfg.graph_piv_path if cfg.graph_piv_path.exists() else cfg.graph_vessels_path
@@ -519,9 +511,32 @@ def view(stage_root: Path = typer.Argument(...),
         of_video_dir=of_video_dir,
         of_video_pattern=video_pattern,
         initial_field=field,
-        # A frozen release (has MANIFEST.json) is read-only: never write caches back into its graph.
-        cache_harmonic_class=not (Path(stage_root) / "MANIFEST.json").exists(),
+        mode=mode,
     ).run()
+
+
+@app.command()
+def view(stage_root: Path = typer.Argument(...),
+         field: str = typer.Option("mean_Q",
+             help='Field to colour edges by on startup')
+         ) -> None:
+    """Open the read-only mosaic viewer (measured, reconciled, video overlay).
+
+    Never writes anything and runs no optical flow — safe on frozen releases.
+    For tagging, boundary edits and fresh OF use `plexusflow workbench`.
+    """
+    _launch_viewer(stage_root, field, 'view')
+
+
+@app.command()
+def workbench(stage_root: Path = typer.Argument(...),
+              field: str = typer.Option("mean_Q",
+                  help='Field to colour edges by on startup')
+              ) -> None:
+    """Open the viewer with editing tools: fresh OF on a vessel, radial-uncertainty
+    tagging, boundary marking (saved to the stage graph).  Refuses frozen releases
+    (opens them read-only).  Simulation tabs appear when plexusmech is installed."""
+    _launch_viewer(stage_root, field, 'workbench')
 
 
 @app.command('downsample-videos')

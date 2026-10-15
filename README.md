@@ -105,9 +105,13 @@ python examples/quickstart.py
 | `python examples/quickstart.py` | load graph → reliability fit → DC reconciliation → 2 plots |
 | `python scripts/dc_reconcile.py` | full DC pipeline (writes `reliability_model_v1.json`, `dc_reconciled_v2.pkl`) |
 | `python scripts/ac_field.py --ref-tile 21` | aligned waveform (AC) field — 27S: `--ref-tile 43`; 15S: `--ref-tile 15 --f0-band 10` |
-| `python scripts/make_figure8alt_v3.py`, `python scripts/make_figure9alt_v3.py` | figures 8 and 9 (after the two above) |
-| `python scripts/ac_estimate.py` | joint (D, η) estimate — slow (tens of minutes) |
-| `pip install -e ".[gui]"` then `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"` | read-only viewer (napari; video playback needs the extras archive) |
+| `python scripts/make_figure8alt_v3.py`, `python scripts/make_figure_ac_field.py` | DC figure (measured vs Poiseuille) and the measured AC field (after the two above) |
+| `python scripts/mech/make_figure9alt_v3.py` | modelling: measured vs RC-network AC field (`plexusmech`) |
+| `python scripts/mech/ac_estimate.py` | modelling: joint (D, η) estimate — slow (tens of minutes) |
+| `pip install -e ".[gui]"` then `plexusflow view "$PLEXUSFLOW_STAGE"` | read-only viewer (napari; video playback needs the extras archive) |
+
+From Python, a release is opened with `plexusflow.release.load_release(path)` (graph, DC and AC results, carved
+network, tiles, checksum verification); modelling code should go through it rather than reading files directly.
 
 Working without Python: `graph/export/` in a release holds the graph, every measurement and the per-tile heart rates as
 CSV + npz (`SCHEMA.md` explains the columns); `results/` holds the reconciled flows and the waveform field as CSV.
@@ -121,17 +125,24 @@ only comparable across tiles whose phase uncertainty is ≤ 30° (`results/summa
 ## Repository layout (2026-10)
 
 ```text
-src/plexusflow/
+src/plexusflow/      measurement → conservative flow field (paper 1)
   analyze/       optical flow + Kloosterman per-vessel batch (per-measurement `quality` record)
-  reconcile/     DC: reliability scale, carved network, reliability-weighted IRLS projection, passive flow
-  ac/            AC: Option-A harmonic field, two-port network model, likelihood, group-corrected (D, η) estimate
-  ...            graph I/O, viewer, CLI and the upstream stages
+  reconcile/     DC: reliability scale, carve, carved network, reliability-weighted IRLS projection, passive flow
+  ac/            AC: Option-A harmonic field (tile time gauge, junction residuals, phase-determined vessels)
+  release.py     read-only loader for frozen data releases (schema-versioned)
+  viewer/        napari viewer: `plexusflow view` (read-only) / `plexusflow workbench` (fresh OF, tagging, edits)
+  legacy/        2026-09 tile_normalize / KCL path, kept to reproduce old figures; unused by pipeline and viewer
+  ...            graph I/O, CLI and the upstream stages
+src/plexusmech/      modelling on top of a reconstruction (paper 2) — imports plexusflow, never the reverse
+  ac/            two-port network model, likelihood, group-corrected (D, η) estimate
+  tl/            transmission-line simulator (`plexusmech simulate`); viewer/ backend for the Simulate tab
 scripts/         pipeline drivers, run in order:
   dc_reconcile.py                  → results/reliability_model_v1.json, results/dc_reconciled_v2.pkl
   ac_field.py                      → results/ac_field_v2.pkl
-  ac_estimate.py                   → results/ac_group_bc_estimate.pkl, figures/ac/
-  make_dc_emergent_figure_v2.py, make_figure8alt_v3.py     DC figures
+  make_dc_emergent_figure_v2.py, make_figure8alt_v3.py, make_figure_ac_field.py     reconstruction figures
   make_release.py                  → frozen, self-contained data release of a stage
+  mech/ac_estimate.py              → results/ac_group_bc_estimate.pkl, figures/ac/
+  mech/make_figure9alt_v3.py       measured vs RC-network figure
 examples/        quickstart.py — graph → reconciliation → plots
 docs/            methods notes (docs/dc_method.md)
 ```
