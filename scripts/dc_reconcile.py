@@ -30,6 +30,9 @@ def main():
              f"{len(V)} V nodes: total {V.sum():+.2f} nL/s ({np.sum(V < 0)} withdrawing, {np.sum(V > 0)} injecting)")
     print(f"[3] IRLS {D['n_iter']} iterations;  inflow {met['total_in']:.2f} nL/s (L {met['inj_L']:.2f} / R {met['inj_R']:.2f}, "
           f"withdrawing carve nodes {met['n_withdraw']});  {v_txt}")
+    un = D["unstable"]
+    print(f"    reproducibility: {'converged' if D['converged'] else 'limit cycle, averaged'}; unstable vessels {un.sum()} of {len(un)} "
+          f"({np.sum(un & im)} measured, {np.sum(un & ~im)} unmeasured)")
     print(f"    moved median {met['move_p50']:.2f}, sign flips {met['flips']:.1%};  passive corr {met['corr_lin']:.3f} "
           f"(log {met['corr_log']:.3f}), shuffled radii {D['shuffled_corr']:.3f};  loop share {met['loop_share']:.2f}")
     paths.RESULTS.mkdir(parents=True, exist_ok=True)

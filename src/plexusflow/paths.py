@@ -27,8 +27,28 @@ MOSAIC = next((p for p in (STAGE / "fuse" / "organ_fusion_close.tif", STAGE / "f
 
 def load_graph(path=None):
     """Load the measured graph (networkx gpickle).  Graphs are pickled with numpy 1.x so that every environment can read
-    them; numpy 2 reads them fine but warns about the old ``numpy.core`` module path — silenced here."""
+    them; numpy 2 reads them fine but warns about the old ``numpy.core`` module path — silenced here.  Release graphs
+    keep their Q(t) traces in export/traces.npz; they are re-attached here (`attach_external_traces`)."""
     import pickle, warnings
+    p = Path(path or GRAPH)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        return pickle.loads(Path(path or GRAPH).read_bytes())
+        G = pickle.loads(p.read_bytes())
+    return attach_external_traces(G, p)
+
+
+def attach_external_traces(G, graph_path):
+    """Release graphs store each measurement's Q(t) once, in ``G.graph['external_traces']`` (an npz next to the graph,
+    key ``m<meas_id>``), not inside the pickle.  Put them back on the measurements so all code sees ``m['Q_t']``."""
+    rel = G.graph.get("external_traces")
+    if not rel:
+        return G
+    import numpy as np
+    Z = np.load(Path(graph_path).parent / rel)
+    for *_, d in G.edges(data=True):
+        for m in d.get("measurements_piv") or []:
+            if m.get("Q_t") is None and m.get("meas_id") is not None:
+                k = f"m{m['meas_id']}"
+                if k in Z.files:
+                    m["Q_t"] = Z[k]
+    return G

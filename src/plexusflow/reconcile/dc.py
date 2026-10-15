@@ -15,7 +15,8 @@ from .network import carved_domain, project, emergent, passive, metrics, EPS_UNI
 PX_UM = 1.7
 
 
-def reconcile_dc(G, model, M, dom=None, damping=0.3, tol=1e-6, max_iter=500, n_shuffle=10, seed=0):
+def reconcile_dc(G, model, M, dom=None, damping=0.3, tol=1e-6, max_iter=500, n_shuffle=10, seed=0, n_avg=100,
+                 n_ens=8, perturb=1e-9, stable_rtol=0.02):
     dom = dom or carved_domain(G)
     win = {}
     for (t, e), m in M.items():
@@ -27,17 +28,39 @@ def reconcile_dc(G, model, M, dom=None, damping=0.3, tol=1e-6, max_iter=500, n_s
     for i, e in enumerate(sub):
         if e in win:
             m, c = win[e]; Qm[i], C[i], imaged[i], tile_w[i] = m["Q"], c, True, m["tile"]
-    s0 = 0.01 * np.median(np.abs(Qm[imaged])); Cw = np.where(imaged, C, 1.0); ref = None; n_it = 0
-    for n_it in range(1, max_iter + 1):
-        w = np.ones_like(Qm) if ref is None else 1 / (Cw ** 2 * ref ** 2 + s0 ** 2)
-        w = np.where(imaged, w / np.median(w[imaged]), EPS_UNIMAGED)
-        new = project(Qm, w, dom)
-        if ref is None:
-            ref = new; continue
-        upd = damping * new + (1 - damping) * ref; ch = np.linalg.norm(upd - ref) / np.linalg.norm(upd); ref = upd
-        if ch < tol:
-            break
-    Qp = ref; fb = emergent(Qp, dom)
+    s0 = 0.01 * np.median(np.abs(Qm[imaged])); Cw = np.where(imaged, C, 1.0)
+    from collections import deque
+
+    def irls(q):
+        """One reweighted projection run → (cycle-averaged Q', iterations, converged)."""
+        ref = None; tail = deque(maxlen=n_avg); n_it = 0
+        for n_it in range(1, max_iter + 1):
+            w = np.ones_like(q) if ref is None else 1 / (Cw ** 2 * ref ** 2 + s0 ** 2)
+            w = np.where(imaged, w / np.median(w[imaged]), EPS_UNIMAGED)
+            new = project(q, w, dom)
+            if ref is None:
+                ref = new; continue
+            upd = damping * new + (1 - damping) * ref; ch = np.linalg.norm(upd - ref) / np.linalg.norm(upd); ref = upd
+            tail.append(ref)
+            if ch < tol:
+                return ref, n_it, True
+        return np.array(tail).mean(axis=0), n_it, False
+
+    # The reweighting (weights ∝ 1/(c²Q'² + s0²)) settles into a limit cycle rather than converging, and for ~0.1–2 % of
+    # vessels (unmeasured loop flows, near-zero vessels) its outcome is sensitive to rounding: a 1e-9 perturbation of the
+    # data moves them by percent-level amounts or flips their direction (found by reproducing the releases on another
+    # numpy).  So: an ensemble of n_ens runs on the data perturbed by `perturb` (fixed seeds), each averaged over its
+    # last n_avg iterates.  Q' = ensemble mean (exactly conservative — an average of conservative fields); Qp_sd = spread;
+    # `unstable` = runs disagree in direction or spread > stable_rtol·|Q'|.  Unflagged vessels reproduce to < 1 % with no
+    # direction changes across independent ensembles (27S: 99th pct 0.3 %).
+    runs = []
+    for k in range(n_ens):
+        q = Qm if k == 0 else Qm * (1 + perturb * np.random.default_rng(1000 + k).standard_normal(me))
+        runs.append(irls(q))
+    E = np.array([r[0] for r in runs]); n_it = runs[0][1]; converged = all(r[2] for r in runs)
+    Qp = E.mean(axis=0); Qp_sd = E.std(axis=0)
+    unstable = (np.any(E > 0, axis=0) & np.any(E < 0, axis=0)) | (Qp_sd > stable_rtol * np.maximum(np.abs(Qp), 1e-6))
+    fb = emergent(Qp, dom)
     rg = np.array([G.edges[e]["radius"] for e in sub], float)
     def _median_rkl(e):
         r = [m["R_kl_um"] / PX_UM for m in G.edges[e].get("measurements_piv") or [] if m.get("R_kl_um") and np.isfinite(m["R_kl_um"])]
@@ -51,4 +74,5 @@ def reconcile_dc(G, model, M, dom=None, damping=0.3, tol=1e-6, max_iter=500, n_s
     return dict(model=model, edges=sub, nodes=dom["nodes"], Qm=Qm, Qp=Qp, Qs=Qs, fb=fb,
                 sigma=np.sqrt(Cw ** 2 * Qp ** 2 + s0 ** 2), c=C, imaged=imaged, tile=tile_w, radius=r, length=L,
                 inj=dom["inj"], out=dom["out"], side=dom["side"], metrics=met, shuffled_corr=shuf,
-                n_iter=n_it, sigma0_floor=s0, dom=dom)
+                n_iter=n_it, sigma0_floor=s0, dom=dom,
+                converged=converged, Qp_sd=Qp_sd, unstable=unstable, n_ens=n_ens)
