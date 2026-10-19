@@ -2,8 +2,9 @@
 
 The counterpart of fig 6 v2 (per-tile scaling) for the conservative reconciliation; the whole-organ field itself is fig 8.
   top  per-tile flow → reliability + one measurement per vessel → conservation-constrained reconciliation → Q′ (fig 8)
-  a    reliability is calibrated on data: observed net flux at simultaneously imaged (same-tile) junctions inside the carve
-       vs the imbalance the reliability model predicts, √(Σ y² c² + σ0²)
+  a    reliability is calibrated on data: at simultaneously imaged (same-tile) junctions inside the carve the true flows
+       conserve, so the observed net flux is measurement error; its size vs the expected RMS imbalance from the error
+       model, √(Σ c² y² + σ0²) (errors ≈ c|y|, independent) — c_T, c_f, c_a are fitted so that these agree
   b    choosing among repeated measurements: one vessel seen in several tiles — each tile's image (vessel mask, ±R tube,
        mean flow coloured by |cos θ| to the centreline), Q(t), mean and reliability c; the smallest c is used (winner),
        the others are held out; the reconciled Q′ of that vessel
@@ -126,11 +127,12 @@ def main():
         if s_.sum() > 20:
             cen.append(np.median(pred[s_])); rms.append(np.sqrt(np.mean(obs[s_] ** 2)))
             bs = [np.sqrt(np.mean(rng.choice(obs[s_], s_.sum()) ** 2)) for _ in range(200)]; lo.append(np.percentile(bs, 5)); hi_.append(np.percentile(bs, 95))
-    ax.scatter(pred[ok], np.abs(obs[ok]), s=3, color="0.75", alpha=0.4, label="|net flux| at one junction")
-    ax.errorbar(cen, rms, yerr=[np.array(rms) - lo, np.array(hi_) - rms], fmt="o-", color="#d62728", lw=2, ms=6, label="RMS net flux (binned, 90 % CI)")
+    ax.scatter(pred[ok], np.abs(obs[ok]), s=3, color="0.75", alpha=0.4, label="observed |net flux|, one junction")
+    ax.errorbar(cen, rms, yerr=[np.array(rms) - lo, np.array(hi_) - rms], fmt="o-", color="#d62728", lw=2, ms=6, label="observed RMS imbalance (binned, 90 % CI)")
     l0, l1 = np.percentile(pred[ok], [1, 99.5]); ax.plot([l0, l1], [l0, l1], "k--", lw=1, label="1 : 1")
     ax.set_xscale("log"); ax.set_yscale("log"); ax.set_ylim(l0 * 0.05, l1 * 5); ax.legend(fontsize=10, loc="upper left")
-    ax.set_xlabel("imbalance predicted by the reliability model (nL/s)", fontsize=11); ax.set_ylabel("observed net flux at the junction (nL/s)", fontsize=11)
+    ax.set_xlabel("expected RMS junction imbalance from measurement uncertainty (nL/s)\n" "$\\sqrt{\\sum_{e\\in j} c_e^2\\,y_e^2+\\sigma_0^2}$   (errors ≈ c|y|, independent; true flows conserve)", fontsize=11)
+    ax.set_ylabel("observed |net flux| at the junction (nL/s)", fontsize=11)
     ax.set_title(f"a   Reliability is calibrated on {len(pred)} simultaneously imaged junctions", loc="left", fontsize=13, fontweight="bold")
 
     # b
