@@ -2,7 +2,8 @@
 
 The counterpart of fig 6 v2 (per-tile scaling) for the conservative reconciliation; the whole-organ field itself is fig 8.
   top  per-tile flow → reliability + one measurement per vessel → conservation-constrained reconciliation → Q′ (fig 8)
-  a    reliability is calibrated on data: at simultaneously imaged (same-tile) junctions inside the carve the true flows
+  a    reliability (c = c0 + c_f (1 − f) + c_a (1 − align)) is calibrated on data, with held-out coverage (whole tiles
+       left out, 5 folds): at simultaneously imaged (same-tile) junctions inside the carve the true flows
        conserve, so the observed net flux is measurement error; its size vs the expected RMS imbalance from the error
        model, √(Σ c² y² + σ0²) (errors ≈ c|y|, independent) — c_T, c_f, c_a are fitted so that these agree
   b    choosing among repeated measurements: one vessel seen in several tiles — each tile's image (vessel mask, ±R tube,
@@ -12,7 +13,7 @@ The counterpart of fig 6 v2 (per-tile scaling) for the conservative reconciliati
        vessels) and measured directions reversed, for weights relative to the measured value, uniform weights, and
        weights relative to the reconciled flow (production) — same winners
   d    what reconciliation does to the measurements: measured vs reconciled flow per vessel, coloured by c
-Example vessel (b), by rule: measured in ≥ 3 tiles; winner c in the best 25 %; reconciled within 25 % of the winner;
+Example vessel (b): --vessel u,v (paper: 61854,61988), else by rule: measured in ≥ 3 tiles; winner c in the best 25 %; reconciled within 25 % of the winner;
 largest spread of the tile means (same direction), then largest |Q′|.
 In Methods / supplement: w_e = 1/(c_e² Q_e² + s0²); the damped re-weighting and its long-run mean (fig_dc_method).
 Reads the graph and results/{dc_reconciled_v2.pkl, reliability_model_v1.json}; writes figures/fig6v3/fig6v3.{png,pdf}.
@@ -38,6 +39,7 @@ import plexusflow.paths as _paths
 from plexusflow.reconcile import measurement_table, same_tile_junctions, carved_domain, c_of
 from plexusflow.reconcile.network import project, EPS_UNIMAGED
 from plexusflow.reconcile.harmonics import phasors, FS
+from plexusflow.reconcile.reliability import _arrays, _fit_theta
 
 OUT_DIR = _paths.FIGURES / "fig6v3"
 T0 = time.time()
@@ -60,7 +62,10 @@ def main():
             meas_by_e.setdefault(eix[e], []).append((t, m, c_of(model, m)))
     log(f"{_paths.STAGE.name}: {nE} carved vessels, {int(im.sum())} measured, {len(M)} measurements")
 
-    # example vessel (b)
+    # example vessel (b): --vessel u,v, else by rule
+    import argparse
+    ap = argparse.ArgumentParser(); ap.add_argument("--vessel", default=None, help="example vessel 'u,v' for panel b (default: rule)")
+    args = ap.parse_args()
     c25 = np.percentile(c[im], 25); best = None
     for i, ms in meas_by_e.items():
         if len(ms) < 3 or not im[i] or c[i] > c25 or abs(Qp[i] - y[i]) > 0.25 * abs(y[i]):
@@ -71,7 +76,11 @@ def main():
         key = (round(np.log(np.abs(qs).max() / np.abs(qs).min()), 1), abs(Qp[i]))
         if best is None or key > best[0]:
             best = (key, i)
-    i0 = best[1]; e0 = E[i0]; ms0 = sorted(meas_by_e[i0], key=lambda r: r[2])
+    i0 = best[1]
+    if args.vessel:
+        u_, v_ = (int(x) for x in args.vessel.split(",")); i0 = eix.get((u_, v_), eix.get((v_, u_)))
+        assert i0 is not None and len(meas_by_e.get(i0, [])) >= 2, f"vessel {args.vessel} is not a carved vessel with ≥ 2 measurements"
+    e0 = E[i0]; ms0 = sorted(meas_by_e[i0], key=lambda r: r[2])
     log(f"  example vessel {e0}: " + ", ".join(f"tile {t} y {m['Q']:+.3f} c {cc:.2f}" for t, m, cc in ms0) + f";  Q′ {Qp[i0]:+.3f}")
 
     # (a) calibration
@@ -82,6 +91,20 @@ def main():
             mm = [M[(t, e)] for e, _ in j]
             pred.append(np.sqrt(sum((m["Q"] * c_of(model, m)) ** 2 for m in mm) + model["sigma0"] ** 2)); obs.append(sum(s * M[(t, e)]["Q"] for e, s in j))
     pred, obs = np.array(pred), np.array(obs)
+    # held-out coverage: fit c0, c_f, c_a with whole tiles left out (5 folds), z = net flux / expected RMS imbalance
+    tl = sorted({t for t, _ in M}); JJ = []
+    for t in tl:
+        JJ += [(t, j) for j in same_tile_junctions(G, t, {e for (tt, e) in M if tt == t})]
+    ix_, dc_, f_, al_, _, net_ = _arrays(JJ, M, tl); jt = np.array([tl.index(t) for t, _ in JJ])
+    fold = np.random.default_rng(0).permutation(np.arange(len(tl)) % 5)[jt]; zs = []
+    for k in range(5):
+        def part(sel):
+            jj = np.flatnonzero(sel); rm = -np.ones(len(JJ), int); rm[jj] = np.arange(len(jj)); kp = sel[ix_]
+            return (rm[ix_[kp]], dc_[kp], f_[kp], al_[kp], np.zeros(kp.sum(), int), net_[jj])
+        th = np.exp(_fit_theta(part(fold != k), 1).x); d = part(fold == k); cc = th[0] + th[1] * (1 - d[2]) + th[2] * (1 - d[3])
+        zs.append(d[5] / np.sqrt(np.bincount(d[0], d[1] ** 2 * cc ** 2, minlength=len(d[5])) + th[3] ** 2))
+    zc = np.concatenate(zs); cov = (np.sqrt(np.mean(zc ** 2)), np.mean(np.abs(zc) < 1), np.mean(np.abs(zc) < 1.96), np.mean(np.abs(zc) > 3))
+    log(f"  held-out coverage (by tile, {len(JJ)} junctions): RMS(z) {cov[0]:.3f}, |z|<1 {cov[1]:.3f}, |z|<1.96 {cov[2]:.3f}, |z|>3 {cov[3]:.4f}")
 
     # (c) weighting ablation (same winners)
     held = [(eix[k[1]], m["Q"]) for k, m in M.items() if k[1] in eix and im[eix[k[1]]] and k[0] != win[eix[k[1]]]]
@@ -131,6 +154,10 @@ def main():
     ax.errorbar(cen, rms, yerr=[np.array(rms) - lo, np.array(hi_) - rms], fmt="o-", color="#d62728", lw=2, ms=6, label="observed RMS imbalance (binned, 90 % CI)")
     l0, l1 = np.percentile(pred[ok], [1, 99.5]); ax.plot([l0, l1], [l0, l1], "k--", lw=1, label="1 : 1")
     ax.set_xscale("log"); ax.set_yscale("log"); ax.set_ylim(l0 * 0.05, l1 * 5); ax.legend(fontsize=10, loc="upper left")
+    fm = "c = {:.2f} + {:.2f} (1 − f) + {:.2f} (1 − align)".format(model.get("c0", np.nan), model["c_f"], model["c_a"])
+    ax.text(0.97, 0.04, f"{fm}\nwhole tiles held out:  {100 * cov[1]:.1f} % within 1σ (Gaussian 68.3 %)\n"
+            f"{100 * cov[2]:.1f} % within 1.96σ (95 %);  {100 * cov[3]:.1f} % beyond 3σ (0.3 %)", transform=ax.transAxes, ha="right", va="bottom",
+            fontsize=9.5, bbox=dict(fc="white", ec="0.6"))
     ax.set_xlabel("expected RMS junction imbalance from measurement uncertainty (nL/s)\n" "$\\sqrt{\\sum_{e\\in j} c_e^2\\,y_e^2+\\sigma_0^2}$   (errors ≈ c|y|, independent; true flows conserve)", fontsize=11)
     ax.set_ylabel("observed |net flux| at the junction (nL/s)", fontsize=11)
     ax.set_title(f"a   Reliability is calibrated on {len(pred)} simultaneously imaged junctions", loc="left", fontsize=13, fontweight="bold")
