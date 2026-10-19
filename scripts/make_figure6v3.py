@@ -5,11 +5,13 @@
        imaged within one tile) / (expected RMS imbalance from the uncertainty model), with the model fitted on the other
        tiles (5 folds by tile); standard normal overlaid; RMS, coverage within 1 and 1.96, beyond 3
   b    reconciliation enforces conservation at a junction: one junction, its vessels' measured means y (all from one tile),
-       uncertainty c, reconciled Q′, and the net flux before (Σ s y) and after (Σ s Q′ = 0)
+       uncertainty c, reconciled Q′, and the net flux before (Σ s y) and after (Σ s Q′ = 0); on the tile image each vessel's mean
+       flow (arrows, coloured by alignment) and the cross-sections the Kloosterman fit kept (ticks; recomputed with the batch settings)
   c    globally the corrections are modest: measured vs reconciled mean flow per vessel, coloured by c
   d    one measurement per vessel: a vessel seen in several tiles, the lowest-c measurement is kept (--vessel u,v;
        paper 61854,61988)
-Junction (b), by rule: interior node, 3–4 vessels, every vessel measured with its winner from the same tile, measured
+Junction (b), by rule: interior node with 3 vessels — one short (1.5–3 radii), two ≥ 3 radii; measurement centrelines ≥ 0.5 R apart
+away from the ends; largest c ≥ 2 × smallest; every vessel measured with its winner from the same tile, measured
 imbalance ≥ 10 % of the throughput, the vessel with the largest c takes ≥ 70 % of the total |correction|, the others move
 ≤ 10 %, no direction change; then largest throughput.
 Methods / supplement: c = c0 + c_f (1 − f) + c_a (1 − align); weights w = 1/(c² Q² + s0²); weighting ablation; damping.
@@ -80,9 +82,12 @@ def main():
     if args.junction is not None:
         jn = nix[args.junction]
     else:
-        best = None
+        cands = []
         for n, es in inc.items():
-            if n in bnd or not 3 <= len(es) <= 4 or not all(im[i] for i, _ in es) or len({int(win[i]) for i, _ in es}) != 1:
+            if n in bnd or len(es) != 3 or not all(im[i] for i, _ in es) or len({int(win[i]) for i, _ in es}) != 1:
+                continue
+            asp = sorted(G.edges[E[i]]["length"] / G.edges[E[i]]["radius"] for i, _ in es)
+            if not (1.5 <= asp[0] < 3 and asp[1] >= 3):                     # one short vessel, two of medium length or more
                 continue
             thr = sum(abs(y[i]) for i, _ in es) / 2; imb = abs(sum(s * y[i] for i, s in es))
             if thr <= 0 or imb < 0.10 * thr:
@@ -91,8 +96,33 @@ def main():
             rel = np.array([abs(Qp[i] - y[i]) / abs(y[i]) for i, _ in es])
             if corr[w_] < 0.7 * corr.sum() or np.any(np.delete(rel, w_) > 0.10) or np.any(np.sign(Qp[[i for i, _ in es]]) != np.sign(y[[i for i, _ in es]])):
                 continue
-            if best is None or thr > best[0]:
-                best = (thr, n)
+            if cs.max() < 2 * cs.min():                                    # a real difference in reliability to reconcile
+                continue
+            cands.append((thr, n))
+        kcache = {}
+        def separate(n):
+            """The vessels' measurement centrelines stay ≥ 0.5 R apart away from the junction (no shared flow ridge)."""
+            t = int(win[inc[n][0][0]])
+            if t not in kcache:
+                kcache[t] = pickle.load(gzip.open(_paths.STAGE / "batch_kl_inputs" / f"tile_{t}.pkl.gz"))["kl_inputs"]
+            cls = []
+            for i, _ in inc[n]:
+                ki = kcache[t].get(E[i]) or kcache[t].get(E[i][::-1])
+                if ki is None:
+                    return False
+                cl = np.asarray(ki["cl_used"], float) + np.asarray(ki["roi_offset"], float); cls.append((cl, float(ki["R_prior_px"])))
+            for a in range(3):
+                for b in range(a + 1, 3):
+                    (ca, Ra), (cb, Rb) = cls[a], cls[b]
+                    core = lambda cl: cl[len(cl) // 5: len(cl) - len(cl) // 5] if len(cl) >= 10 else cl
+                    if np.min(np.linalg.norm(core(ca)[:, None] - cb[None], axis=2)) < 0.5 * min(Ra, Rb):
+                        return False
+            return True
+        for thr_, n_ in sorted(cands, reverse=True):
+            log(f"     candidate {nodes[n_]}: throughput {thr_:.3f}, c " + "/".join(f"{c[i]:.2f}" for i, _ in inc[n_]) + ", aspect "
+                + "/".join(f"{G.edges[E[i]]['length'] / G.edges[E[i]]['radius']:.1f}" for i, _ in inc[n_]) + f", separate {separate(n_)}")
+        best = next(((thr, n) for thr, n in sorted(cands, reverse=True) if separate(n)), None)
+        log(f"  (b) {len(cands)} junctions match the rule; first with separate centrelines (largest throughput) used")
         jn = best[1]
     es = inc[jn]; tj = int(win[es[0][0]])
     before = sum(s * y[i] for i, s in es); after = sum(s * Qp[i] for i, s in es); thr = sum(abs(y[i]) for i, _ in es) / 2
@@ -126,44 +156,74 @@ def main():
             transform=ax.transAxes, ha="right", va="top", fontsize=11, bbox=dict(fc="white", ec="0.6"))
     ax.set_title("a   Same-tile junctions calibrate the local uncertainty", loc="left", fontsize=13, fontweight="bold")
 
-    # b
-    gB = gs[1, 1].subgridspec(1, 2, width_ratios=[1.1, 1], wspace=0.06); ax = fig.add_subplot(gB[0])
-    mos = tifffile.imread(str(_paths.MOSAIC)); mos = mos.mean(-1) if mos.ndim == 3 else mos; Hm = mos.shape[0]
-    def seg(i):
-        e = E[i]; d = G.edges[e]; p = np.asarray(d["path"], float) if d.get("path") is not None else np.array([[G.nodes[n]["x"], G.nodes[n]["y"]] for n in e])
-        return np.column_stack([p[:, 0], Hm - p[:, 1]])
-    jx, jy = G.nodes[nodes[jn]]["x"], Hm - G.nodes[nodes[jn]]["y"]; pts = np.vstack([seg(i) for i, _ in es]); hw = max(np.abs(pts - [jx, jy]).max() * 0.9, 30)
-    ax.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98)); ax.set_xlim(jx - hw, jx + hw); ax.set_ylim(jy + hw, jy - hw); ax.axis("off")
+    # b — one image: the junction in tile tj, each vessel's mean flow (arrows, coloured by alignment) and its kept cross-sections
+    from plexusflow.analyze.kloosterman import kloosterman_scalar
+    from plexusflow.analyze.centerline import _centerline_geometry
+    gB = gs[1, 1].subgridspec(1, 2, width_ratios=[1.15, 1], wspace=0.06); ax = fig.add_subplot(gB[0])
+    kdj = pickle.load(gzip.open(_paths.STAGE / "batch_kl_inputs" / f"tile_{tj}.pkl.gz"))["kl_inputs"]
+    img = tifffile.imread(str(_paths.STAGE / "tiles" / "maxmed" / f"vid{tj}_maxmed.tif")).astype(float)
+    vinfo = []
     for k, (i, s) in enumerate(es):
-        p = seg(i); col = VESSEL_COLORS[k]
-        if np.linalg.norm(p[0] - [jx, jy]) > np.linalg.norm(p[-1] - [jx, jy]):
-            p = p[::-1]                                            # start at the junction
-        ax.plot(p[:, 0], p[:, 1], color=col, lw=5, solid_capstyle="round", alpha=0.9)
-        q_ = max(1, min(len(p) - 2, int(0.45 * (len(p) - 1)))); m_ = p[q_]
-        dirn = p[min(len(p) - 1, q_ + 2)] - p[max(0, q_ - 2)]; dirn /= max(np.linalg.norm(dirn), 1e-9)      # local tangent, away from the junction
-        out_flow = s * Qp[i] > 0                                   # + = leaves the junction
-        a0, a1 = (m_ - 0.11 * hw * dirn, m_ + 0.11 * hw * dirn) if out_flow else (m_ + 0.11 * hw * dirn, m_ - 0.11 * hw * dirn)
-        ax.annotate("", xy=a1, xytext=a0, arrowprops=dict(arrowstyle="simple,head_length=0.9,head_width=0.9,tail_width=0.35", fc="white", ec="black", lw=1.2,
-                                                          mutation_scale=22), zorder=6)
-        ax.text(*(m_ + 0.12 * hw * np.array([-dirn[1], dirn[0]])), str(k + 1), color="white", fontsize=14, fontweight="bold", ha="center", va="center",
-                bbox=dict(boxstyle="circle,pad=0.25", fc=col, ec="white"))
-    ax.plot(jx, jy, "o", color="white", mec="k", ms=11)
-    ax.text(0.02, 0.02, f"tile {tj}; arrows: reconciled direction", transform=ax.transAxes, fontsize=10, color="white",
-            bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
+        ki = kdj.get(E[i]) or kdj.get(E[i][::-1]); vf = np.asarray(ki["vfield_mean"], float); cl = np.asarray(ki["cl_used"], float); R = float(ki["R_prior_px"])
+        kr = kloosterman_scalar(vf, cl, R, dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="median_band", median_lo=0.5, median_hi=1.5,
+                                R_slice_lo=0.5, R_slice_hi=2.0, min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0,
+                                mask=ki["ridge_mask_roi"])                 # the batch settings (plexusflow.analyze.profile); reproduces n_kept
+        vinfo.append(dict(vf=vf, cl=cl, R=R, off=np.asarray(ki["roi_offset"], float), vm=np.asarray(kr["valid_mask"], bool)))
+    allcl = np.vstack([v["cl"] + v["off"] for v in vinfo]); Rmax = max(v["R"] for v in vinfo)
+    lo2, hi3 = allcl.min(0) - 1.3 * Rmax, allcl.max(0) + 1.3 * Rmax; side = max(hi3 - lo2) / 2; ctr = (lo2 + hi3) / 2
+    r_lo, r_hi = int(max(ctr[0] - side, 0)), int(min(ctr[0] + side, img.shape[0])); c_lo, c_hi = int(max(ctr[1] - side, 0)), int(min(ctr[1] + side, img.shape[1]))
+    crop = img[r_lo:r_hi, c_lo:c_hi]
+    ax.imshow(img, cmap="gray", vmin=np.percentile(crop, 2), vmax=np.percentile(crop, 99.5))
+    for k, ((i, s), v) in enumerate(zip(es, vinfo)):
+        col = VESSEL_COLORS[k]; cl = v["cl"] + v["off"]; R = v["R"]; vf = v["vf"]; H, W = vf.shape[:2]; _, tang, nrm = _centerline_geometry(v["cl"])
+        ax.plot(cl[:, 1], cl[:, 0], color=col, lw=3.0, alpha=0.95, zorder=4)
+        for q in np.flatnonzero(v["vm"])[::2]:                         # kept cross-sections (every 2nd): short ticks across the vessel
+            a_, b_ = cl[q] - 0.3 * R * nrm[q], cl[q] + 0.3 * R * nrm[q]
+            ax.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white", lw=1.3, zorder=5, solid_capstyle="butt")
+        qs = np.arange(1, len(v["cl"]) - 1, max(2, len(v["cl"]) // 9))     # flow sampled near the centreline only
+        ys_, xs_ = [], []
+        for q in qs:
+            for rho_ in (-0.45 * R, 0.45 * R):
+                ys_.append(int(round(v["cl"][q, 0] + rho_ * nrm[q, 0]))); xs_.append(int(round(v["cl"][q, 1] + rho_ * nrm[q, 1])))
+        ys_, xs_ = np.array(ys_), np.array(xs_); okp = (ys_ >= 0) & (ys_ < H) & (xs_ >= 0) & (xs_ < W); ys_, xs_ = ys_[okp], xs_[okp]
+        if len(ys_):
+            nn = np.argmin((v["cl"][None, :, 0] - ys_[:, None]) ** 2 + (v["cl"][None, :, 1] - xs_[:, None]) ** 2, axis=1)
+            U, V = vf[ys_, xs_, 0], vf[ys_, xs_, 1]; sp_ = np.hypot(U, V); Ls = np.nanpercentile(sp_, 90) or 1.0; L_ = 0.55 * R
+            ax.quiver(xs_ + v["off"][1], ys_ + v["off"][0], U / Ls * L_, V / Ls * L_, np.abs(V * tang[nn, 0] + U * tang[nn, 1]) / np.maximum(sp_, 1e-12),
+                      cmap="RdYlGn", clim=(0, 1), angles="xy", scale_units="xy", scale=1, width=0.006, headwidth=4, zorder=6)
+        q_ = len(cl) // 3; lab = cl[q_] + 1.0 * R * nrm[q_]
+        ax.text(lab[1], lab[0], str(k + 1), color="white", fontsize=13, fontweight="bold", ha="center", va="center", zorder=8,
+                bbox=dict(boxstyle="circle,pad=0.22", fc=col, ec="white"))
+    ends = np.array([[v["cl"][0] + v["off"], v["cl"][-1] + v["off"]] for v in vinfo]); best_j = None
+    for cand in ends.reshape(-1, 2):                                  # junction ≈ the centreline ends that meet
+        d_ = sum(np.min(np.linalg.norm(e_ - cand, axis=1)) for e_ in ends)
+        if best_j is None or d_ < best_j[0]:
+            best_j = (d_, cand)
+    jpt = np.mean([e_[np.argmin(np.linalg.norm(e_ - best_j[1], axis=1))] for e_ in ends], axis=0)
+    ax.plot(jpt[1], jpt[0], "o", color="white", mec="k", ms=10, zorder=9)
+    ax.set_xlim(c_lo, c_hi); ax.set_ylim(r_hi, r_lo); ax.axis("off")
+    ax.text(0.02, 0.02, f"tile {tj}:  arrows = mean flow (green: along the vessel);  white ticks = cross-sections kept", transform=ax.transAxes, fontsize=9.5,
+            color="white", bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
     axt = fig.add_subplot(gB[1]); axt.axis("off")
-    rows = [[str(k + 1), f"{s * y[i]:+.3f}", f"{c[i]:.2f}", f"{s * Qp[i]:+.3f}"] for k, (i, s) in enumerate(es)]
-    tab = axt.table(cellText=rows, colLabels=["vessel", "measured y\n(nL/s)", "uncertainty\nc", "reconciled Q′\n(nL/s)"], loc="upper center",
-                    cellLoc="center", bbox=[0.0, 0.42, 1.0, 0.5])
-    tab.auto_set_font_size(False); tab.set_fontsize(11.5)
+    rows = []
+    for k, ((i, s), v) in enumerate(zip(es, vinfo)):
+        m = M[(tj, E[i])]
+        rows.append([str(k + 1), f"{s * y[i]:+.3f}", f"{v['vm'].sum()}/{len(v['vm'])}", f"{m['align']:.2f}", f"{c[i]:.2f}", f"{s * Qp[i]:+.3f}"])
+    tab = axt.table(cellText=rows, colLabels=["", "measured\ny (nL/s)", "kept\nsections", "align-\nment", "c", "reconciled\nQ′ (nL/s)"],
+                    loc="upper center", cellLoc="center", bbox=[0.0, 0.44, 1.0, 0.48])
+    tab.auto_set_font_size(False); tab.set_fontsize(11)
+    for j_ in range(6):
+        tab[(0, j_)].get_text().set_fontsize(9.5)
     for k in range(len(es)):
         tab[(k + 1, 0)].set_facecolor(VESSEL_COLORS[k]); tab[(k + 1, 0)].get_text().set_color("white"); tab[(k + 1, 0)].get_text().set_fontweight("bold")
-    for j_ in range(4):
+    for j_ in range(6):
         tab[(0, j_)].set_facecolor("#e8eef5")
-    axt.text(0.5, 0.36, "sign: + leaves the junction", ha="center", fontsize=9.5, color="0.35", transform=axt.transAxes)
-    axt.text(0.5, 0.24, f"measured:  $\\sum s\\,y$ = {before:+.3f} nL/s\n({abs(before) / thr:.0%} of the flow through the junction)", ha="center", va="center", fontsize=11.5,
+    axt.text(0.5, 0.38, "sign: + leaves the junction", ha="center", fontsize=9.5, color="0.35", transform=axt.transAxes)
+    axt.text(0.5, 0.26, f"measured:  $\\sum s\\,y$ = {before:+.3f} nL/s\n({abs(before) / thr:.0%} of the flow through the junction)", ha="center", va="center", fontsize=11.5,
              transform=axt.transAxes)
-    axt.text(0.5, 0.09, "reconciled:  $\\sum s\\,Q'$ = 0", ha="center", va="center", fontsize=12, fontweight="bold", transform=axt.transAxes)
-    axt.text(0.5, -0.04, "the least reliable vessel (largest c)\nabsorbs most of the correction", ha="center", va="center", fontsize=10.5, style="italic", transform=axt.transAxes)
+    axt.text(0.5, 0.11, "reconciled:  $\\sum s\\,Q'$ = 0", ha="center", va="center", fontsize=12, fontweight="bold", transform=axt.transAxes)
+    axt.text(0.5, -0.02, "the least reliable vessel (largest c)\nabsorbs most of the correction", ha="center", va="center",
+             fontsize=10.5, style="italic", transform=axt.transAxes)
     fig.text(gs[1, 1].get_position(fig).x0, gs[1, 1].get_position(fig).y1 + 0.012, "b   Reconciliation enforces conservation at each junction", fontsize=13, fontweight="bold")
 
     # c
