@@ -21,6 +21,7 @@ import pickle
 from pathlib import Path
 
 import numpy as np
+import tifffile
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -79,23 +80,37 @@ def main():
         t, e = keys[i]; m = M[keys[i]]; q = np.asarray(raw[keys[i]]["Q_t"], float); tt = np.arange(len(q)) / FS; f0 = tf0.get(t)
         ki = kl_of(t, e)
         if ki is not None:
-            vf = np.asarray(ki["vfield_mean"], float); sp = np.hypot(vf[..., 0], vf[..., 1]); cl = np.asarray(ki["cl_used"], float)
-            axv.imshow(sp, cmap="magma", origin="upper"); H, W = sp.shape; st_ = max(2, int(min(H, W) / 14))
-            yy, xx = np.mgrid[0:H:st_, 0:W:st_]
-            # vf[..., 0] = column (x) and vf[..., 1] = row (y, downward) displacement; angles='xy' draws them in image coordinates
-            U, V = vf[0:H:st_, 0:W:st_, 0], vf[0:H:st_, 0:W:st_, 1]; L = np.nanpercentile(np.hypot(U, V), 95) or 1.0
-            axv.quiver(xx, yy, U / L * st_ * 0.9, V / L * st_ * 0.9, color="white", angles="xy", scale_units="xy", scale=1, width=0.006, alpha=0.9)
-            axv.plot(cl[:, 1], cl[:, 0], color="#4fc3f7", lw=1.6)
-            if "ridge_mask_roi" in ki:
-                axv.contour(np.asarray(ki["ridge_mask_roi"], float), levels=[0.5], colors="#4fc3f7", linewidths=0.8, linestyles="--")
-            axv.set_xlim(0, W); axv.set_ylim(H, 0)
+            # image frame: rows downward from the top (imshow origin='upper'); flow vf[..., 0] = column (x) and
+            # vf[..., 1] = row (y, downward) displacement, as returned by OpenCV — drawn with angles='xy' in image coordinates
             from plexusflow.analyze.mosaic_piv import _flow_quality
-            rq = _flow_quality(vf, cl, float(ki["R_prior_px"]))["align"]
-            print(f"[fig_reliability]   {lab}: tile {t} edge {e} stored align {al(m):.2f}, recomputed from the plotted field {rq:.2f}; "
-                  f"centreline span (row, col) {np.round(cl[-1] - cl[0], 1)}", flush=True)
+            from plexusflow.analyze.centerline import _centerline_geometry
+            vf = np.asarray(ki["vfield_mean"], float); cl = np.asarray(ki["cl_used"], float); R = float(ki["R_prior_px"])
+            H, W = vf.shape[:2]; r0, c0 = ki["roi_offset"]
+            tif = _paths.STAGE / "tiles" / "maxmed" / f"vid{t}_maxmed.tif"
+            if tif.exists():
+                img = tifffile.imread(str(tif)).astype(float)[r0:r0 + H, c0:c0 + W]
+                axv.imshow(img, cmap="gray", vmin=np.percentile(img, 2), vmax=np.percentile(img, 99.5))
+            if ki.get("ridge_mask_roi") is not None:
+                axv.contour(np.asarray(ki["ridge_mask_roi"], float), levels=[0.5], colors="#4fc3f7", linewidths=0.8, linestyles="--")
+            rr, cc = np.mgrid[0:H, 0:W]; tube = np.zeros((H, W), bool)
+            for p_ in cl:
+                tube |= (rr - p_[0]) ** 2 + (cc - p_[1]) ** 2 <= R ** 2
+            axv.contour(tube.astype(float), levels=[0.5], colors="#ffd54f", linewidths=1.2)
+            axv.plot(cl[:, 1], cl[:, 0], color="#ffd54f", lw=1.0, ls=":")
+            _, tang, _ = _centerline_geometry(cl); st_ = max(2, int(min(H, W) / 16)); ys_, xs_ = np.mgrid[0:H:st_, 0:W:st_]
+            ys_, xs_ = ys_[tube[0:H:st_, 0:W:st_]], xs_[tube[0:H:st_, 0:W:st_]]
+            if len(ys_):
+                nn = np.argmin((cl[None, :, 0] - ys_[:, None]) ** 2 + (cl[None, :, 1] - xs_[:, None]) ** 2, axis=1)
+                U, V = vf[ys_, xs_, 0], vf[ys_, xs_, 1]; sp = np.hypot(U, V)
+                cos = np.abs(V * tang[nn, 0] + U * tang[nn, 1]) / np.maximum(sp, 1e-12); L = np.nanpercentile(sp, 90) or 1.0
+                q_ = axv.quiver(xs_, ys_, U / L * st_ * 1.1, V / L * st_ * 1.1, cos, cmap="RdYlGn", clim=(0, 1), angles="xy",
+                                scale_units="xy", scale=1, width=0.009)
+            rq = _flow_quality(vf, cl, R)["align"]
+            print(f"[fig_reliability]   {lab}: tile {t} edge {e} stored align {al(m):.2f}, recomputed from the plotted field {rq:.2f}", flush=True)
+            axv.set_xlim(-0.5, W - 0.5); axv.set_ylim(H - 0.5, -0.5)
         axv.set_xticks([]); axv.set_yticks([])
         if r_ == 0:
-            axv.set_title("time-mean optical flow (speed, arrows)\ncentreline and vessel mask in blue", fontsize=10)
+            axv.set_title("tile image, vessel mask (blue dashed), ±R tube (yellow)\nmean flow in the tube, coloured by |cos θ| to the centreline", fontsize=9.5)
         axv.set_ylabel(lab, fontsize=10.5, fontweight="bold")
         axq.plot(tt, q, color="0.45", lw=0.6)
         if f0:
