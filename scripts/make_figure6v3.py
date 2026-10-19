@@ -11,7 +11,7 @@
   d    one measurement per vessel: a vessel seen in several tiles, the lowest-c measurement is kept (--vessel u,v;
        paper 61854,61988)
 Junction (b), by rule: interior node with 3 vessels — one short (1.5–3 radii), two ≥ 3 radii; measurement centrelines ≥ 0.5 R apart
-away from the ends; largest c ≥ 2 × smallest; every vessel measured with its winner from the same tile, measured
+away from the ends; no vessel's kept cross-sections all in one end zone (outer 20 %); largest c ≥ 2 × smallest; every vessel measured with its winner from the same tile, measured
 imbalance ≥ 10 % of the throughput, the vessel with the largest c takes ≥ 70 % of the total |correction|, the others move
 ≤ 10 %, no direction change; then largest throughput.
 Methods / supplement: c = c0 + c_f (1 − f) + c_a (1 − align); weights w = 1/(c² Q² + s0²); weighting ablation; damping.
@@ -117,6 +117,15 @@ def main():
                     core = lambda cl: cl[len(cl) // 5: len(cl) - len(cl) // 5] if len(cl) >= 10 else cl
                     if np.min(np.linalg.norm(core(ca)[:, None] - cb[None], axis=2)) < 0.5 * min(Ra, Rb):
                         return False
+            from plexusflow.analyze.kloosterman import kloosterman_scalar
+            for (i, _), (cl, R) in zip(inc[n], cls):                      # no vessel whose kept cross-sections all sit in one end zone
+                ki = kcache[t].get(E[i]) or kcache[t].get(E[i][::-1]); cl0 = np.asarray(ki["cl_used"], float)
+                vm = np.asarray(kloosterman_scalar(np.asarray(ki["vfield_mean"], float), cl0, R, mask=ki["ridge_mask_roi"], dt=1, slice_window=2, n_bins=60,
+                                                   fit_fraction=1.0, outlier_mode="median_band", median_lo=0.5, median_hi=1.5, R_slice_lo=0.5, R_slice_hi=2.0,
+                                                   min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0)["valid_mask"], bool)
+                sa = np.r_[0, np.cumsum(np.hypot(*np.diff(cl0, axis=0).T))]; kp = sa[vm]
+                if len(kp) == 0 or (kp <= 0.2 * sa[-1]).all() or (kp >= 0.8 * sa[-1]).all():
+                    return False
             return True
         for thr_, n_ in sorted(cands, reverse=True):
             log(f"     candidate {nodes[n_]}: throughput {thr_:.3f}, c " + "/".join(f"{c[i]:.2f}" for i, _ in inc[n_]) + ", aspect "
