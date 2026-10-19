@@ -1,22 +1,24 @@
 """Option-A AC field on the carved network, from the measured graph and the DC reconciliation.
 
 1. Per Kloosterman-valid measurement in the f0 band: a0, H1..H3 (LSQ at the tile f0; Q_t signed along the
-   oriented path u→v), per-beat H1 scatter, coherence ρ.
+   oriented path u→v), per-beat H1 scatter, coherence ρ, waveform repeatability (harmonics.beat_uncertainty).
 2. Tile time gauge ψ_t: angular synchronisation of H1 over edges measured in ≥ 2 in-band tiles (ρ ≥ 0.1);
    leading eigenvector of Σ_e u_a ū_b (u = unit H1), ψ_ref = 0.  Applied coherently: H_k → e^{−ikψ_t} H_k.
 3. AC winner per carved edge: |a0| > Q_DET, ρ ≥ RHO_MIN, sign(a0) = sign(Q'); smallest per-beat H1 scatter.
 4. Ĥ_k = (|Q'_e| / |a0|) e^{−ikψ} H_k,raw   (u→v frame).
+Per winner also stored: a0 (its own mean, for the measurement-supported cut |Q'|/|a0|) and the per-beat uncertainties
+var_phi (2 × nE: H1, H2 phase, rad²) and var_logpi (log10 pulsatility) used to weight the AC likelihood.
 """
 from __future__ import annotations
 import numpy as np
-from ..reconcile.harmonics import phasors, coherence, beat_scatter
+from ..reconcile.harmonics import phasors, coherence, beat_scatter, beat_uncertainty
 
 REF_TILE, F0_BAND, RHO_MIN, Q_DET, RHO_SYNC = 21, 0.15, 0.02, 1e-4, 0.1
 
 
 def _measure(q, f0):
     q = np.asarray(q, float); a0, H = phasors(q, f0)
-    return a0, H, beat_scatter(q, f0), coherence(q, f0)
+    return a0, H, beat_scatter(q, f0), coherence(q, f0), beat_uncertainty(q, f0)
 
 
 def _sync(pa, pb, pw, pz, nT, ref_i, start=None, n_iter=2000):
@@ -55,8 +57,8 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
                 items.append((e, m["tile_id"], m["Q_t"]))
     res = Parallel(n_jobs=n_jobs)(delayed(_measure)(q, tf0[t]) for e, t, q in items)
     meas = {}
-    for (e, t, _), (a0, H, sc, rho) in zip(items, res):
-        meas.setdefault(e, {})[t] = dict(a0=a0, H=H, scatter=sc, rho=rho)
+    for (e, t, _), (a0, H, sc, rho, bu) in zip(items, res):
+        meas.setdefault(e, {})[t] = dict(a0=a0, H=H, scatter=sc, rho=rho, var_phi=(bu["var_phi1"], bu["var_phi2"]), var_logpi=bu["var_logpi"])
 
     # Tile time gauge ψ (phase synchronisation over vessels seen in two tiles).  Every pair of valid measurements of the
     # same vessel contributes u_a·conj(u_b) (unit H1 phasors) weighted by ρ_a·ρ_b, so weakly pulsatile tiles still link
@@ -93,7 +95,8 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
     gauge_sd_deg = {t: float(sd[ti[t]]) for t in tiles}
 
     Qp = dc["Qp"]; nE = len(sub); Hf = np.full((3, nE), np.nan + 0j); win_t = np.full(nE, -1); elig = np.zeros(nE, bool)
-    sc_w = np.full(nE, np.nan); rho_w = np.full(nE, np.nan)
+    sc_w = np.full(nE, np.nan); rho_w = np.full(nE, np.nan); a0_w = np.full(nE, np.nan)
+    vphi_w = np.full((2, nE), np.nan); vpi_w = np.full(nE, np.nan)
     for e, d in meas.items():
         i = eix[e]
         cand = [(t, x) for t, x in d.items() if abs(x["a0"]) > Q_DET and x["rho"] >= RHO_MIN and np.sign(x["a0"]) == np.sign(Qp[i])]
@@ -105,9 +108,19 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
         # so they rank after any candidate that has one, by harmonic coherence ρ
         t, x = min(cand, key=lambda c: (0, c[1]["scatter"]) if np.isfinite(c[1]["scatter"]) else (1, -c[1]["rho"]))
         Hf[:, i] = abs(Qp[i]) / abs(x["a0"]) * x["H"] * np.exp(-1j * np.arange(1, 4) * psi[t]); win_t[i] = t; elig[i] = True
-        sc_w[i] = x["scatter"]; rho_w[i] = x["rho"]
-    return dict(edges=sub, H=Hf, elig=elig, tile=win_t, psi=psi, scatter=sc_w, rho=rho_w, f_ref=f_ref, band=sorted(band),
-                Qp=Qp, gauge_sd_deg=gauge_sd_deg, _meas=meas, _pairs=pairs)
+        sc_w[i] = x["scatter"]; rho_w[i] = x["rho"]; a0_w[i] = x["a0"]; vphi_w[:, i] = x["var_phi"]; vpi_w[i] = x["var_logpi"]
+    return dict(edges=sub, H=Hf, elig=elig, tile=win_t, psi=psi, scatter=sc_w, rho=rho_w, a0=a0_w, var_phi=vphi_w,
+                var_logpi=vpi_w, f_ref=f_ref, band=sorted(band), ref_tile=ref_tile, Qp=Qp, gauge_sd_deg=gauge_sd_deg,
+                _meas=meas, _pairs=pairs)
+
+
+def supported(field, ratio_max=5.0):
+    """AC-eligible vessels whose waveform is not promoted to a reconciled flow > ratio_max × its own measured mean
+    (|Q'|/|a0| ≤ ratio_max): the measurement-supported set the mechanics are fitted on.  Conservation-dominated vessels
+    (e.g. the vein stubs, whose DC is under-read) keep their waveform for boundary forcing but are not fitted."""
+    a0 = field["a0"]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return field["elig"] & (np.abs(field["Qp"]) / np.abs(a0) <= ratio_max)
 
 
 def sync_mismatch(field, aligned=True):
