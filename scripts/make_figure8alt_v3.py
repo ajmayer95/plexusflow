@@ -61,7 +61,7 @@ def main():
     rec = dict(length=D['length'])
     Qp, Qs, fb, imaged, r = D['Qp'], D['Qs'], D['fb'], D['imaged'], D['radius']
     K = r ** 4 / D['length']; nodes = dom['nodes']
-    print(f"[fig8alt_v3] conservation-imputed edges drawn faint: {int((~imaged).sum())} unmeasured + "
+    print(f"[fig8alt_v3] unmeasured / conservation-dominated edges drawn faint: {int((~imaged).sum())} unmeasured + "
           f"{int((imaged & (np.abs(Qp) > IMPUTED_RATIO * np.abs(D['Qm']))).sum())} measured with |Q'| > {IMPUTED_RATIO:g}× measurement")
     print(f"[fig8alt_v3] carved: {len(idx)} edges ({int(imaged.sum())} measured); "
           f"Σ in {fb[dom['inj']].sum():.2f}; V {fb[dom['out']]}")
@@ -93,7 +93,7 @@ def main():
         for n in G.graph['boundary']['V']:
             ax.plot(*nxy[n], marker='*', color='#1f5fa8', ms=15, markeredgecolor='white', mew=1.2, zorder=6)
 
-    # conservation-imputed: unmeasured, or reconciled flow > IMPUTED_RATIO × its own measurement (the flow there is set by
+    # faint: unmeasured, or conservation-dominated (reconciled flow > IMPUTED_RATIO × its own measurement (the flow there is set by
     # conservation, not by the measurement — e.g. the venous return routed to the head-end veins; repeat measurements of one
     # vessel differ by a median ~2×, so that routing is not determined by the data)
     imputed = ~imaged | (np.abs(Qp) > IMPUTED_RATIO * np.abs(D['Qm']))
@@ -118,7 +118,7 @@ def main():
     axA = fig.add_subplot(gs[0, 0]); bg(axA); field(axA, Qp, True); markers(axA)
     axA.set_title("A   Conservative mean-flow field  $|Q'|$", fontsize=14, loc='left', fontweight='bold', pad=6)
     axA.plot([], [], color=cAB(0.6), lw=0.6, alpha=0.35,
-             label=f'conservation-imputed (unmeasured, or > {IMPUTED_RATIO:g}× its measurement)')
+             label=f'faint: unmeasured or conservation-dominated (|Q′| > {IMPUTED_RATIO:g}|y|)')
     axA.legend(loc='lower right', fontsize=10, frameon=True)
 
     # B
