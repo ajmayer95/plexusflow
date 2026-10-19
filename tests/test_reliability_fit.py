@@ -28,3 +28,16 @@ def test_fit_independent_of_start():
     a, b = _fit_theta(d, nT, jitters=(0.0,)), _fit_theta(d, nT, jitters=(0.7,))
     assert a.success and b.success
     assert np.max(np.abs(np.exp(a.x) - np.exp(b.x)) / np.exp(a.x)) < 1e-4
+
+
+def test_single_c0_fit_recovers_constant():
+    rng = np.random.default_rng(1); c0, cf, ca, s0 = 0.12, 0.3, 1.4, 1e-3; idx, dc, f, al, net = [], [], [], [], []
+    for k in range(2000):
+        q = rng.lognormal(-3, 1, 3); ff = rng.uniform(0.2, 1, 3); aa = rng.uniform(0.5, 1, 3)
+        v = np.sum((q * (c0 + cf * (1 - ff) + ca * (1 - aa))) ** 2) + s0 ** 2
+        idx += [k] * 3; dc += list(q); f += list(ff); al += list(aa); net.append(rng.normal(0, np.sqrt(v)))
+    d = tuple(np.array(x) for x in (idx, dc, f, al, np.zeros(len(idx), int), net))
+    r = _fit_theta(d, 1)
+    assert r.success
+    est = np.exp(r.x[:3])
+    assert abs(est[1] / cf - 1) < 0.25 and abs(est[2] / ca - 1) < 0.25 and est[0] < 0.3

@@ -3,7 +3,7 @@
 Modules:
   - ``harmonics``    — per-trace DC + harmonic phasors, harmonic coherence ρ, per-beat H1 scatter
   - ``reliability``  — measurement table, same-tile junctions, reliability scale
-                        c = c_T(tile) + c_f (1 − f) + c_a (1 − align), fitted by ML on junction balance
+                        c = c0 + c_f (1 − f) + c_a (1 − align), fitted by ML on junction balance (per-tile c_T optional)
   - ``network``      — carved domain, conservative projection (B_I Q = 0), emergent boundary, passive flow
   - ``dc``           — the full DC reconciliation (winner = min c, reliability-weighted damped IRLS)
 

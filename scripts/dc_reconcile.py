@@ -1,6 +1,6 @@
 """DC reconciliation (final method, 2026-10-07) from the measured graph.
 
-1. Reliability scale c = c_T + c_f(1 − f) + c_a(1 − align), ML-fitted on same-tile junction balance.
+1. Reliability scale c = c0 + c_f(1 − f) + c_a(1 − align), ML-fitted on same-tile junction balance (--tile-terms: per-tile c_T).
 2. Per edge the Kloosterman-valid measurement with the smallest c; carved network; reliability-weighted damped IRLS
    projection onto B_I Q = 0; emergent boundary f = B Q'; passive comparison (consensus radii) + radius shuffle.
 See plexusflow.reconcile.  Writes results/reliability_model_v1.json and results/dc_reconciled_v2.pkl.
@@ -15,12 +15,17 @@ from plexusflow.reconcile import measurement_table, fit_reliability, reconcile_d
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--tile-terms", action="store_true", help="per-tile c_T (the pre-2026-10-19 model) instead of one c0")
+    a = ap.parse_args()
     G = paths.load_graph()
     M = measurement_table(G)
-    model, J = fit_reliability(G, M)
+    model, J = fit_reliability(G, M, tile_terms=a.tile_terms)
     cT = np.array(list(model["c_T"].values()))
     print(f"[1] reliability fit: {model['n_junctions']} junctions, {len(cT)} tiles:  c_f {model['c_f']:.2f}  c_a {model['c_a']:.2f}  "
-          f"σ0 {model['sigma0']:.4f}  c_T median {np.median(cT):.2f} [IQR {np.percentile(cT, 25):.2f}–{np.percentile(cT, 75):.2f}]")
+          f"σ0 {model['sigma0']:.4f}  " + (f"c0 {model['c0']:.3f}" if 'c0' in model else
+          f"c_T median {np.median(cT):.2f} [IQR {np.percentile(cT, 25):.2f}–{np.percentile(cT, 75):.2f}]"))
     D = reconcile_dc(G, model, M)
     dom, met, C, im = D.pop("dom"), D["metrics"], D["c"], D["imaged"]
     print(f"[2] carved network: {len(D['edges'])} edges, boundary {len(dom['inj'])} carve + {len(dom['out'])} V;  measured {im.sum()} "
