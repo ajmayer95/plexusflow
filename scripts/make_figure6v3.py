@@ -1,13 +1,11 @@
 """Figure 6 v3 — construction of a conservation-consistent reference field Q′ (the whole-organ field is fig. 8).
 
-  top  per-tile flow → one measurement per vessel → conservative reconciliation → reference field Q′
-  a    what the uncertainty c is: c = c0 + c_f (1 − f) + c_a (1 − align) over (fraction of cross-sections kept, alignment), every
-       vessel's kept measurement on it, the junction's vessels (b) marked; the fit (net flux at same-tile junctions) and its
-       held-out coverage (5 folds by tile) stated in the panel
-  b    reconciliation enforces conservation at a junction: one junction, its vessels' measured means y (all from one tile),
-       uncertainty c, reconciled Q′, each vessel's share of the correction, and the net flux before (Σ s y) and after (Σ s Q′ = 0); on the tile image each vessel's mean
-       flow (arrows, coloured by alignment) and the cross-sections the Kloosterman fit kept (ticks; recomputed with the batch settings)
-  c    globally the corrections are modest: measured vs reconciled mean flow per vessel, coloured by c
+  a    each measurement earns an error bar: three vessels of the junction's tile — a clean one, one with few usable cross-sections,
+       one whose flow is not along the vessel (lowest alignment with ≥ 40 % kept) — image crop with the kept cross-sections (ticks)
+       and the mean flow (arrows, coloured by alignment), fraction kept, alignment, c, and the measured flow ± c·|y|
+  b    conservation at one junction: the junction's vessels on the tile image; each flow measured ± c·|y| and reconciled; inflow vs
+       outflow stacked, measured (mismatch) and reconciled (equal)
+  c    across the organ, the relative correction |Q′ − y| / |y| per measured vessel, in five equal groups of c (quartiles, 10–90 %)
 Junction (b), by rule: interior node with 3 vessels — one short (1.5–3 radii), two ≥ 3 radii; measurement centrelines ≥ 0.5 R apart
 away from the ends; no vessel's kept cross-sections all in one end zone (outer 20 %); largest c ≥ 2 × smallest; every vessel measured with its winner from the same tile, measured
 imbalance ≥ 10 % of the throughput, the vessel with the largest c takes ≥ 70 % of the total |correction|, the others move
@@ -135,127 +133,142 @@ def main():
     log(f"  (b) junction {nodes[jn]} (tile {tj}): " + ", ".join(f"{E[i]} y {s * y[i]:+.3f} c {c[i]:.2f} Q′ {s * Qp[i]:+.3f}" for i, s in es)
         + f";  net {before:+.4f} → {after:+.1e} (throughput {thr:.3f})")
 
-    fig = plt.figure(figsize=(24, 9.6), facecolor="white")
-    gs = fig.add_gridspec(2, 3, height_ratios=[0.24, 1.0], width_ratios=[1, 1.85, 1], hspace=0.22, wspace=0.16, left=0.04, right=0.98, top=0.97, bottom=0.07)
-    ax0 = fig.add_subplot(gs[0, :]); ax0.axis("off"); ax0.set_xlim(0, 1); ax0.set_ylim(0, 1)
-    steps = [("Per-tile flow", "optical flow → mean flux of\neach vessel in each tile"),
-             ("Uncertainty per measurement", "c from the cross-sections kept and the\nflow–vessel alignment (a); lowest c kept"),
-             ("Conservative reconciliation", "$\\min_{B_I Q=0}\\;\\sum_e w_e\\,(Q_e-y_e)^2$,  $w_e = 1/(c_e Q_e)^2$\n\nimbalance shared in proportion to $(c_e Q_e)^2$ (b)"),
-             ("Reference field  $Q'$", "modest corrections (c);\nwhole organ: fig. 8")]
-    xs = np.linspace(0.01, 0.775, len(steps)); bw = 0.215
-    for k, (title, body) in enumerate(steps):
-        ax0.add_patch(FancyBboxPatch((xs[k], 0.04), bw, 0.92, boxstyle="round,pad=0.006,rounding_size=0.02", fc=plt.cm.Blues(0.15 + 0.15 * k), ec="#2b5c8a", lw=1.3))
-        ax0.text(xs[k] + bw / 2, 0.8, title, ha="center", va="center", fontsize=13, fontweight="bold")
-        ax0.text(xs[k] + bw / 2, 0.36, body, ha="center", va="center", fontsize=10.5)
-        if k < len(steps) - 1:
-            ax0.annotate("", xy=(xs[k + 1] - 0.004, 0.5), xytext=(xs[k] + bw + 0.004, 0.5), arrowprops=dict(arrowstyle="-|>", lw=2.2, color="#2b5c8a"))
-    cnorm = mcolors.LogNorm(*np.percentile(c[im], [1, 99])); CMAP = "viridis_r"
-
-    # a — what c is: the score over (fraction kept, alignment), every vessel's kept measurement on it, the junction's vessels marked
-    ax = fig.add_subplot(gs[1, 0]); c0, cf, ca = model["c0"], model["c_f"], model["c_a"]
-    fg, ag = np.meshgrid(np.linspace(0, 1, 201), np.linspace(0.2, 1, 161)); cg = c0 + cf * (1 - fg) + ca * (1 - ag)
-    ax.pcolormesh(fg, ag, cg, cmap=CMAP, norm=cnorm, shading="auto", alpha=0.85)
-    cs_ = ax.contour(fg, ag, cg, levels=[0.2, 0.3, 0.5, 0.75, 1.0], colors="white", linewidths=1.0)
-    ax.clabel(cs_, fmt=lambda v: f"c = {v:g}", fontsize=9.5, inline_spacing=3)
-    wm = [M[(int(win[i]), E[i])] for i in np.flatnonzero(im) if (int(win[i]), E[i]) in M]
-    ax.scatter([m["f"] for m in wm], [m["align"] if np.isfinite(m["align"]) else 1.0 for m in wm], s=3, color="k", alpha=0.3, lw=0)
-    for k, (i, s) in enumerate(es):
-        m = M[(tj, E[i])]; ax.plot(m["f"], m["align"], "o", ms=17, color=VESSEL_COLORS[k], mec="white", mew=1.5, zorder=6)
-        ax.text(m["f"], m["align"], str(k + 1), color="white", fontsize=11, fontweight="bold", ha="center", va="center", zorder=7)
-    ax.set_xlim(0, 1.01); ax.set_ylim(0.2, 1.025)
-    ax.set_xlabel("f  fraction of cross-sections kept", fontsize=11); ax.set_ylabel("flow–vessel alignment", fontsize=11)
-    ax.text(0.03, 0.03, f"$c = c_0 + c_f\\,(1-f) + c_a\\,(1-\\mathrm{{align}})$\n$c_0$ = {c0:.2f},  $c_f$ = {cf:.2f},  $c_a$ = {ca:.2f}\n"
-            f"σ = c·|Q|: a fractional uncertainty\nfitted to the net flux at {len(z)} junctions\nimaged within one tile; on held-out tiles\n"
-            f"{100 * cov[2]:.0f} % fall within ±1.96 σ\n\ndots: the kept measurement of each vessel ({len(wm)});\n1–3: the junction in b", transform=ax.transAxes, ha="left", va="bottom", fontsize=10, bbox=dict(fc="white", ec="0.6", alpha=0.92))
-    ax.set_title("a   Each measurement gets an uncertainty c", loc="left", fontsize=13, fontweight="bold")
-
-    # b — one image: the junction in tile tj, each vessel's mean flow (arrows, coloured by alignment) and its kept cross-sections
+    # ---- shared: Kloosterman kept cross-sections (batch settings) and drawing of one vessel
     from plexusflow.analyze.kloosterman import kloosterman_scalar
     from plexusflow.analyze.centerline import _centerline_geometry
-    gB = gs[1, 1].subgridspec(1, 2, width_ratios=[1.0, 1.05], wspace=0.05); ax = fig.add_subplot(gB[0])
+    KW = dict(dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="median_band", median_lo=0.5, median_hi=1.5, R_slice_lo=0.5,
+              R_slice_hi=2.0, min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0)   # reproduces n_kept
     kdj = pickle.load(gzip.open(_paths.STAGE / "batch_kl_inputs" / f"tile_{tj}.pkl.gz"))["kl_inputs"]
     img = tifffile.imread(str(_paths.STAGE / "tiles" / "maxmed" / f"vid{tj}_maxmed.tif")).astype(float)
-    vinfo = []
-    for k, (i, s) in enumerate(es):
-        ki = kdj.get(E[i]) or kdj.get(E[i][::-1]); vf = np.asarray(ki["vfield_mean"], float); cl = np.asarray(ki["cl_used"], float); R = float(ki["R_prior_px"])
-        kr = kloosterman_scalar(vf, cl, R, dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="median_band", median_lo=0.5, median_hi=1.5,
-                                R_slice_lo=0.5, R_slice_hi=2.0, min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0,
-                                mask=ki["ridge_mask_roi"])                 # the batch settings (plexusflow.analyze.profile); reproduces n_kept
-        vinfo.append(dict(vf=vf, cl=cl, R=R, off=np.asarray(ki["roi_offset"], float), vm=np.asarray(kr["valid_mask"], bool)))
-    allcl = np.vstack([v["cl"] + v["off"] for v in vinfo]); Rmax = max(v["R"] for v in vinfo)
-    lo2, hi3 = allcl.min(0) - 1.3 * Rmax, allcl.max(0) + 1.3 * Rmax; side = max(hi3 - lo2) / 2; ctr = (lo2 + hi3) / 2
-    r_lo, r_hi = int(max(ctr[0] - side, 0)), int(min(ctr[0] + side, img.shape[0])); c_lo, c_hi = int(max(ctr[1] - side, 0)), int(min(ctr[1] + side, img.shape[1]))
-    crop = img[r_lo:r_hi, c_lo:c_hi]
-    ax.imshow(img, cmap="gray", vmin=np.percentile(crop, 2), vmax=np.percentile(crop, 99.5))
-    for k, ((i, s), v) in enumerate(zip(es, vinfo)):
-        col = VESSEL_COLORS[k]; cl = v["cl"] + v["off"]; R = v["R"]; vf = v["vf"]; H, W = vf.shape[:2]; _, tang, nrm = _centerline_geometry(v["cl"])
-        ax.plot(cl[:, 1], cl[:, 0], color=col, lw=3.0, alpha=0.95, zorder=4)
-        for q in np.flatnonzero(v["vm"])[::2]:                         # kept cross-sections (every 2nd): short ticks across the vessel
-            a_, b_ = cl[q] - 0.3 * R * nrm[q], cl[q] + 0.3 * R * nrm[q]
-            ax.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white", lw=1.3, zorder=5, solid_capstyle="butt")
-        qs = np.arange(1, len(v["cl"]) - 1, max(2, len(v["cl"]) // 9))     # flow sampled near the centreline only
-        ys_, xs_ = [], []
-        for q in qs:
-            for rho_ in (-0.45 * R, 0.45 * R):
-                ys_.append(int(round(v["cl"][q, 0] + rho_ * nrm[q, 0]))); xs_.append(int(round(v["cl"][q, 1] + rho_ * nrm[q, 1])))
-        ys_, xs_ = np.array(ys_), np.array(xs_); okp = (ys_ >= 0) & (ys_ < H) & (xs_ >= 0) & (xs_ < W); ys_, xs_ = ys_[okp], xs_[okp]
-        if len(ys_):
-            nn = np.argmin((v["cl"][None, :, 0] - ys_[:, None]) ** 2 + (v["cl"][None, :, 1] - xs_[:, None]) ** 2, axis=1)
-            U, V = vf[ys_, xs_, 0], vf[ys_, xs_, 1]; sp_ = np.hypot(U, V); Ls = np.nanpercentile(sp_, 90) or 1.0; L_ = 0.55 * R
-            ax.quiver(xs_ + v["off"][1], ys_ + v["off"][0], U / Ls * L_, V / Ls * L_, np.abs(V * tang[nn, 0] + U * tang[nn, 1]) / np.maximum(sp_, 1e-12),
-                      cmap="RdYlGn", clim=(0, 1), angles="xy", scale_units="xy", scale=1, width=0.006, headwidth=4, zorder=6)
-        q_ = len(cl) // 3; lab = cl[q_] + 1.0 * R * nrm[q_]
-        ax.text(lab[1], lab[0], str(k + 1), color="white", fontsize=13, fontweight="bold", ha="center", va="center", zorder=8,
-                bbox=dict(boxstyle="circle,pad=0.22", fc=col, ec="white"))
-    ends = np.array([[v["cl"][0] + v["off"], v["cl"][-1] + v["off"]] for v in vinfo]); best_j = None
-    for cand in ends.reshape(-1, 2):                                  # junction ≈ the centreline ends that meet
-        d_ = sum(np.min(np.linalg.norm(e_ - cand, axis=1)) for e_ in ends)
-        if best_j is None or d_ < best_j[0]:
-            best_j = (d_, cand)
-    jpt = np.mean([e_[np.argmin(np.linalg.norm(e_ - best_j[1], axis=1))] for e_ in ends], axis=0)
-    ax.plot(jpt[1], jpt[0], "o", color="white", mec="k", ms=10, zorder=9)
-    ax.set_xlim(c_lo, c_hi); ax.set_ylim(r_hi, r_lo); ax.axis("off")
-    ax.text(0.02, 0.02, f"tile {tj}:  arrows = mean flow (green: along the vessel);  white ticks = cross-sections kept", transform=ax.transAxes, fontsize=9.5,
-            color="white", bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
-    axt = fig.add_subplot(gB[1]); axt.axis("off")
-    rows = []; dq = np.array([abs(Qp[i] - y[i]) for i, _ in es])
-    for k, ((i, s), v) in enumerate(zip(es, vinfo)):
-        m = M[(tj, E[i])]
-        rows.append([str(k + 1), f"{s * y[i]:+.3f}", f"{v['vm'].sum()}/{len(v['vm'])}", f"{m['align']:.2f}", f"{c[i]:.2f}", f"{s * Qp[i]:+.3f}", f"{dq[k] / dq.sum():.0%}"])
-    tab = axt.table(cellText=rows, colLabels=["", "measured\ny (nL/s)", "kept\nsections", "align-\nment", "c", "reconciled\nQ′ (nL/s)", "share of\ncorrection"],
-                    loc="upper center", cellLoc="center", bbox=[0.0, 0.44, 1.0, 0.48])
-    tab.auto_set_font_size(False); tab.set_fontsize(11)
-    for j_ in range(7):
-        tab[(0, j_)].get_text().set_fontsize(9.5)
-    for k in range(len(es)):
-        tab[(k + 1, 0)].set_facecolor(VESSEL_COLORS[k]); tab[(k + 1, 0)].get_text().set_color("white"); tab[(k + 1, 0)].get_text().set_fontweight("bold")
-    for j_ in range(7):
-        tab[(0, j_)].set_facecolor("#e8eef5")
-    axt.text(0.5, 0.38, "sign: + leaves the junction", ha="center", fontsize=9.5, color="0.35", transform=axt.transAxes)
-    axt.text(0.5, 0.26, f"measured:  $\\sum s\\,y$ = {before:+.3f} nL/s\n({abs(before) / thr:.0%} of the flow through the junction)", ha="center", va="center", fontsize=11.5,
-             transform=axt.transAxes)
-    axt.text(0.5, 0.11, "reconciled:  $\\sum s\\,Q'$ = 0", ha="center", va="center", fontsize=12, fontweight="bold", transform=axt.transAxes)
-    axt.text(0.5, -0.02, "each vessel absorbs the imbalance in proportion to $(c\\,Q')^2$:\nthe least reliable vessel takes most of the correction", ha="center", va="center",
-             fontsize=10.5, style="italic", transform=axt.transAxes)
-    fig.text(gs[1, 1].get_position(fig).x0, gs[1, 1].get_position(fig).y1 + 0.012, "b   Reconciliation enforces conservation at each junction", fontsize=13, fontweight="bold")
 
-    # c
-    ax = fig.add_subplot(gs[1, 2]); s_ = im & (np.abs(y) > 1e-5) & (np.abs(Qp) > 1e-5)
-    sc = ax.scatter(np.abs(y[s_]), np.abs(Qp[s_]), c=c[s_], s=4, cmap=CMAP, alpha=0.6, norm=cnorm)
-    fl = s_ & (np.sign(y) != np.sign(Qp)); ax.scatter(np.abs(y[fl]), np.abs(Qp[fl]), s=12, facecolors="none", edgecolors="k", lw=0.5, label=f"direction reversed ({fl.sum() / s_.sum():.1%})")
-    lo_, hi2 = 1e-5, np.abs(np.r_[y[s_], Qp[s_]]).max() * 2; ax.plot([lo_, hi2], [lo_, hi2], "k--", lw=0.8)
-    for k, (i, s) in enumerate(es):
-        ax.plot(abs(y[i]), abs(Qp[i]), "o", ms=10, color=VESSEL_COLORS[k], mec="white", mew=1.2)
-    ax.plot([], [], "o", color="0.4", ms=8, label="vessels of the junction in b")
-    ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlim(lo_, hi2); ax.set_ylim(lo_, hi2); ax.legend(fontsize=10, loc="upper left")
-    ax.set_xlabel("|y|  measured mean flow (nL/s)", fontsize=11); ax.set_ylabel("|Q′|  reconciled (nL/s)", fontsize=11)
-    cb = plt.colorbar(sc, ax=ax, fraction=0.045, pad=0.02); cb.set_label("uncertainty c", fontsize=11)
-    cb.set_ticks([t_ for t_ in (0.15, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5) if cnorm.vmin <= t_ <= cnorm.vmax]); cb.ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter("%g")); cb.ax.minorticks_off()
+    def vessel(e):
+        ki = kdj.get(e) or kdj.get(e[::-1]); vf = np.asarray(ki["vfield_mean"], float); cl = np.asarray(ki["cl_used"], float); R = float(ki["R_prior_px"])
+        vm = np.asarray(kloosterman_scalar(vf, cl, R, mask=ki["ridge_mask_roi"], **KW)["valid_mask"], bool)
+        return dict(vf=vf, cl=cl, R=R, off=np.asarray(ki["roi_offset"], float), vm=vm)
+
+    def draw(ax, v, col, pad=1.6, arrows=True, ticks=True):
+        cl = v["cl"] + v["off"]; R = v["R"]; vf = v["vf"]; H, W = vf.shape[:2]; _, tang, nrm = _centerline_geometry(v["cl"])
+        lo, hi = cl.min(0) - pad * R, cl.max(0) + pad * R; side = max(max(hi - lo) / 2, 3.5 * R); ctr = (lo + hi) / 2
+        r0, r1 = int(max(ctr[0] - side, 0)), int(min(ctr[0] + side, img.shape[0])); c0_, c1_ = int(max(ctr[1] - side, 0)), int(min(ctr[1] + side, img.shape[1]))
+        crop = img[r0:r1, c0_:c1_]; ax.imshow(img, cmap="gray", vmin=np.percentile(crop, 2), vmax=np.percentile(crop, 99.5))
+        ax.plot(cl[:, 1], cl[:, 0], color=col, lw=3.2, zorder=4, solid_capstyle="round")
+        if ticks:
+            for q in np.flatnonzero(v["vm"]):
+                a_, b_ = cl[q] - 0.75 * R * nrm[q], cl[q] + 0.75 * R * nrm[q]; ax.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white", lw=1.6, zorder=5)
+        if arrows:
+            qs = np.arange(1, len(v["cl"]) - 1, max(2, len(v["cl"]) // 7)); ys_, xs_ = [], []
+            for q in qs:
+                for rho_ in (-0.5 * R, 0.5 * R):
+                    ys_.append(int(round(v["cl"][q, 0] + rho_ * nrm[q, 0]))); xs_.append(int(round(v["cl"][q, 1] + rho_ * nrm[q, 1])))
+            ys_, xs_ = np.array(ys_), np.array(xs_); okp = (ys_ >= 0) & (ys_ < H) & (xs_ >= 0) & (xs_ < W); ys_, xs_ = ys_[okp], xs_[okp]
+            if len(ys_):
+                nn = np.argmin((v["cl"][None, :, 0] - ys_[:, None]) ** 2 + (v["cl"][None, :, 1] - xs_[:, None]) ** 2, axis=1)
+                U, V = vf[ys_, xs_, 0], vf[ys_, xs_, 1]; sp_ = np.hypot(U, V); Ls = np.nanpercentile(sp_, 90) or 1.0
+                ax.quiver(xs_ + v["off"][1], ys_ + v["off"][0], U / Ls * 0.8 * R, V / Ls * 0.8 * R, np.abs(V * tang[nn, 0] + U * tang[nn, 1]) / np.maximum(sp_, 1e-12),
+                          cmap="RdYlGn", clim=(0.3, 1), angles="xy", scale_units="xy", scale=1, width=0.012, headwidth=3.5, zorder=6)
+        ax.set_xlim(c0_, c1_); ax.set_ylim(r1, r0); ax.set_xticks([]); ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_edgecolor(col); sp.set_linewidth(3)
+
+    vinfo = [vessel(E[i]) for i, _ in es]
+    # the third example for (a): a vessel in the same tile, well sampled but with flow misaligned to its centreline
+    al = lambda m: m["align"] if np.isfinite(m["align"]) else 1.0
+    jset = {E[i] for i, _ in es}; mis = None
+    for i in np.flatnonzero(im & (win == tj)):
+        m = M.get((tj, E[i]))
+        if m is None or E[i] in jset or al(m) > 0.75 or m["f"] < 0.4:
+            continue
+        ki = kdj.get(E[i]) or kdj.get(E[i][::-1])
+        if ki is None or len(ki["cl_used"]) < 12:
+            continue
+        if mis is None or al(m) - 0.3 * m["f"] < mis[1]:
+            mis = (i, al(m) - 0.3 * m["f"])
+    ex = [(es[0][0], VESSEL_COLORS[0], "1", vinfo[0], "clean measurement"),
+          (es[1][0], VESSEL_COLORS[1], "2", vinfo[1], "few cross-sections usable")]
+    if mis is not None:
+        ex.append((mis[0], "#ff7f00", "x", vessel(E[mis[0]]), "flow not along the vessel"))
+    log(f"  (a) examples: " + ", ".join(f"{E[i]} f {M[(tj, E[i])]['f']:.2f} align {al(M[(tj, E[i])]):.2f} c {c[i]:.2f}" for i, *_ in ex))
+
+    fig = plt.figure(figsize=(20, 11.5), facecolor="white")
+    gs = fig.add_gridspec(2, 1, height_ratios=[0.72, 1.0], hspace=0.3, left=0.04, right=0.98, top=0.95, bottom=0.06)
+    c0, cf, ca = model["c0"], model["c_f"], model["c_a"]
+
+    # ---- a: what makes a measurement uncertain
+    gA = gs[0].subgridspec(1, len(ex), wspace=0.1); xmax = 1.05 * max(abs(y[j]) * (1 + c[j]) for j, *_ in ex)
+    for k, (i, col, lab, v, what) in enumerate(ex):
+        m = M[(tj, E[i])]; g2 = gA[k].subgridspec(1, 2, width_ratios=[1, 0.95], wspace=0.08); axv = fig.add_subplot(g2[0]); draw(axv, v, col)
+        g3 = g2[1].subgridspec(3, 1, height_ratios=[1.6, 0.5, 0.35], hspace=0.05); axt = fig.add_subplot(g3[0]); axt.axis("off")
+        axt.text(0, 1.0, f"{'vessel ' + lab if lab != 'x' else 'another vessel'}", fontsize=13, fontweight="bold", color=col, va="top", transform=axt.transAxes)
+        axt.text(0, 0.8, what, fontsize=12, style="italic", va="top", transform=axt.transAxes)
+        axt.text(0, 0.55, f"cross-sections kept  {int(v['vm'].sum())}/{len(v['vm'])}\nalignment  {al(m):.2f}", fontsize=11.5, va="top", transform=axt.transAxes, linespacing=1.5)
+        axt.text(0, 0.1, f"c = {c[i]:.2f}   (± {100 * c[i]:.0f} %)", fontsize=13, fontweight="bold", va="top", transform=axt.transAxes)
+        axe = fig.add_subplot(g3[1]); yy = abs(y[i]); sd = c[i] * yy
+        axe.errorbar([yy], [0], xerr=[sd], fmt="o", color=col, ms=9, capsize=7, lw=3)
+        axe.set_xlim(0, xmax); axe.set_ylim(-1, 1); axe.set_yticks([]); axe.spines[["left", "right", "top"]].set_visible(False)
+        axe.set_xlabel("measured flow (nL/s)", fontsize=10); axe.tick_params(labelsize=9)
+    fig.text(0.04, gs[0].get_position(fig).y1 + 0.012, "a   Each measurement earns an error bar from how well its flow field fits the vessel", fontsize=14, fontweight="bold")
+    fig.text(0.04, gs[0].get_position(fig).y0 - 0.03, f"white ticks: cross-sections kept;  arrows: mean flow (green = along the vessel)        "
+             f"c = {c0:.2f} + {cf:.2f}·(1 − fraction kept) + {ca:.2f}·(1 − alignment), calibrated on junctions imaged within one tile", fontsize=11, color="0.25")
+
+    # ---- b: conservation at the junction
+    gBC = gs[1].subgridspec(1, 2, width_ratios=[2.75, 1], wspace=0.16)
+    gB = gBC[0].subgridspec(1, 3, width_ratios=[0.8, 1.25, 0.95], wspace=0.25)
+    gBl = gB[0].subgridspec(1, 1); axj = fig.add_subplot(gBl[0])
+    allcl = np.vstack([v["cl"] + v["off"] for v in vinfo]); Rm = max(v["R"] for v in vinfo)
+    lo2, hi3 = allcl.min(0) - 1.3 * Rm, allcl.max(0) + 1.3 * Rm; side = max(hi3 - lo2) / 2; ctr = (lo2 + hi3) / 2
+    r_lo, r_hi = int(max(ctr[0] - side, 0)), int(min(ctr[0] + side, img.shape[0])); c_lo, c_hi = int(max(ctr[1] - side, 0)), int(min(ctr[1] + side, img.shape[1]))
+    crop = img[r_lo:r_hi, c_lo:c_hi]; axj.imshow(img, cmap="gray", vmin=np.percentile(crop, 2), vmax=np.percentile(crop, 99.5))
+    for k, v in enumerate(vinfo):
+        cl = v["cl"] + v["off"]; _, _, nrm = _centerline_geometry(v["cl"]); axj.plot(cl[:, 1], cl[:, 0], color=VESSEL_COLORS[k], lw=4, solid_capstyle="round")
+        q_ = len(cl) // 2; lb = cl[q_] + 1.3 * v["R"] * nrm[q_]
+        axj.text(lb[1], lb[0], str(k + 1), color="white", fontsize=14, fontweight="bold", ha="center", va="center", bbox=dict(boxstyle="circle,pad=0.25", fc=VESSEL_COLORS[k], ec="white"))
+    axj.set_xlim(c_lo, c_hi); axj.set_ylim(r_hi, r_lo); axj.set_xticks([]); axj.set_yticks([]); axj.set_title(f"the junction (tile {tj})", fontsize=12)
+
+    axf = fig.add_subplot(gB[1]); order = list(range(len(es)))
+    for k in order:
+        i, s = es[k]; yy, qq, sd = abs(y[i]), abs(Qp[i]), c[i] * abs(y[i]); yk = len(es) - 1 - k
+        axf.errorbar([yy], [yk], xerr=[sd], fmt="o", color=VESSEL_COLORS[k], ms=11, capsize=8, lw=3, zorder=3)
+        axf.plot([qq], [yk], "D", ms=12, color="k", mfc="white", mew=2.2, zorder=4)
+        if abs(qq - yy) > 0.15 * sd:
+            axf.annotate("", xy=(qq, yk - 0.22), xytext=(yy, yk - 0.22), arrowprops=dict(arrowstyle="-|>", lw=1.8, color="0.2"))
+        axf.text(-0.02, yk, f"{k + 1}  {'out' if s * y[i] > 0 else 'in '}", transform=axf.get_yaxis_transform(), ha="right", va="center", fontsize=13, fontweight="bold", color=VESSEL_COLORS[k])
+    axf.errorbar([], [], xerr=[], fmt="o", color="0.4", ms=9, capsize=6, lw=2.5, label="measured ± c·flow")
+    axf.plot([], [], "D", ms=10, color="k", mfc="white", mew=2, label="reconciled")
+    axf.set_yticks([]); axf.set_ylim(-0.7, len(es) - 0.3); axf.set_xlim(0, None); axf.legend(fontsize=11, loc="upper right", frameon=False)
+    axf.set_xlabel("flow (nL/s)", fontsize=12); axf.spines[["top", "right", "left"]].set_visible(False)
+    axf.set_title("each flow moves in proportion to its error bar", fontsize=12)
+
+    axb = fig.add_subplot(gB[2]); X = {"measured": y, "reconciled": Qp}
+    for xk, (nm, arr) in enumerate(X.items()):
+        for side_, sgn, dx in (("in", -1, -0.19), ("out", 1, 0.19)):
+            bot = 0.0
+            for k, (i, s) in enumerate(es):
+                if s * np.sign(y[i]) != sgn:
+                    continue
+                h = abs(arr[i]); axb.bar(xk + dx, h, bottom=bot, width=0.34, color=VESSEL_COLORS[k], ec="white", lw=1.5)
+                axb.text(xk + dx, bot + h / 2, str(k + 1), ha="center", va="center", color="white", fontsize=12, fontweight="bold"); bot += h
+            axb.text(xk + dx, bot + 0.002, side_, ha="center", va="bottom", fontsize=11.5)
+    axb.set_xticks([0, 1]); axb.set_xticklabels([f"measured\nin ≠ out  ({abs(before) / thr:.0%} mismatch)", "reconciled\nin = out"], fontsize=12)
+    axb.set_ylabel("flow (nL/s)", fontsize=12); axb.spines[["top", "right"]].set_visible(False); axb.set_xlim(-0.6, 1.6)
+    axb.set_title("conservation is enforced", fontsize=12)
+    fig.text(0.04, gs[1].get_position(fig).y1 + 0.04, "b   At each junction inflow must equal outflow: the mismatch goes to the least certain flows", fontsize=14, fontweight="bold")
+
+    # ---- c: over all vessels, the correction tracks c
+    axc = fig.add_subplot(gBC[1]); s_ = im & (np.abs(y) > 1e-5)
     with np.errstate(divide="ignore", invalid="ignore"):
-        a2 = (np.abs(Qp - y) / np.abs(y))[s_]
-    ax.text(0.97, 0.05, f"median correction {np.median(a2):.0%}\n(c < 0.3: {np.median(a2[c[s_] < 0.3]):.0%})", transform=ax.transAxes, ha="right", va="bottom",
-            fontsize=11, bbox=dict(fc="white", ec="0.6"))
-    ax.set_title("c   Globally, the corrections are modest", loc="left", fontsize=13, fontweight="bold")
+        rel = np.abs(Qp - y) / np.abs(y)
+    edges = np.quantile(c[s_], np.linspace(0, 1, 6)); grp, mids = [], []
+    for b0, b1 in zip(edges[:-1], edges[1:]):
+        sel = s_ & (c >= b0) & (c <= b1); grp.append(100 * rel[sel]); mids.append(np.median(c[sel]))
+    bp = axc.boxplot(grp, positions=range(len(grp)), widths=0.6, whis=(10, 90), showfliers=False, patch_artist=True, medianprops=dict(color="k", lw=2))
+    for k, b_ in enumerate(bp["boxes"]):
+        b_.set_facecolor(plt.cm.viridis_r(0.15 + 0.7 * k / (len(grp) - 1))); b_.set_alpha(0.8)
+    axc.set_xticks(range(len(grp))); axc.set_xticklabels([f"{a:.2f}–\n{b:.2f}" for a, b in zip(edges[:-1], edges[1:])], fontsize=10)
+    axc.set_xlabel("uncertainty c  (five equal groups of vessels)", fontsize=11.5); axc.set_ylabel("correction  |Q′ − y| / |y|  (%)", fontsize=11.5)
+    axc.set_yscale("log"); axc.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}")); axc.spines[["top", "right"]].set_visible(False)
+    axc.text(0.03, 0.97, f"{int(s_.sum())} measured vessels\nmedian correction {100 * np.nanmedian(rel[s_]):.0f} %\nboxes: quartiles; whiskers 10–90 %",
+             transform=axc.transAxes, ha="left", va="top", fontsize=10.5)
+    fig.text(gBC[1].get_position(fig).x0, gs[1].get_position(fig).y1 + 0.04, "c   Across the organ, corrections go to uncertain flows", fontsize=14, fontweight="bold")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT_DIR / "fig6v3.png", dpi=140, bbox_inches="tight", facecolor="white"); fig.savefig(OUT_DIR / "fig6v3.pdf", bbox_inches="tight", facecolor="white")
