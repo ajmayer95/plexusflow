@@ -1,6 +1,6 @@
 """Joint (D, η) estimate with the boundary forcing corrected per group, profiled by the same likelihood.
 
-Groups: left carve nodes, right carve nodes, V1, V2.  Each keeps its measured local-ratio pattern f0 and gets an
+Groups: left carve nodes, right carve nodes, left veins, right veins (split at the DA midline).  Each keeps its measured local-ratio pattern f0 and gets an
 amplitude correction per harmonic and ONE timing shift shared by the harmonics (coherent: the boundary pulse keeps
 its measured shape φ2 − 2φ1):
     s_g,k = exp(a_g,k + i k b_g)                     (12 parameters)
@@ -15,13 +15,21 @@ from scipy.optimize import minimize
 from .model import response
 from .likelihood import nll_vm, nll_t
 
-GROUPS = ("L carve", "R carve", "V1", "V2")
+GROUPS = ("L carve", "R carve", "L veins", "R veins")
 D_GRID = np.logspace(np.log10(2e-4), np.log10(1.2e-3), 14)
 ETA_GRID = np.round(np.arange(0.0, 0.61, 0.1), 2)
 
 
 def groups(C):
-    return np.r_[np.where(C["dom"]["side"] == "L", 0, 1), [2, 3]]
+    """Group index of every boundary node (order of dom['bnd'] = carve nodes, then V nodes): carve nodes and V nodes are
+    each split left / right of the DA midline.  Any number of V nodes; with one vein per side (21S) this equals the old
+    V1 / V2 grouping.  A group with no node keeps neutral parameters (it does not enter the forcing)."""
+    dom = C["dom"]; v_side = dom.get("side_out")
+    if v_side is None or len(v_side) != len(dom["out"]):
+        if len(dom["out"]) != 2:
+            raise ValueError("domain lacks 'side_out' for its V nodes; rebuild it with plexusflow.reconcile.carved_domain")
+        v_side = np.array(["L", "R"])
+    return np.r_[np.where(dom["side"] == "L", 0, 1), np.where(np.asarray(v_side) == "L", 2, 3)]
 
 
 def estimate(C, c, d_grid=D_GRID, eta_grid=ETA_GRID, progress=print):
