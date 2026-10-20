@@ -201,7 +201,16 @@ def main():
     gTop = gs[0].subgridspec(1, 2, width_ratios=[1.12, 1], wspace=0.16)
 
     def label(bbox_from, letter, heading):
-        b_ = bbox_from.get_position(fig); fig.text(b_.x0 - 0.015, b_.y1 + 0.022, letter, fontsize=11, fontweight="bold", va="bottom")
+        b_ = bbox_from.get_position(fig); fig.text(b_.x0 - 0.018, b_.y1 + 0.02, letter, fontsize=10, fontweight="bold", va="bottom")
+
+    UM_PX = 1.7                                            # tile pixel size (µm)
+
+    def scalebar(ax, um=20):
+        x0_, x1_ = ax.get_xlim(); y0_, y1_ = ax.get_ylim(); L = um / UM_PX; pad = 0.06 * (x1_ - x0_)
+        ax.plot([x1_ - pad - L, x1_ - pad], [y0_ - pad, y0_ - pad], color="white", lw=1.6, solid_capstyle="butt", zorder=8)
+        import matplotlib.patheffects as pe
+        ax.text(x1_ - pad - L / 2, y0_ - pad - 0.03 * (y0_ - y1_), f"{um} µm", color="white", fontsize=7, ha="center", va="bottom", zorder=8,
+                path_effects=[pe.withStroke(linewidth=1.5, foreground="0.15")])
 
     def crop_vessel(ax, v, col, side_R=3.6):
         cl = v["cl"] + v["off"]; R = v["R"]; vf = v["vf"]; H, W = vf.shape[:2]; _, tang, nrm = _centerline_geometry(v["cl"])
@@ -220,7 +229,7 @@ def main():
             U, V = vf[ys_, xs_, 0], vf[ys_, xs_, 1]; Ls = np.nanpercentile(np.hypot(U, V), 90) or 1.0
             ax.quiver(xs_ + v["off"][1], ys_ + v["off"][0], U / Ls * 0.85 * R, V / Ls * 0.85 * R, color=ARR, edgecolor="0.1", linewidth=0.4, angles="xy",
                       scale_units="xy", scale=1, width=0.014, headwidth=3.4, headlength=3.6, headaxislength=3.3, zorder=6)
-        ax.set_xlim(c0_, c1_); ax.set_ylim(r1, r0); ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xlim(c0_, c1_); ax.set_ylim(r1, r0); ax.set_xticks([]); ax.set_yticks([]); scalebar(ax)
         for sp in ax.spines.values():
             sp.set_linewidth(0.5); sp.set_color("0.5")
 
@@ -232,8 +241,8 @@ def main():
     xs_ = [0.5, 0.25, 0.75]; hdr_y, rows_y = 0.87, [0.65, 0.49, 0.33]
     axtab.text(xs_[1], hdr_y, "High quality", ha="center", va="center", fontsize=8.5, fontweight="bold", transform=T)
     axtab.text(xs_[2], hdr_y, "Low quality", ha="center", va="center", fontsize=8.5, fontweight="bold", transform=T)
-    tab_rows = [("sections kept", [f"{int(v['vm'].sum())}/{len(v['vm'])}" for i, _, _, v, _ in pair]),
-                ("alignment", [f"{al(M[(tj, E[i])]):.2f}" for i, *_ in pair]), ("$c$", [f"{c[i]:.2f}" for i, *_ in pair])]
+    tab_rows = [("$f$ (sections kept)", [f"{v['vm'].mean():.2f}  ({int(v['vm'].sum())}/{len(v['vm'])})" for i, _, _, v, _ in pair]),
+                ("align", [f"{al(M[(tj, E[i])]):.2f}" for i, *_ in pair]), ("$c$", [f"{c[i]:.2f}" for i, *_ in pair])]
     for yv, (nm, vals) in zip(rows_y, tab_rows):
         axtab.text(xs_[0], yv, nm, ha="center", va="center", fontsize=8, color="0.35", transform=T)
         for x_, vv in zip(xs_[1:], vals):
@@ -245,33 +254,28 @@ def main():
 
     # ---- b: held-out calibration
     axB = fig.add_subplot(gTop[1]); bins = np.linspace(-5, 5, 51)
-    axB.hist(np.clip(z, -5, 5), bins=bins, density=True, color="#b9cde2", ec="white", lw=0.4)
-    xg = np.linspace(-5, 5, 400); pdf = np.exp(-xg ** 2 / 2) / np.sqrt(2 * np.pi); axB.plot(xg, pdf, "k-", lw=1.0)
+    axB.hist(np.clip(z, -5, 5), bins=bins, density=True, color="#8fb0d3", ec="white", lw=0.4)
+    xg = np.linspace(-5, 5, 400); pdf = np.exp(-xg ** 2 / 2) / np.sqrt(2 * np.pi); axB.plot(xg, pdf, "-", color="0.45", lw=1.0)
     axB.annotate("N(0, 1)", xy=(1.35, np.exp(-1.35 ** 2 / 2) / np.sqrt(2 * np.pi)), xytext=(2.5, 0.27), fontsize=8, arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
     for v_ in (-1.96, 1.96):
         axB.axvline(v_, color="0.6", ls="--", lw=0.6)
     axB.set_xlim(-5, 5); axB.set_ylim(0, 0.62); axB.set_yticks([]); axB.spines[["top", "right", "left"]].set_visible(False)
     axB.set_xlabel("standardized junction residual $z_j$")
     axB.text(0.99, 0.99, f"RMS $z$ = {cov[0]:.2f}\n95% within $|z|$ < 1.96", transform=axB.transAxes, ha="right", va="top", fontsize=8)
-    axS = axB.inset_axes([0.0, 0.5, 0.36, 0.5]); axS.set_xlim(0, 1); axS.set_ylim(0, 1); axS.set_xticks([]); axS.set_yticks([])
-    for sp in axS.spines.values():
-        sp.set_linewidth(0.5); sp.set_color("0.55")
-    axS.set_facecolor("white"); axS.set_zorder(5)
-    axS.text(0.06, 0.9, "same-tile junction $j$", fontsize=7.5, fontweight="bold", va="center")
-    jx, jy = 0.24, 0.66
-    for (dx, dy, lab_, inward) in ((-0.1, 0.09, "$y_1$", True), (-0.1, -0.09, "$y_2$", True), (0.12, 0.0, "$y_3$", False)):
+    axS = axB.inset_axes([0.0, 0.42, 0.34, 0.58]); axS.set_xlim(0, 1); axS.set_ylim(0, 1); axS.axis("off"); axS.set_zorder(10)
+    jx, jy = 0.26, 0.84
+    for (dx, dy, lab_, inward) in ((-0.14, 0.08, "$y_1$", True), (-0.14, -0.08, "$y_2$", True), (0.16, 0.0, "$y_3$", False)):
         x0_, y0_ = jx + dx, jy + dy
         axS.annotate("", xy=(jx, jy) if inward else (x0_, y0_), xytext=(x0_, y0_) if inward else (jx, jy),
-                     arrowprops=dict(arrowstyle="-|>", lw=0.7, color="0.25", shrinkA=0, shrinkB=2, mutation_scale=5))
+                     arrowprops=dict(arrowstyle="-|>", lw=0.7, color="0.3", shrinkA=0, shrinkB=2, mutation_scale=5))
         axS.text(x0_ + (-0.02 if dx < 0 else 0.02), y0_, lab_, ha="right" if dx < 0 else "left", va="center", fontsize=7)
-    axS.plot(jx, jy, "o", ms=3, color="0.25")
-    axS.text(0.52, 0.66, "$r_j = \\Sigma_e\\, s_e\\, y_e$", fontsize=7.5, va="center")
-    axS.text(0.06, 0.42, "$\\sigma_j = (\\Sigma_e\\, c_e^2\\, y_e^2 + \\sigma_0^2)^{1/2}$", fontsize=7.5, va="center")
-    axS.text(0.06, 0.16, "$z_j = r_j\\, /\\, \\sigma_j$", fontsize=7.5, va="center", fontweight="bold")
+    axS.plot(jx, jy, "o", ms=3, color="0.3")
+    for yv, eq in ((0.6, "$r_j = \\Sigma_e\\, s_e\\, y_e$"), (0.36, "$\\sigma_j = (\\Sigma_e\\, c_e^2\\, y_e^2 + \\sigma_0^2)^{1/2}$"), (0.12, "$z_j = r_j\\, /\\, \\sigma_j$")):
+        axS.text(0.04, yv, eq, fontsize=7.5, va="center", bbox=dict(fc="white", ec="none", pad=0.6))
     label(axB, "b", "")
 
     # ---- c: conservative reconciliation at one junction
-    gC = gs[1].subgridspec(1, 2, width_ratios=[0.78, 1.3], wspace=0.24); axj = fig.add_subplot(gC[0])
+    gC = gs[1].subgridspec(1, 2, width_ratios=[0.8, 1.3], wspace=0.17); axj = fig.add_subplot(gC[0])
     allcl = np.vstack([v["cl"] + v["off"] for v in vinfo]); Rm = max(v["R"] for v in vinfo)
     lo2, hi3 = allcl.min(0) - 1.2 * Rm, allcl.max(0) + 1.2 * Rm; side = max(hi3 - lo2) / 2; ctr = (lo2 + hi3) / 2
     r_lo, r_hi = int(max(ctr[0] - side, 0)), int(min(ctr[0] + side, img.shape[0])); c_lo, c_hi = int(max(ctr[1] - side, 0)), int(min(ctr[1] + side, img.shape[1]))
@@ -290,7 +294,7 @@ def main():
             continue
         loc = graph_to_tile_batch(np.asarray(pth, float), mgeom, tj)
         if ((loc[:, 0] > r_lo) & (loc[:, 0] < r_hi) & (loc[:, 1] > c_lo) & (loc[:, 1] < c_hi)).any():
-            axj.plot(loc[:, 1], loc[:, 0], color="white", lw=0.7, alpha=0.75, zorder=3)
+            axj.plot(loc[:, 1], loc[:, 0], color="white", lw=0.45, alpha=0.45, zorder=3)
     jpt = graph_to_tile_batch(np.array([[G.nodes[nodes[jn]]["x"], G.nodes[nodes[jn]]["y"]]]), mgeom, tj)[0]
     for k, (v, (i_e, _s)) in enumerate(zip(vinfo, es)):
         cl = v["cl"] + v["off"]; _, _, nrm = _centerline_geometry(v["cl"])
@@ -303,7 +307,7 @@ def main():
         q_ = len(cl) // 2; lb = cl[q_] + 1.4 * v["R"] * nrm[q_]
         axj.text(lb[1], lb[0], str(k + 1), color="white", fontsize=8, fontweight="bold", ha="center", va="center", bbox=dict(boxstyle="circle,pad=0.18", fc=VC[k], ec="white", lw=0.6))
     axj.plot(jpt[1], jpt[0], "o", ms=4.5, color="white", mec="0.1", mew=0.7, zorder=6)
-    axj.set_xlim(c_lo, c_hi); axj.set_ylim(r_hi, r_lo); axj.set_xticks([]); axj.set_yticks([])
+    axj.set_xlim(c_lo, c_hi); axj.set_ylim(r_hi, r_lo); axj.set_xticks([]); axj.set_yticks([]); scalebar(axj)
     for sp in axj.spines.values():
         sp.set_linewidth(0.5); sp.set_color("0.5")
     axd = fig.add_subplot(gC[1])
@@ -319,8 +323,8 @@ def main():
     lim = 1.15 * max(abs(v_) for i, s in es for v_ in (y[i], Qp[i])); axd.set_xlim(-lim, lim)
     axd.spines[["top", "right", "left"]].set_visible(False); axd.set_xlabel("flow (nL/s)   (− into junction, + out)")
     axd.plot([], [], "o", ms=4, color="0.4", label="measured"); axd.plot([], [], "D", ms=5, mfc="white", mec="0.3", mew=1.1, label="reconciled")
-    axd.legend(loc="upper left", fontsize=7.5, frameon=False, handletextpad=0.2, borderaxespad=0.1, labelspacing=0.3)
-    axd.text(0.99, 0.04, f"measured imbalance   {abs(before):.3f} nL/s\nreconciled imbalance   0", transform=axd.transAxes, ha="right", va="bottom", fontsize=8, linespacing=1.5)
+    axd.legend(loc="lower right", fontsize=7, frameon=False, handletextpad=0.2, borderaxespad=0.1, labelspacing=0.25, markerscale=0.85)
+    axd.text(0.5, 1.02, f"$|\\Sigma_e\\, s_e\\, y_e|$ = {abs(before):.3f} nL/s   →   $|\\Sigma_e\\, s_e\\, Q′_e|$ = 0", transform=axd.transAxes, ha="center", va="bottom", fontsize=8.5)
     label(axj, "c", "Conservative reconciliation at one junction")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
