@@ -172,6 +172,22 @@ def main():
     phi_b = np.angle(np.sum(np.array(wda) * np.array(zda)))
     log(f"  (b) zero = dorsal aorta H1 phase in tile {ref}: {np.degrees(phi_b):.1f}° ({len(zda)} DA measurements); "
         f"driven boundary {np.degrees(phi_bnd):.1f}° → boundary lags the DA by {np.degrees(np.angle(np.exp(1j * (phi_b - phi_bnd)))):.0f}°")
+    # well-synchronised core: drop near-unconstrained tiles (< 5 % of median link weight) and the weakest normalised cut
+    #     (the side without the reference tile) — tiles whose orientation relative to the rest the shared vessels do not fix
+    tl_ = sorted(band); ix_t = {t: i for i, t in enumerate(tl_)}; Wt = np.zeros((len(tl_),) * 2)
+    for e, x in meas.items():
+        ok_ = [t for t, y in x.items() if t in ix_t and abs(y["H"][0]) > 0 and np.isfinite(y["rho"])]
+        for i in range(len(ok_)):
+            for j in range(i + 1, len(ok_)):
+                w_ = max(x[ok_[i]]["rho"], 0) * max(x[ok_[j]]["rho"], 0); Wt[ix_t[ok_[i]], ix_t[ok_[j]]] += w_; Wt[ix_t[ok_[j]], ix_t[ok_[i]]] += w_
+    deg_ = Wt.sum(1); weak_ = deg_ < 0.05 * np.median(deg_); kp_ = np.flatnonzero(~weak_); Wk = Wt[np.ix_(kp_, kp_)]; dk_ = Wk.sum(1)
+    _, Vk = np.linalg.eigh(np.eye(len(kp_)) - Wk / np.sqrt(np.outer(dk_, dk_))); side_ = Vk[:, 1] / np.sqrt(dk_) > 0
+    if side_[list(kp_).index(ix_t[ref])]:
+        side_ = ~side_
+    masked = {tl_[i] for i in np.flatnonzero(weak_)} | {tl_[kp_[i]] for i in np.flatnonzero(side_)}
+    core = [t for t in tl_ if t not in masked]
+    log(f"  (b) core {len(core)} of {len(tl_)} tiles; masked: weakly linked block {sorted(tl_[kp_[i]] for i in np.flatnonzero(side_))}, "
+        f"near-unconstrained {sorted(tl_[i] for i in np.flatnonzero(weak_))}")
     tdel, tR, nflip, ntot = {}, {}, {}, {}; eixf = {e: i for i, e in enumerate(Ef)}
     for t in band:
         zs, ws = [], []
@@ -198,11 +214,11 @@ def main():
             axM.add_patch(Polygon(pgon, closed=True, fc="none", ec="0.55" if t in band else "0.8", lw=0.35, zorder=1))
     # delays as positive lags: wrap into [−30°, 330°) so small negatives near the boundary stay ≈ 0; colour range [0, max]
     tdel = {t: (v + 30) % 360 - 30 for t, v in tdel.items()}
-    dmax = max(v for t, v in tdel.items() if sd.get(t, np.inf) <= SD_MAX); vtop = 10 * np.ceil(dmax / 10)
-    log(f"  (b) max delay over determined tiles {dmax:.0f}° (tile {max((v, t) for t, v in tdel.items() if sd.get(t, np.inf) <= SD_MAX)[1]})")
+    dmax = max(v for t, v in tdel.items() if t in core and sd.get(t, np.inf) <= SD_MAX); vtop = 10 * np.ceil(dmax / 10)
+    log(f"  (b) max delay over determined tiles {dmax:.0f}° (tile {max((v, t) for t, v in tdel.items() if t in core and sd.get(t, np.inf) <= SD_MAX)[1]})")
     cmp = plt.cm.cividis_r; nph = mcolors.Normalize(0, vtop)
     for t, v in tdel.items():
-        ok = sd.get(t, np.inf) <= SD_MAX; col = cmp(nph(v))
+        ok = t in core and sd.get(t, np.inf) <= SD_MAX; col = cmp(nph(v))
         if ok:
             axM.plot(*cen[t], "o", ms=3 + 5 * tR[t], mfc=col, mec="0.15", mew=0.4, zorder=4)
         else:                                                     # tile offset undetermined (SD > 30°): no phase shown
