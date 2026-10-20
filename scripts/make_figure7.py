@@ -159,7 +159,19 @@ def main():
     eB = np.array([min(dB[nix_[u]], dB[nix_[v]]) for u, v in Ef])
     okf = F["elig"] & np.array([sd.get(int(t), np.inf) <= SD_MAX if t >= 0 else False for t in F["tile"]])
     phf = np.angle(F["H"][0] * np.sign(F["Qp"])); nb = okf & (eB <= 1)
-    phi_b = np.angle(np.sum(np.exp(1j * phf[nb])))
+    phi_bnd = np.angle(np.sum(np.exp(1j * phf[nb])))
+    # zero = the dorsal aorta's H1 phase in the reference tile (both DA stubs, ρ-weighted): the arterial flow peak
+    from plexusflow.reconcile.harmonics import phasors as _ph, coherence as _coh
+    zda, wda = [], []
+    for n_ in dom["DA"]:
+        for e_ in G.edges(n_):
+            for m in G.edges[e_].get("measurements_piv") or []:
+                if int(m["tile_id"]) == ref and m.get("Q_t") is not None and (m.get("quality") or {}).get("kl_ok"):
+                    a0_, H_ = _ph(m["Q_t"], tf0[ref]); r_ = _coh(m["Q_t"], tf0[ref])
+                    zda.append(np.exp(1j * np.angle(np.sign(a0_) * H_[0] * np.exp(-1j * psi[ref])))); wda.append(max(r_, 0))
+    phi_b = np.angle(np.sum(np.array(wda) * np.array(zda)))
+    log(f"  (b) zero = dorsal aorta H1 phase in tile {ref}: {np.degrees(phi_b):.1f}° ({len(zda)} DA measurements); "
+        f"driven boundary {np.degrees(phi_bnd):.1f}° → boundary lags the DA by {np.degrees(np.angle(np.exp(1j * (phi_b - phi_bnd)))):.0f}°")
     tdel, tR, nflip, ntot = {}, {}, {}, {}; eixf = {e: i for i, e in enumerate(Ef)}
     for t in band:
         zs, ws = [], []
@@ -200,7 +212,7 @@ def main():
         axM.plot(*xy, marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
     cb = fig.colorbar(sm, ax=axM, fraction=0.045, pad=0.01, shrink=0.8, ticks=[0, 60, 120, 180] if vtop >= 180 else [0, vtop / 2, vtop], extend="min")
-    cb.set_label("H1 phase delay from boundary (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
+    cb.set_label("H1 phase delay from dorsal aorta (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
     label(gs[1], "b")
 
     # ---- c: repeated-vessel agreement after alignment
