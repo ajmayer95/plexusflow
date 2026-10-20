@@ -41,8 +41,13 @@ delete, just don't start new work on it.
 - `scripts/` — ALL figure-generation scripts, diagnostics,
   experiments, re-aggregators.  Everything new goes here (never in a
   scratchpad).  Representative current scripts (2026-10):
-  - `make_figure{6v2,7v3,8v4,8alt,9v3,10v2}.py` — the main-paper
-    figures
+  - main-paper figures, order as of 2026-10-20:
+    - Fig 6 `make_figure6v3.py` — DC reliability c and conservative reconciliation (→ Q′)
+    - Fig 7 `make_figure7.py` — cross-tile phase synchronisation (tile gauges ψ_t, H1/H2 validation)
+    - Fig 8 `make_figure8alt_v3.py` — organ-scale DC field Q′, emergent boundary f = BQ′, passive network (DC only)
+    - Fig 9 (to build) — boundary forcing f_b·r_b^(n), RC model, D profile (old Fig 7v3 boundary-waveform panel
+      belongs here)
+    - Fig 10 `mech/make_figure9alt_v3.py` (to rename) — measured vs simulated pulsatility, H1/H2 phase, waveforms
   - `renormalize_to_tile21.py` — rerun normalization anchored at tile 21
   - `shift_tile21_anchor_by_half_period.py` — cosmetic T/2 shift
   - `reaggregate_coherent_h2_gauge.py` — fixes the independent-H2
