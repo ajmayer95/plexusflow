@@ -73,11 +73,15 @@ def sync_diagnostics(pa, pb, pw, pz, nT, ref_i, psi, n_starts=50, step_deg=5.0, 
                 cut_fraction=cut, rotation=prof, rigid_rotation=rigid, weak=np.flatnonzero(weak))
 
 
-def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=50, sync_extra_edges=None):
+def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=50, sync_extra_edges=None, stitch_lambda=0.0):
     """dc: output of reconcile_dc (needs edges, Qp).  Returns the field dict (H is 3 × nE, u→v frame).
 
     sync_extra_edges: edges outside the carved domain whose repeated measurements also constrain the tile gauge (e.g. the
-    dorsal-aorta stubs, seen in several tiles); they enter the synchronisation only, never the field."""
+    dorsal-aorta stubs, seen in several tiles); they enter the synchronisation only, never the field.
+    stitch_lambda: weight of a spatial-continuity term (phase-field stitching; 0 = off).  Adjacent carved vessels (sharing a
+    junction) measured in different tiles add a constraint that their H1 phases agree in each vessel's own flow direction
+    (× sgn Q'), weighted λ·ρ_a·ρ_b.  Within-tile pairs do not involve ψ, so in effect this links tiles across their borders;
+    it orients blocks that shared vessels connect only weakly.  Bias ≈ the physiological phase step between neighbours."""
     from joblib import Parallel, delayed
     tf0 = G.graph["tile_f0_piv"]; f_ref = tf0[ref_tile]
     band = {t for t, f in tf0.items() if abs(f / f_ref - 1) <= f0_band}
@@ -115,6 +119,25 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
                 pz.append(ua * np.conj(ub)); pv.append(vi)
                 if d[a]["rho"] >= RHO_SYNC and d[b]["rho"] >= RHO_SYNC:
                     pairs.append((e, a, b))
+    n_stitch = 0
+    if stitch_lambda > 0:
+        nb_ = {}
+        for i_, (u, v) in enumerate(sub):
+            nb_.setdefault(u, []).append(i_); nb_.setdefault(v, []).append(i_)
+        sgn = np.sign(dc["Qp"]); vi0 = (max(pv) + 1) if len(pv) else 0
+        for node, inc_ in nb_.items():
+            for x_ in range(len(inc_)):
+                for y_ in range(x_ + 1, len(inc_)):
+                    e1, e2 = sub[inc_[x_]], sub[inc_[y_]]; s1, s2 = sgn[inc_[x_]], sgn[inc_[y_]]
+                    if e1 not in meas or e2 not in meas or s1 == 0 or s2 == 0:
+                        continue
+                    for a, xa in meas[e1].items():
+                        for b, xb in meas[e2].items():
+                            if a == b or a not in ti or b not in ti or not (np.isfinite(xa["rho"]) and np.isfinite(xb["rho"])) or abs(xa["H"][0]) == 0 or abs(xb["H"][0]) == 0:
+                                continue
+                            ua = s1 * xa["H"][0] / abs(xa["H"][0]); ub = s2 * xb["H"][0] / abs(xb["H"][0])
+                            pa.append(ti[a]); pb.append(ti[b]); pw.append(stitch_lambda * max(xa["rho"], 0.0) * max(xb["rho"], 0.0))
+                            pz.append(ua * np.conj(ub)); pv.append(vi0 + n_stitch); n_stitch += 1
     pa, pb, pw, pz, pv = map(np.asarray, (pa, pb, pw, pz, pv))
     psi_vec = _sync(pa, pb, pw, pz, nT, ti[ref_tile])
     diag = sync_diagnostics(pa, pb, pw, pz, nT, ti[ref_tile], psi_vec)
@@ -153,7 +176,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
         sc_w[i] = x["scatter"]; rho_w[i] = x["rho"]; a0_w[i] = x["a0"]; vphi_w[:, i] = x["var_phi"]; vpi_w[i] = x["var_logpi"]
     return dict(edges=sub, H=Hf, elig=elig, tile=win_t, psi=psi, scatter=sc_w, rho=rho_w, a0=a0_w, var_phi=vphi_w,
                 var_logpi=vpi_w, f_ref=f_ref, band=sorted(band), ref_tile=ref_tile, Qp=Qp, gauge_sd_deg=gauge_sd_deg,
-                _meas=meas, _pairs=pairs, _sync_diag=diag)
+                _meas=meas, _pairs=pairs, _sync_diag=diag, n_stitch=n_stitch, stitch_lambda=stitch_lambda)
 
 
 def supported(field, ratio_max=5.0):
