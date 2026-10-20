@@ -73,11 +73,14 @@ def sync_diagnostics(pa, pb, pw, pz, nT, ref_i, psi, n_starts=50, step_deg=5.0, 
                 cut_fraction=cut, rotation=prof, rigid_rotation=rigid, weak=np.flatnonzero(weak))
 
 
-def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=50, sync_extra_edges=None, stitch_lambda=0.0):
+def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=50, sync_extra_edges=None, stitch_lambda=0.0,
+                   sync_extra_min_rho=0.0, sync_extra_weight=1.0):
     """dc: output of reconcile_dc (needs edges, Qp).  Returns the field dict (H is 3 × nE, u→v frame).
 
     sync_extra_edges: edges outside the carved domain whose repeated measurements also constrain the tile gauge (e.g. the
-    dorsal-aorta stubs, seen in several tiles); they enter the synchronisation only, never the field.
+    dorsal-aorta stubs, seen in several tiles); they enter the synchronisation only, never the field.  sync_extra_min_rho drops their
+    measurements below that coherence; sync_extra_weight multiplies their pair weights (≫ 1 = an anchor: the same vessel must
+    agree across tiles, e.g. the dorsal aorta seen in tiles 14 / 21 / 28).
     stitch_lambda: weight of a spatial-continuity term (phase-field stitching; 0 = off).  Adjacent carved vessels (sharing a
     junction) measured in different tiles add a constraint that their H1 phases agree in each vessel's own flow direction
     (× sgn Q'), weighted λ·ρ_a·ρ_b.  Within-tile pairs do not involve ψ, so in effect this links tiles across their borders;
@@ -108,14 +111,16 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
     # History: the first Option-A version (2026-10-06) kept only pairs with both ρ ≥ 0.1, unweighted; that discarded most
     # vessels linking the two halves of the 21S yolk sac and put the second half ~65° off the earlier tile_normalize
     # gauge (its "median 5°" check hid the 90th percentile).  Using all pairs, weighted, agrees with tile_normalize (2–5°).
-    tiles = sorted(band); ti = {t: i for i, t in enumerate(tiles)}; nT = len(tiles)
+    tiles = sorted(band); ti = {t: i for i, t in enumerate(tiles)}; nT = len(tiles); xset = set(sync_extra_edges or []) - set(eix)
     pa, pb, pw, pz, pv, pairs = [], [], [], [], [], []
     for vi, (e, d) in enumerate(meas.items()):
         ok = [t for t, x in d.items() if t in ti and abs(x["H"][0]) > 0 and np.isfinite(x["rho"])]
         for i in range(len(ok)):
             for j in range(i + 1, len(ok)):
                 a, b = ok[i], ok[j]; ua = d[a]["H"][0] / abs(d[a]["H"][0]); ub = d[b]["H"][0] / abs(d[b]["H"][0])
-                pa.append(ti[a]); pb.append(ti[b]); pw.append(max(d[a]["rho"], 0.0) * max(d[b]["rho"], 0.0))
+                if e in xset and min(d[a]["rho"], d[b]["rho"]) < sync_extra_min_rho:
+                    continue
+                pa.append(ti[a]); pb.append(ti[b]); pw.append(max(d[a]["rho"], 0.0) * max(d[b]["rho"], 0.0) * (sync_extra_weight if e in xset else 1.0))
                 pz.append(ua * np.conj(ub)); pv.append(vi)
                 if d[a]["rho"] >= RHO_SYNC and d[b]["rho"] >= RHO_SYNC:
                     pairs.append((e, a, b))
