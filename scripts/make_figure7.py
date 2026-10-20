@@ -142,7 +142,7 @@ def main():
     axP.axvline(fit, color="#2b5c8a", lw=1.6, zorder=3)
     axP.text(fit + 8, 1.15, "tile offset", color="#2b5c8a", fontsize=8, va="bottom", ha="left")
     axP.set_xlim(-180, 180); axP.set_xticks([-180, -90, 0, 90, 180]); axP.set_ylim(-1.4, 1.9); axP.set_yticks([])
-    axP.spines[["top", "right", "left"]].set_visible(False); axP.set_xlabel("$\\Delta\\phi_e$ (deg)")
+    axP.spines[["top", "right", "left"]].set_visible(False); axP.set_xlabel(f"H1 phase difference of the same vessel,\ntile {pa_} − tile {pb_} (deg)")
     axP.text(0.99, 0.97, f"$N$ = {npb}", transform=axP.transAxes, ha="right", va="top", fontsize=7.5, color="0.35")
     label(gs[1], "b")
 
