@@ -5,8 +5,8 @@ comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gau
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
   a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
-  b  tile gauges on the overlap graph: retained tiles linked by the vessels they share (width ∝ √Σ ρ_a ρ_b), coloured
-     by ψ_t; open = gauge bootstrap SD > 30°; square = reference tile
+  b  one vessel's assembled reference waveform: measured in its AC winner tile t (cardiac phase τ = f0·t mod 1) →
+     shifted by the tile gauge (Δτ = ψ_t/2π) → scaled to the reconciled mean, Q̃_e(τ) = (Q′_e / Q̄_{e,t}) Q_{e,t}(τ − ψ_t/2π)
   c  validation on vessels imaged in two tiles (both ρ ≥ 0.1): same-vessel phase difference between tiles for H1 (fitted)
      and H2 (not fitted; aligned with 2ψ), as recorded vs aligned, with the median |Δφ|
   (supplement: one vessel's waveform in two tiles before / after the gauges)
@@ -24,6 +24,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.patches
 from matplotlib.patches import Polygon
 from matplotlib.collections import LineCollection
 
@@ -97,7 +98,7 @@ def main():
         [s_.set_visible(False) for s_ in ax.spines.values()]
 
     fig = plt.figure(figsize=(7.5, 3.0), facecolor="white")
-    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1.2, 1], wspace=0.3, left=0.07, right=0.985, top=0.9, bottom=0.17)
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1.35, 1], wspace=0.3, left=0.07, right=0.985, top=0.9, bottom=0.17)
 
     def label(cell, letter):
         b_ = cell.get_position(fig); fig.text(b_.x0 - 0.045, b_.y1 + 0.03, letter, fontsize=10, fontweight="bold", va="bottom", ha="left")
@@ -114,20 +115,39 @@ def main():
     axA.legend(fontsize=7, frameon=False, loc="lower right", handletextpad=0.2, borderaxespad=0.2, labelspacing=0.3)
     label(gs[0], "a")
 
-    # ---- b: tile gauges on the overlap graph
-    axC = fig.add_subplot(gs[1]); organ(axC)
-    wmax = max(link.values()); segs, lws = [], []
-    for (a, b), w in link.items():
-        segs.append([cen[a], cen[b]]); lws.append(0.25 + 1.4 * np.sqrt(w / wmax))
-    axC.add_collection(LineCollection(segs, linewidths=lws, colors="0.35", alpha=0.35, zorder=2))
-    cmp = plt.cm.twilight; npsi = mcolors.Normalize(-180, 180)
-    for t in band:
-        ok = sd.get(t, np.inf) <= SD_MAX; col = cmp(npsi(np.degrees(psi[t])))
-        axC.plot(*cen[t], "o", ms=4.6, mfc=col if ok else "white", mec="0.2" if ok else col, mew=0.4 if ok else 1.2, zorder=4)
-    axC.plot(*cen[ref], "s", ms=6.5, mfc="none", mec="black", mew=1.0, zorder=5)
-    sm = plt.cm.ScalarMappable(norm=npsi, cmap=cmp); cb = fig.colorbar(sm, ax=axC, fraction=0.045, pad=0.01, shrink=0.75, ticks=[-180, 0, 180])
-    cb.set_label("tile gauge $\\psi_t$ (deg)", fontsize=8, labelpad=1); cb.ax.yaxis.set_label_position("left"); cb.ax.tick_params(labelsize=7)
-    cb.outline.set_linewidth(0.4)
+    # ---- b: assembling one vessel's reference waveform: measured → phase-shifted → scaled to Q′
+    el, wt, rho_w, a0_w, Qp_w = F["elig"], F["tile"], F["rho"], F["a0"], F["Qp"]; best = None
+    for i in np.flatnonzero(el & np.isfinite(rho_w)):
+        t = int(wt[i]); ratio = abs(Qp_w[i] / a0_w[i]); dtau = abs(np.angle(np.exp(1j * psi[t]))) / (2 * np.pi)
+        if rho_w[i] < 0.8 or not (0.2 <= dtau <= 0.45) or not (1.3 <= ratio <= 2.2) or sd.get(t, np.inf) > SD_MAX or abs(Qp_w[i]) < 0.05:
+            continue
+        if best is None or rho_w[i] > best[0]:
+            best = (rho_w[i], i, t)
+    _, ib, tb = best; eb = F["edges"][ib]; x = meas[eb][tb]; sg = np.sign(x["a0"]); tau = np.linspace(0, 1, 300)
+    wave = lambda H, a0: sg * (a0 + sum((H[n - 1] * np.exp(2j * np.pi * n * tau)).real for n in (1, 2, 3)))
+    q_raw = wave(x["H"], x["a0"]); Hs = x["H"] * np.exp(-1j * np.arange(1, 4) * psi[tb]); q_sh = wave(Hs, x["a0"])
+    q_fin = abs(Qp_w[ib]) / abs(x["a0"]) * q_sh
+    log(f"  (b) vessel {eb}, tile {tb}: ρ {rho_w[ib]:.2f}, Δτ = ψ/2π {psi[tb] / (2 * np.pi):+.2f}, Q′/Q̄ {abs(Qp_w[ib] / x['a0']):.2f}")
+    gB = gs[1].subgridspec(2, 3, height_ratios=[1, 0.36], wspace=0.75, hspace=0.42)
+    steps = [(q_raw, f"measured, tile {tb}", "0.45"), (q_sh, "phase-aligned", "0.45"), (q_fin, "assembled $\\tilde Q_e$", "#2b5c8a")]
+    ylo, yhi = min(q.min() for q, *_ in steps), max(q.max() for q, *_ in steps); pad = 0.08 * (yhi - ylo); axs_ = []
+    for j, (q, ttl, col) in enumerate(steps):
+        ax = fig.add_subplot(gB[0, j]); axs_.append(ax)
+        ax.plot(tau, q, color=col, lw=1.3); ax.axhline(q.mean(), color=col, lw=0.5, ls=":")
+        ax.set_ylim(0, yhi + pad); ax.set_xlim(0, 1); ax.set_xticks([0, 1]); ax.spines[["top", "right"]].set_visible(False)
+        ax.set_title(ttl, fontsize=7.5, pad=2); ax.set_xlabel("$\\tau$", labelpad=0)
+        if j == 0:
+            ax.set_ylabel("flow (nL/s)")
+        else:
+            ax.set_yticklabels([])
+    for j, txt in enumerate(("shift\n$\\psi_t/2\\pi$", "scale\n$Q′_e/\\bar Q_{e,t}$")):
+        a_, b_ = axs_[j].get_position(), axs_[j + 1].get_position(); xm = (a_.x1 + b_.x0) / 2; ym = (a_.y0 + a_.y1) / 2
+        fig.patches.append(matplotlib.patches.FancyArrowPatch((a_.x1 + 0.004, ym), (b_.x0 - 0.004, ym), transform=fig.transFigure,
+                                                              arrowstyle="-|>", mutation_scale=7, lw=0.8, color="0.3"))
+        fig.text(xm, ym + 0.025, txt, ha="center", va="bottom", fontsize=6.5, color="0.25", linespacing=1.2)
+    axe = fig.add_subplot(gB[1, :]); axe.axis("off")
+    axe.text(0.5, 0.45, "$\\tilde Q_e(\\tau) = \\dfrac{Q′_e}{\\bar Q_{e,t}}\; Q_{e,t}\\!\\left(\\tau - \\dfrac{\\psi_t}{2\\pi}\\right)$", ha="center", va="center", fontsize=8.5)
+    axe.text(0.5, -0.5, "$\\psi_t$ inferred from vessels shared between tiles", ha="center", va="center", fontsize=7, color="0.35")
     label(gs[1], "b")
 
     # ---- c: validation, cross-tile phase differences of the same vessel
