@@ -189,76 +189,104 @@ def main():
         ex.append((mis[0], "#ff7f00", "x", vessel(E[mis[0]]), "flow not along the vessel"))
     log(f"  (a) examples: " + ", ".join(f"{E[i]} f {M[(tj, E[i])]['f']:.2f} align {al(M[(tj, E[i])]):.2f} c {c[i]:.2f}" for i, *_ in ex))
 
-    fig = plt.figure(figsize=(23, 7.6), facecolor="white")
-    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1.45], wspace=0.13, left=0.02, right=0.985, top=0.9, bottom=0.17)
-    title = lambda gsp, txt: fig.text(gsp.get_position(fig).x0, 0.95, txt, fontsize=15, fontweight="bold")
-    foot = lambda gsp, txt, **kw: fig.text(gsp.get_position(fig).x0, 0.025, txt, fontsize=11.5, color="0.3", **kw)
+    # ---- publication layout: PLOS Comp Biol, 7.5 in wide, Arial 8–11 pt
+    plt.rcParams.update({"font.family": "Arial", "mathtext.fontset": "custom", "mathtext.rm": "Arial", "mathtext.it": "Arial:italic",
+                         "mathtext.bf": "Arial:bold", "font.size": 8, "axes.labelsize": 9, "xtick.labelsize": 8, "ytick.labelsize": 8,
+                         "axes.linewidth": 0.6, "xtick.major.width": 0.6, "ytick.major.width": 0.6, "xtick.major.size": 2.5, "ytick.major.size": 2.5})
+    VC = ["#0072B2", "#E69F00", "#CC79A7"]                 # vessels 1–3 (Okabe–Ito), used in c only
+    ACC, CL, ARR = "#5b84b1", "#56B4E9", "#F0E442"          # calibration accent; centreline; flow arrows
+    fig = plt.figure(figsize=(7.5, 5.3), facecolor="white")
+    gs = fig.add_gridspec(2, 1, height_ratios=[1, 1.0], hspace=0.42, left=0.025, right=0.985, top=0.94, bottom=0.075)
+    gTop = gs[0].subgridspec(1, 2, width_ratios=[1.12, 1], wspace=0.16)
 
-    # ---- a: measurement quality → uncertainty (two vessels of the junction's tile)
-    pair = [ex[0], ex[-1]]; gA = gs[0].subgridspec(2, 2, width_ratios=[1, 0.72], hspace=0.12, wspace=0.05)
-    for k, (i, col, lab, v, what) in enumerate(pair):
-        m = M[(tj, E[i])]; axv = fig.add_subplot(gA[k, 0]); draw(axv, v, col)
-        axt = fig.add_subplot(gA[k, 1]); axt.axis("off")
-        axt.text(0.06, 0.86, "reliable" if k == 0 else "unreliable", fontsize=14, fontweight="bold", color=col, va="top", transform=axt.transAxes)
-        axt.text(0.06, 0.62, f"{int(v['vm'].sum())}/{len(v['vm'])} sections kept\nalignment {al(m):.2f}", fontsize=12.5, va="top", linespacing=1.6, transform=axt.transAxes)
-        axt.text(0.06, 0.22, f"c = {c[i]:.2f}", fontsize=18, fontweight="bold", va="top", transform=axt.transAxes)
-    title(gs[0], "a   Measurement quality sets the uncertainty")
-    foot(gs[0], "$c = c_0 + c_f\\,(1-f) + c_a\\,(1-\\mathrm{align})$,  calibrated from same-tile junction balance\n"
-                "white ticks: cross-sections kept;  arrows: mean flow (green = along the vessel)")
+    def label(bbox_from, letter, heading):
+        b_ = bbox_from.get_position(fig); fig.text(b_.x0 - 0.012, b_.y1 + 0.028, letter, fontsize=11, fontweight="bold", va="bottom")
+        fig.text(b_.x0 + 0.012, b_.y1 + 0.028, heading, fontsize=9.5, fontweight="bold", va="bottom")
 
-    # ---- b: is c calibrated — held-out standardized junction residuals
-    axB = fig.add_subplot(gs[1]); bins = np.linspace(-5, 5, 51)
-    axB.hist(np.clip(z, -5, 5), bins=bins, density=True, color="#9ecae1", ec="white", label="held-out junctions")
-    xg = np.linspace(-5, 5, 400); axB.plot(xg, np.exp(-xg ** 2 / 2) / np.sqrt(2 * np.pi), "k-", lw=2, label="standard normal")
+    def crop_vessel(ax, v, side_R=3.6):
+        cl = v["cl"] + v["off"]; R = v["R"]; vf = v["vf"]; H, W = vf.shape[:2]; _, tang, nrm = _centerline_geometry(v["cl"])
+        ctr = (cl.min(0) + cl.max(0)) / 2; side = max(max(cl.max(0) - cl.min(0)) / 2 + 1.4 * R, side_R * R)
+        r0, r1 = int(max(ctr[0] - side, 0)), int(min(ctr[0] + side, img.shape[0])); c0_, c1_ = int(max(ctr[1] - side, 0)), int(min(ctr[1] + side, img.shape[1]))
+        cr = img[r0:r1, c0_:c1_]; ax.imshow(img, cmap="gray", vmin=np.percentile(cr, 1), vmax=np.percentile(cr, 99.5), interpolation="nearest")
+        ax.plot(cl[:, 1], cl[:, 0], color=CL, lw=1.3, zorder=4, solid_capstyle="round")
+        for q in np.flatnonzero(v["vm"]):
+            a_, b_ = cl[q] - 0.7 * R * nrm[q], cl[q] + 0.7 * R * nrm[q]; ax.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white", lw=0.6, zorder=5)
+        qs = np.arange(1, len(v["cl"]) - 1, max(2, len(v["cl"]) // 6)); ys_, xs_ = [], []
+        for q in qs:
+            for rho_ in (-0.5 * R, 0.5 * R):
+                ys_.append(int(round(v["cl"][q, 0] + rho_ * nrm[q, 0]))); xs_.append(int(round(v["cl"][q, 1] + rho_ * nrm[q, 1])))
+        ys_, xs_ = np.array(ys_), np.array(xs_); okp = (ys_ >= 0) & (ys_ < H) & (xs_ >= 0) & (xs_ < W); ys_, xs_ = ys_[okp], xs_[okp]
+        if len(ys_):
+            U, V = vf[ys_, xs_, 0], vf[ys_, xs_, 1]; Ls = np.nanpercentile(np.hypot(U, V), 90) or 1.0
+            ax.quiver(xs_ + v["off"][1], ys_ + v["off"][0], U / Ls * 0.85 * R, V / Ls * 0.85 * R, color=ARR, angles="xy", scale_units="xy", scale=1,
+                      width=0.016, headwidth=3.2, headlength=3.5, headaxislength=3.2, zorder=6)
+        ax.set_xlim(c0_, c1_); ax.set_ylim(r1, r0); ax.set_xticks([]); ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_linewidth(0.5); sp.set_color("0.5")
+
+    # ---- a: measurement quality
+    pair = [ex[0], ex[-1]]; gA = gTop[0].subgridspec(2, 2, height_ratios=[1, 0.5], hspace=0.08, wspace=0.08)
+    for k, (i, *_r) in enumerate(pair):
+        axv = fig.add_subplot(gA[0, k]); crop_vessel(axv, _r[2]); axv.set_title("High quality" if k == 0 else "Low quality", fontsize=9, pad=3)
+    axtab = fig.add_subplot(gA[1, :]); axtab.axis("off")
+    rows_ = [("sections kept", [f"{int(v['vm'].sum())}/{len(v['vm'])}" for i, _, _, v, _ in pair]),
+             ("alignment", [f"{al(M[(tj, E[i])]):.2f}" for i, *_ in pair]), ("$c$", [f"{c[i]:.2f}" for i, *_ in pair])]
+    xc = [0.25, 0.75]
+    for r_, (nm, vals) in enumerate(rows_):
+        yv = 0.86 - 0.2 * r_; bold = nm == "$c$"
+        axtab.text(0.5, yv, nm, ha="center", va="center", fontsize=8, color="0.35", transform=axtab.transAxes)
+        for x_, vv in zip(xc, vals):
+            axtab.text(x_, yv, vv, ha="center", va="center", fontsize=9 if bold else 8, fontweight="bold" if bold else "normal", transform=axtab.transAxes)
+    axtab.plot([0.05, 0.95], [0.97, 0.97], color="0.6", lw=0.5, transform=axtab.transAxes); axtab.plot([0.05, 0.95], [0.25, 0.25], color="0.6", lw=0.5, transform=axtab.transAxes)
+    axtab.text(0.5, 0.05, "$c = c_0 + c_f\\,(1-f) + c_a\\,(1-\\mathrm{align})$", ha="center", va="center", fontsize=9, transform=axtab.transAxes)
+    label(gA[0, 0], "a", "Measurement quality")
+
+    # ---- b: held-out calibration
+    axB = fig.add_subplot(gTop[1]); bins = np.linspace(-5, 5, 51)
+    axB.hist(np.clip(z, -5, 5), bins=bins, density=True, color="#b9cde2", ec="white", lw=0.4)
+    xg = np.linspace(-5, 5, 400); pdf = np.exp(-xg ** 2 / 2) / np.sqrt(2 * np.pi); axB.plot(xg, pdf, "k-", lw=1.0)
+    axB.annotate("N(0, 1)", xy=(-1.25, np.exp(-1.25 ** 2 / 2) / np.sqrt(2 * np.pi)), xytext=(-4.6, 0.3), fontsize=8, arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"))
     for v_ in (-1.96, 1.96):
-        axB.axvline(v_, color="0.45", ls=":", lw=1.3)
-    axB.set_xlim(-5, 5); axB.set_yticks([]); axB.spines[["top", "right", "left"]].set_visible(False); axB.tick_params(labelsize=11)
-    axB.set_xlabel("z = junction imbalance / predicted spread", fontsize=12.5)
-    axB.text(0.97, 0.97, f"RMS z = {cov[0]:.2f}\n{100 * cov[2]:.0f} % within ±1.96", transform=axB.transAxes, ha="right", va="top", fontsize=14)
-    axB.legend(loc="upper left", fontsize=11.5, frameon=False)
-    title(gs[1], "b   The uncertainty is calibrated out of sample")
-    foot(gs[1], f"{len(z)} junctions with every vessel imaged in one tile;\nmodel fitted on the other tiles (5 folds by tile)")
+        axB.axvline(v_, color="0.55", ls="--", lw=0.6)
+    axB.set_xlim(-5, 5); axB.set_yticks([]); axB.spines[["top", "right", "left"]].set_visible(False)
+    axB.set_xlabel("standardized junction residual $z$")
+    axB.text(0.98, 0.97, f"RMS $z$ = {cov[0]:.2f}\n{100 * cov[2]:.1f}% within $|z|$ < 1.96", transform=axB.transAxes, ha="right", va="top", fontsize=8)
+    label(axB, "b", "Held-out calibration")
 
-    # ---- c: what reconciliation does at one junction
-    gC = gs[2].subgridspec(1, 2, width_ratios=[0.78, 1.2], wspace=0.16); axj = fig.add_subplot(gC[0])
+    # ---- c: conservative reconciliation at one junction
+    gC = gs[1].subgridspec(1, 2, width_ratios=[0.62, 1.4], wspace=0.34); axj = fig.add_subplot(gC[0])
     allcl = np.vstack([v["cl"] + v["off"] for v in vinfo]); Rm = max(v["R"] for v in vinfo)
-    lo2, hi3 = allcl.min(0) - 1.3 * Rm, allcl.max(0) + 1.3 * Rm; side = max(hi3 - lo2) / 2; ctr = (lo2 + hi3) / 2
+    lo2, hi3 = allcl.min(0) - 1.2 * Rm, allcl.max(0) + 1.2 * Rm; side = max(hi3 - lo2) / 2; ctr = (lo2 + hi3) / 2
     r_lo, r_hi = int(max(ctr[0] - side, 0)), int(min(ctr[0] + side, img.shape[0])); c_lo, c_hi = int(max(ctr[1] - side, 0)), int(min(ctr[1] + side, img.shape[1]))
-    crop = img[r_lo:r_hi, c_lo:c_hi]; axj.imshow(img, cmap="gray", vmin=np.percentile(crop, 2), vmax=np.percentile(crop, 99.5))
+    cr = img[r_lo:r_hi, c_lo:c_hi]; axj.imshow(img, cmap="gray", vmin=np.percentile(cr, 1), vmax=np.percentile(cr, 99.5), interpolation="nearest")
+    mk = ["o", "s", "^"]
     for k, v in enumerate(vinfo):
-        cl = v["cl"] + v["off"]; _, _, nrm = _centerline_geometry(v["cl"]); axj.plot(cl[:, 1], cl[:, 0], color=VESSEL_COLORS[k], lw=4.5, solid_capstyle="round")
-        q_ = len(cl) // 2; lb = cl[q_] + 1.3 * v["R"] * nrm[q_]
-        axj.text(lb[1], lb[0], str(k + 1), color="white", fontsize=15, fontweight="bold", ha="center", va="center", bbox=dict(boxstyle="circle,pad=0.25", fc=VESSEL_COLORS[k], ec="white"))
+        cl = v["cl"] + v["off"]; _, _, nrm = _centerline_geometry(v["cl"]); axj.plot(cl[:, 1], cl[:, 0], color=VC[k], lw=2.0, solid_capstyle="round")
+        q_ = len(cl) // 2; lb = cl[q_] + 1.4 * v["R"] * nrm[q_]
+        axj.text(lb[1], lb[0], str(k + 1), color="white", fontsize=8, fontweight="bold", ha="center", va="center", bbox=dict(boxstyle="circle,pad=0.18", fc=VC[k], ec="white", lw=0.6))
     axj.set_xlim(c_lo, c_hi); axj.set_ylim(r_hi, r_lo); axj.set_xticks([]); axj.set_yticks([])
-    gCr = gC[1].subgridspec(2, 1, height_ratios=[1, 0.36], hspace=0.42); axd = fig.add_subplot(gCr[0])
+    for sp in axj.spines.values():
+        sp.set_linewidth(0.5); sp.set_color("0.5")
+    axd = fig.add_subplot(gC[1])
     for k, (i, s) in enumerate(es):
         yk = len(es) - 1 - k; a_, b_ = s * y[i], s * Qp[i]
-        axd.plot([a_, b_], [yk, yk], color=VESSEL_COLORS[k], lw=4, alpha=0.5, solid_capstyle="round", zorder=2)
-        axd.plot(a_, yk, "o", ms=13, color=VESSEL_COLORS[k], mec="white", mew=1.5, zorder=3)
-        axd.plot(b_, yk, "D", ms=15, mfc="none", mec=VESSEL_COLORS[k], mew=2.6, zorder=4)
-        axd.text(-0.02, yk, str(k + 1), transform=axd.get_yaxis_transform(), ha="right", va="center", fontsize=15, fontweight="bold", color=VESSEL_COLORS[k])
-        axd.text(1.01, yk, f"c = {c[i]:.2f}", transform=axd.get_yaxis_transform(), ha="left", va="center", fontsize=12.5)
-    axd.axvline(0, color="0.6", lw=1); axd.set_yticks([]); axd.set_ylim(-0.6, len(es) - 0.4)
-    lim = 1.15 * max(abs(v_) for i, s in es for v_ in (y[i], Qp[i])); axd.set_xlim(-lim, lim); axd.tick_params(labelsize=11)
-    axd.plot([], [], "o", ms=11, color="0.45", label="measured  y"); axd.plot([], [], "D", ms=11, mfc="none", mec="0.3", mew=2.2, label="reconciled  Q′")
-    axd.legend(fontsize=11.5, loc="lower right", frameon=False)
-    axd.set_xlabel("flow (nL/s):   − into the junction,  + out", fontsize=12); axd.spines[["top", "right", "left"]].set_visible(False)
-    s_ = im & (np.abs(y) > 1e-5) & (np.abs(Qp) > 1e-5)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        rel = (np.abs(Qp - y) / np.abs(y))[s_]
-    axd.text(0.02, 0.98, f"all {int(s_.sum())} vessels:\nmedian adjustment {100 * np.median(rel):.0f} %\ndirection changed {100 * np.mean(np.sign(y[s_]) != np.sign(Qp[s_])):.0f} %",
-             transform=axd.transAxes, ha="left", va="top", fontsize=11, bbox=dict(fc="#f4f6f8", ec="0.7", boxstyle="round,pad=0.4"))
-    axs_ = fig.add_subplot(gCr[1]); axs_.axis("off")
-    axs_.text(0.0, 0.62, "measured", fontsize=13, fontweight="bold", transform=axs_.transAxes)
-    axs_.text(0.0, 0.08, f"Σ s·y = {abs(before):.3f} nL/s\n({abs(before) / thr:.0%} of the flow)", fontsize=12.5, transform=axs_.transAxes)
-    axs_.annotate("", xy=(0.56, 0.45), xytext=(0.43, 0.45), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=2.5, color="0.3"))
-    axs_.text(0.62, 0.62, "reconciled", fontsize=13, fontweight="bold", transform=axs_.transAxes)
-    axs_.text(0.62, 0.2, "Σ s·Q′ = 0", fontsize=13, transform=axs_.transAxes)
-    title(gs[2], "c   Reconciliation enforces conservation; the least reliable flow moves most")
-    foot(gs[2], "$Q' = \\arg\\min_{B_I Q = 0}\; \\sum_e w_e\\,(Q_e - y_e)^2$     (weights from $c_e$ and the flow, updated self-consistently)", )
+        axd.plot([a_, b_], [yk, yk], color=VC[k], lw=1.2, zorder=2)
+        axd.plot(b_, yk, "D", ms=7, mfc="white", mec=VC[k], mew=1.3, zorder=3)
+        axd.plot(a_, yk, "o", ms=4.5, color=VC[k], mec="white", mew=0.4, zorder=4)
+    axd.set_yticks(range(len(es))); axd.set_yticklabels([f"{len(es) - j}   $c$ = {c[es[len(es) - 1 - j][0]]:.2f}" for j in range(len(es))], fontsize=8)
+    for j, tl_ in enumerate(axd.get_yticklabels()):
+        tl_.set_color(VC[len(es) - 1 - j])
+    axd.tick_params(axis="y", length=0); axd.axvline(0, color="0.6", lw=0.6, zorder=1); axd.set_ylim(-0.6, len(es) - 0.4)
+    lim = 1.15 * max(abs(v_) for i, s in es for v_ in (y[i], Qp[i])); axd.set_xlim(-lim, lim)
+    axd.spines[["top", "right", "left"]].set_visible(False); axd.set_xlabel("flow (nL/s)   (− into junction, + out)")
+    axd.plot([], [], "o", ms=5.5, color="0.4", label="measured $y$"); axd.plot([], [], "D", ms=5.5, mfc="white", mec="0.3", mew=1.2, label="reconciled Q′")
+    axd.legend(loc="lower right", fontsize=8, frameon=False, handletextpad=0.3)
+    axd.text(0.5, 1.04, f"|Σ s·y| = {abs(before):.3f} nL/s   →   |Σ s·Q′| = 0", transform=axd.transAxes, ha="center", va="bottom", fontsize=8.5)
+    label(axj, "c", "Conservative reconciliation at one junction")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT_DIR / "fig6v3.png", dpi=140, bbox_inches="tight", facecolor="white"); fig.savefig(OUT_DIR / "fig6v3.pdf", bbox_inches="tight", facecolor="white")
+    fig.savefig(OUT_DIR / "fig6v3.png", dpi=300, facecolor="white"); fig.savefig(OUT_DIR / "fig6v3.pdf", facecolor="white")
+    fig.savefig(OUT_DIR / "fig6v3.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})     # submission (PLOS: 300–600 dpi)
     log(f"wrote {OUT_DIR / 'fig6v3.png'}")
 
 
