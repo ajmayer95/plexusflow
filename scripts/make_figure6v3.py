@@ -292,8 +292,14 @@ def main():
         if ((loc[:, 0] > r_lo) & (loc[:, 0] < r_hi) & (loc[:, 1] > c_lo) & (loc[:, 1] < c_hi)).any():
             axj.plot(loc[:, 1], loc[:, 0], color="white", lw=0.7, alpha=0.75, zorder=3)
     jpt = graph_to_tile_batch(np.array([[G.nodes[nodes[jn]]["x"], G.nodes[nodes[jn]]["y"]]]), mgeom, tj)[0]
-    for k, v in enumerate(vinfo):
-        cl = v["cl"] + v["off"]; _, _, nrm = _centerline_geometry(v["cl"]); axj.plot(cl[:, 1], cl[:, 0], color=VC[k], lw=2.0, solid_capstyle="round", zorder=4)
+    for k, (v, (i_e, _s)) in enumerate(zip(vinfo, es)):
+        cl = v["cl"] + v["off"]; _, _, nrm = _centerline_geometry(v["cl"])
+        # colour the stretch of the raw skeleton that the measurement covers (between the projections of its centreline ends)
+        sk = graph_to_tile_batch(np.asarray(G.edges[E[i_e]]["path"], float), mgeom, tj)
+        sa = np.r_[0, np.cumsum(np.hypot(*np.diff(sk, axis=0).T))]; ss = np.linspace(0, sa[-1], max(int(sa[-1] / 0.5), 2))
+        skd = np.c_[np.interp(ss, sa, sk[:, 0]), np.interp(ss, sa, sk[:, 1])]
+        i0_, i1_ = sorted(int(np.argmin(np.linalg.norm(skd - p_, axis=1))) for p_ in (cl[0], cl[-1]))
+        seg = skd[i0_:i1_ + 1]; axj.plot(seg[:, 1], seg[:, 0], color=VC[k], lw=2.2, solid_capstyle="round", zorder=4)
         q_ = len(cl) // 2; lb = cl[q_] + 1.4 * v["R"] * nrm[q_]
         axj.text(lb[1], lb[0], str(k + 1), color="white", fontsize=8, fontweight="bold", ha="center", va="center", bbox=dict(boxstyle="circle,pad=0.18", fc=VC[k], ec="white", lw=0.6))
     axj.plot(jpt[1], jpt[0], "o", ms=4.5, color="white", mec="0.1", mew=0.7, zorder=6)
