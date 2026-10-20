@@ -5,9 +5,11 @@ comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gau
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
   a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
-  b  H1 phase delay from the driven boundary, tile-averaged: each accepted tile's ρ-weighted circular mean of its vessels'
-     aligned H1 phase (relative to their flow direction), subtracted from the boundary phase (circular mean of the field's
-     vessels within 1 hop of the arterial carve boundary and venous outflow); positive = peaks later; star = venous outflow
+  b  H1 phase delay from the dorsal aorta (zero = DA H1 phase in the reference tile), per accepted tile as an arrow: colour =
+     the tile's ρ-weighted mean delay (flow-direction frame, sign of Q′); direction = within-tile delay gradient (weighted
+     plane fit of the vessels' delays vs position), i.e. the local direction of pulse travel; length ∝ steepness (floor 45 %);
+     dot = gradient not significant (|z| < 2); dashed = weakly linked block (offset from the weak cross-links / symmetry);
+     open grey = tile offset undetermined (bootstrap SD > 30°) or near-unconstrained; star = venous outflow
   supplement (fig7_supp_heldout): held-out overlap prediction — for every overlapping tile pair with ≥ 5 shared coherent
      vessels that is not a bridge, all links between the two tiles removed, ψ refitted, ψ_a − ψ_b predicted vs measured
   c  validation on vessels imaged in two tiles: same-vessel phase difference between tiles after alignment, H1 (fitted)
@@ -54,6 +56,8 @@ def tile_polygons(stage):
         with tifffile.TiffFile(f_) as tf_:
             shp[int(re.match(r"vid(\d+)_", f_.name).group(1))] = tf_.pages[0].shape[:2]
     geom = load_tile_geometry(StageConfig.load(stage), video_shapes=shp); out = {}
+    global FUSE_UM_PX
+    FUSE_UM_PX = 1.7 * geom.downsample                                  # tile pixel 1.7 µm; fused image downsampled
     for t, tg in geom.tiles.items():
         H, W = tg.video_shape; corners = np.array([[0, 0, 1], [0, W, 1], [H, W, 1], [H, 0, 1]], float)
         rm, cm, _ = (tg.A_full @ corners.T)
@@ -188,9 +192,13 @@ def main():
     core = [t for t in tl_ if t not in masked]
     log(f"  (b) shown {len(core)} of {len(tl_)} tiles (dashed: weakly linked block); grey: undetermined offset or {sorted(tl_[kp_[i]] for i in np.flatnonzero(side_))}, "
         f"near-unconstrained {sorted(tl_[i] for i in np.flatnonzero(weak_))}")
-    tdel, tR, nflip, ntot = {}, {}, {}, {}; eixf = {e: i for i, e in enumerate(Ef)}
+    tdel, tR, nflip, ntot, tvec = {}, {}, {}, {}, {}; eixf = {e: i for i, e in enumerate(Ef)}; Hm_ = mos.shape[0]
+    def mid(e):
+        pth = G.edges[e].get("path")
+        p_ = np.asarray(pth, float)[len(pth) // 2] if pth is not None and len(pth) else np.array([np.mean([G.nodes[n]["x"] for n in e]), np.mean([G.nodes[n]["y"] for n in e])])
+        return np.array([p_[0], Hm_ - p_[1]])
     for t in band:
-        zs, ws = [], []
+        zs, ws, xy_ = [], [], []
         for e, x in meas.items():
             y = x.get(t)
             if y is None or not np.isfinite(y["rho"]) or y["rho"] < 0.1 or abs(y["H"][0]) == 0:
@@ -199,9 +207,16 @@ def main():
             if i_ is None or F["Qp"][i_] == 0:
                 continue
             nflip[t] = nflip.get(t, 0) + int(np.sign(y["a0"]) != np.sign(F["Qp"][i_])); ntot[t] = ntot.get(t, 0) + 1
-            zs.append(np.exp(1j * np.angle(np.sign(F["Qp"][i_]) * y["H"][0] * np.exp(-1j * psi[t])))); ws.append(y["rho"])
+            zs.append(np.exp(1j * np.angle(np.sign(F["Qp"][i_]) * y["H"][0] * np.exp(-1j * psi[t])))); ws.append(y["rho"]); xy_.append(mid(e))
         if len(zs) >= 5:
             S = np.sum(np.array(ws) * np.array(zs)); tdel[t] = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(S))); tR[t] = abs(S) / np.sum(ws)
+            if len(zs) >= 8:                     # within-tile delay gradient: weighted plane fit, delay relative to the tile mean
+                dv_ = np.degrees(np.angle(np.conj(np.array(zs)) * S / abs(S)))           # delay of each vessel minus the tile's (deg)
+                X_ = np.array(xy_) - np.average(np.array(xy_), axis=0, weights=ws); w_ = np.array(ws)
+                A_ = X_ * np.sqrt(w_)[:, None]; b_ = (dv_ - np.average(dv_, weights=w_)) * np.sqrt(w_)
+                g_, *_ = np.linalg.lstsq(A_, b_, rcond=None); res_ = b_ - A_ @ g_
+                cov_ = np.linalg.pinv(A_.T @ A_) * (res_ @ res_) / max(len(b_) - 3, 1)
+                tvec[t] = (g_, float(np.sqrt(g_ @ np.linalg.pinv(cov_) @ g_)))            # gradient (deg / fused px), its z
     fr = {t: nflip.get(t, 0) / ntot[t] for t in ntot}
     log("  (b) tiles where the measured mean runs against Q′ for > 30 % of vessels: " + (", ".join(f"{t} ({100 * v:.0f}%)" for t, v in sorted(fr.items()) if v > 0.3) or "none"))
     vals = np.array(list(tdel.values()))
@@ -217,15 +232,26 @@ def main():
     dmax = max(v for t, v in tdel.items() if t in core and sd.get(t, np.inf) <= SD_MAX); vtop = 10 * np.ceil(dmax / 10)
     log(f"  (b) max delay over determined tiles {dmax:.0f}° (tile {max((v, t) for t, v in tdel.items() if t in core and sd.get(t, np.inf) <= SD_MAX)[1]})")
     cmp = plt.cm.cividis_r; nph = mcolors.Normalize(0, vtop)
+    # arrows: direction of increasing delay (pulse travel), length ∝ gradient steepness, colour = tile mean delay; dot if |z| < 2
+    side_len = np.median([np.linalg.norm(polys[t][1] - polys[t][0]) for t in band]); Lmax = 0.95 * side_len
+    sig = {t: g for t, (g, z) in tvec.items() if z >= 2}; gref = np.percentile([np.linalg.norm(g) for g in sig.values()], 90) if sig else 1
+    da_xy = np.mean([[G.nodes[n]["x"], Hm_ - G.nodes[n]["y"]] for n in dom["DA"]], axis=0); away = []
     for t, v in tdel.items():
-        if t in block_t and t not in masked and sd.get(t, np.inf) <= SD_MAX:   # weakly linked block: coloured, dashed outline
-            axM.scatter(*cen[t], s=(3 + 5 * tR[t]) ** 2, color=cmp(nph(v)), edgecolors="0.1", linewidths=0.9, linestyles="--", zorder=4)
-            continue
-        ok = t in core and sd.get(t, np.inf) <= SD_MAX; col = cmp(nph(v))
-        if ok:
-            axM.plot(*cen[t], "o", ms=3 + 5 * tR[t], mfc=col, mec="0.15", mew=0.4, zorder=4)
-        else:                                                     # tile offset undetermined (SD > 30°): no phase shown
-            axM.plot(*cen[t], "o", ms=5, mfc="white", mec="0.55", mew=0.9, zorder=4)
+        shown = (t in core or t in block_t) and t not in masked and sd.get(t, np.inf) <= SD_MAX
+        if not shown:                                             # tile offset undetermined: no phase shown
+            axM.plot(*cen[t], "o", ms=5, mfc="white", mec="0.55", mew=0.9, zorder=4); continue
+        col = cmp(nph(v)); dashed = t in block_t
+        if t in sig:
+            g = sig[t]; u = g / np.linalg.norm(g); L = Lmax * (0.45 + 0.55 * min(np.linalg.norm(g) / gref, 1.0))
+            away.append(float(np.dot(u, (cen[t] - da_xy) / np.linalg.norm(cen[t] - da_xy))))
+            axM.add_patch(matplotlib.patches.FancyArrowPatch(cen[t] - 0.5 * L * u, cen[t] + 0.5 * L * u, arrowstyle="simple,head_width=3.2,head_length=3.2,tail_width=1.2",
+                          mutation_scale=1.4, fc=col, ec="0.1", lw=0.6, ls="--" if dashed else "-", zorder=4))
+        else:
+            axM.plot(*cen[t], "o", ms=3.5, mfc=col, mec="0.15", mew=0.4, ls="none", zorder=4)
+    gm = np.array([np.linalg.norm(g) for g in sig.values()]) * 100 / FUSE_UM_PX
+    log(f"  (b) delay gradients: {len(sig)} of {len(tvec)} fitted tiles with |z| ≥ 2; steepness median {np.median(gm):.0f}°/100 µm "
+        f"(10–90 % {np.percentile(gm, 10):.0f}–{np.percentile(gm, 90):.0f}); pointing away from the aorta (cos > 0) in {np.mean(np.array(away) > 0):.0%}, "
+        f"median cos {np.median(away):.2f}")
     for i in [int(i) for i in dom["out"]]:                                   # venous outflow nodes, for orientation
         n_ = nds[i]; xy = (G.nodes[n_]["x"], mos.shape[0] - G.nodes[n_]["y"])
         axM.plot(*xy, marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
