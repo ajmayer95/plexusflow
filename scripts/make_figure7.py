@@ -71,7 +71,15 @@ def main():
                          "axes.linewidth": 0.6, "xtick.major.width": 0.6, "ytick.major.width": 0.6, "xtick.major.size": 2.5, "ytick.major.size": 2.5})
     G = _paths.load_graph(); dc = pickle.loads((_paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
     log("rebuilding the AC field (per-tile phasors and synchronisation pairs)")
-    F = build_ac_field(G, dc); meas, psi, pairs, sd = F["_meas"], F["psi"], F["_pairs"], F["gauge_sd_deg"]
+    # synchronisation anchored on the dorsal aorta (same vessel in tiles 14 / 21 / 28 must agree; ρ ≥ 0.5 measurements, ×100),
+    # as results/ac_field_v3 (scripts/ac_field.py --sync-da --sync-da-min-rho 0.5 --sync-da-weight 100)
+    from plexusflow.reconcile import carved_domain as _cd
+    _dom0 = _cd(G); _carved = set(_dom0["edges"])
+    da_edges = [e if G.has_edge(*e) else e[::-1] for n in _dom0["DA"] for e in G.edges(n)]
+    da_edges = [e for e in da_edges if e not in _carved and e[::-1] not in _carved]
+    F = build_ac_field(G, dc, sync_extra_edges=da_edges, sync_extra_min_rho=0.5, sync_extra_weight=100.0)
+    meas, psi, pairs, sd = F["_meas"], F["psi"], F["_pairs"], F["gauge_sd_deg"]
+    pairs = [(e, a, b) for e, a, b in pairs if e not in set(da_edges)]          # validation on carved vessels only
     tf0, ref, f_ref, band = G.graph["tile_f0_piv"], F["ref_tile"], F["f_ref"], set(F["band"])
     log(f"{len(band)} of {len(tf0)} tiles in band; {len(pairs)} synchronisation pairs (both ρ ≥ 0.1)")
 
@@ -164,17 +172,18 @@ def main():
     okf = F["elig"] & np.array([sd.get(int(t), np.inf) <= SD_MAX if t >= 0 else False for t in F["tile"]])
     phf = np.angle(F["H"][0] * np.sign(F["Qp"])); nb = okf & (eB <= 1)
     phi_bnd = np.angle(np.sum(np.exp(1j * phf[nb])))
-    # zero = the dorsal aorta's H1 phase in the reference tile (both DA stubs, ρ-weighted): the arterial flow peak
+    # zero = the physiological boundary, all in tile 14 (one recording, no tile offset between them): the two DA inflow stubs and
+    # the two V outflow stubs, ρ-weighted H1 phase in each vessel's own flow direction
     from plexusflow.reconcile.harmonics import phasors as _ph, coherence as _coh
-    zda, wda = [], []
-    for n_ in dom["DA"]:
+    zda, wda = [], []; ZT = 14
+    for n_ in list(dom["DA"]) + list(dom["V"]):
         for e_ in G.edges(n_):
             for m in G.edges[e_].get("measurements_piv") or []:
-                if int(m["tile_id"]) == ref and m.get("Q_t") is not None and (m.get("quality") or {}).get("kl_ok"):
-                    a0_, H_ = _ph(m["Q_t"], tf0[ref]); r_ = _coh(m["Q_t"], tf0[ref])
-                    zda.append(np.exp(1j * np.angle(np.sign(a0_) * H_[0] * np.exp(-1j * psi[ref])))); wda.append(max(r_, 0))
+                if int(m["tile_id"]) == ZT and m.get("Q_t") is not None and (m.get("quality") or {}).get("kl_ok"):
+                    a0_, H_ = _ph(m["Q_t"], tf0[ZT]); r_ = _coh(m["Q_t"], tf0[ZT])
+                    zda.append(np.exp(1j * np.angle(np.sign(a0_) * H_[0] * np.exp(-1j * psi[ZT])))); wda.append(max(r_, 0))
     phi_b = np.angle(np.sum(np.array(wda) * np.array(zda)))
-    log(f"  (b) zero = dorsal aorta H1 phase in tile {ref}: {np.degrees(phi_b):.1f}° ({len(zda)} DA measurements); "
+    log(f"  (b) zero = tile-{ZT} physiological boundary (DA + V stubs): {np.degrees(phi_b):.1f}° ({len(zda)} measurements); "
         f"driven boundary {np.degrees(phi_bnd):.1f}° → boundary lags the DA by {np.degrees(np.angle(np.exp(1j * (phi_b - phi_bnd)))):.0f}°")
     # well-synchronised core: drop near-unconstrained tiles (< 5 % of median link weight) and the weakest normalised cut
     #     (the side without the reference tile) — tiles whose orientation relative to the rest the shared vessels do not fix
@@ -257,7 +266,7 @@ def main():
         axM.plot(*xy, marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
     cb = fig.colorbar(sm, ax=axM, fraction=0.045, pad=0.01, shrink=0.8, ticks=[0, 60, 120, 180] if vtop >= 180 else [0, vtop / 2, vtop], extend="min")
-    cb.set_label("H1 phase delay from dorsal aorta (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
+    cb.set_label("H1 phase delay from DA/V boundary (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
     label(gs[1], "b")
 
     # ---- c: repeated-vessel agreement after alignment
