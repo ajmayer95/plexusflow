@@ -194,7 +194,8 @@ def main():
                          "mathtext.bf": "Arial:bold", "font.size": 8, "axes.labelsize": 9, "xtick.labelsize": 8, "ytick.labelsize": 8,
                          "axes.linewidth": 0.6, "xtick.major.width": 0.6, "ytick.major.width": 0.6, "xtick.major.size": 2.5, "ytick.major.size": 2.5})
     VC = ["#0072B2", "#E69F00", "#CC79A7"]                 # vessels 1–3 (Okabe–Ito), used in c only
-    ACC, CL, ARR = "#5b84b1", "#56B4E9", "#F0E442"          # calibration accent; centreline; flow arrows
+    ACC, ARR = "#5b84b1", "white"                          # calibration accent; flow arrows (white, dark edge)
+    CL_OTHER = "#009E73"                                   # centreline of the low-quality example (not in the junction)
     fig = plt.figure(figsize=(7.5, 5.3), facecolor="white")
     gs = fig.add_gridspec(2, 1, height_ratios=[1, 1.0], hspace=0.42, left=0.025, right=0.985, top=0.94, bottom=0.075)
     gTop = gs[0].subgridspec(1, 2, width_ratios=[1.12, 1], wspace=0.16)
@@ -202,14 +203,14 @@ def main():
     def label(bbox_from, letter, heading):
         b_ = bbox_from.get_position(fig); fig.text(b_.x0 - 0.015, b_.y1 + 0.022, letter, fontsize=11, fontweight="bold", va="bottom")
 
-    def crop_vessel(ax, v, side_R=3.6):
+    def crop_vessel(ax, v, col, side_R=3.6):
         cl = v["cl"] + v["off"]; R = v["R"]; vf = v["vf"]; H, W = vf.shape[:2]; _, tang, nrm = _centerline_geometry(v["cl"])
         ctr = (cl.min(0) + cl.max(0)) / 2; side = max(max(cl.max(0) - cl.min(0)) / 2 + 1.4 * R, side_R * R)
         r0, r1 = int(max(ctr[0] - side, 0)), int(min(ctr[0] + side, img.shape[0])); c0_, c1_ = int(max(ctr[1] - side, 0)), int(min(ctr[1] + side, img.shape[1]))
         cr = img[r0:r1, c0_:c1_]; ax.imshow(img, cmap="gray", vmin=np.percentile(cr, 1), vmax=np.percentile(cr, 99.5), interpolation="nearest")
-        ax.plot(cl[:, 1], cl[:, 0], color=CL, lw=1.3, zorder=4, solid_capstyle="round")
+        ax.plot(cl[:, 1], cl[:, 0], color=col, lw=1.4, zorder=4, solid_capstyle="round")
         for q in np.flatnonzero(v["vm"]):
-            a_, b_ = cl[q] - 0.7 * R * nrm[q], cl[q] + 0.7 * R * nrm[q]; ax.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white", lw=0.6, zorder=5)
+            a_, b_ = cl[q] - 0.7 * R * nrm[q], cl[q] + 0.7 * R * nrm[q]; ax.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white", lw=0.5, alpha=0.85, zorder=5)
         qs = np.arange(1, len(v["cl"]) - 1, max(2, len(v["cl"]) // 6)); ys_, xs_ = [], []
         for q in qs:
             for rho_ in (-0.5 * R, 0.5 * R):
@@ -217,83 +218,97 @@ def main():
         ys_, xs_ = np.array(ys_), np.array(xs_); okp = (ys_ >= 0) & (ys_ < H) & (xs_ >= 0) & (xs_ < W); ys_, xs_ = ys_[okp], xs_[okp]
         if len(ys_):
             U, V = vf[ys_, xs_, 0], vf[ys_, xs_, 1]; Ls = np.nanpercentile(np.hypot(U, V), 90) or 1.0
-            ax.quiver(xs_ + v["off"][1], ys_ + v["off"][0], U / Ls * 0.85 * R, V / Ls * 0.85 * R, color=ARR, angles="xy", scale_units="xy", scale=1,
-                      width=0.016, headwidth=3.2, headlength=3.5, headaxislength=3.2, zorder=6)
+            ax.quiver(xs_ + v["off"][1], ys_ + v["off"][0], U / Ls * 0.85 * R, V / Ls * 0.85 * R, color=ARR, edgecolor="0.1", linewidth=0.4, angles="xy",
+                      scale_units="xy", scale=1, width=0.014, headwidth=3.4, headlength=3.6, headaxislength=3.3, zorder=6)
         ax.set_xlim(c0_, c1_); ax.set_ylim(r1, r0); ax.set_xticks([]); ax.set_yticks([])
         for sp in ax.spines.values():
             sp.set_linewidth(0.5); sp.set_color("0.5")
 
     # ---- a: measurement quality
-    pair = [ex[0], ex[-1]]; gA = gTop[0].subgridspec(2, 2, height_ratios=[1, 0.5], hspace=0.08, wspace=0.08)
+    pair = [ex[0], ex[-1]]; gA = gTop[0].subgridspec(2, 2, height_ratios=[1, 0.6], hspace=0.05, wspace=0.08)
     for k, (i, *_r) in enumerate(pair):
-        axv = fig.add_subplot(gA[0, k]); crop_vessel(axv, _r[2]); axv.set_title("High quality" if k == 0 else "Low quality", fontsize=9, pad=3)
-    axtab = fig.add_subplot(gA[1, :]); axtab.axis("off")
-    rows_ = [("sections kept", [f"{int(v['vm'].sum())}/{len(v['vm'])}" for i, _, _, v, _ in pair]),
-             ("alignment", [f"{al(M[(tj, E[i])]):.2f}" for i, *_ in pair]), ("$c$", [f"{c[i]:.2f}" for i, *_ in pair])]
-    xc = [0.25, 0.75]
-    for r_, (nm, vals) in enumerate(rows_):
-        yv = 0.86 - 0.2 * r_; bold = nm == "$c$"
-        axtab.text(0.5, yv, nm, ha="center", va="center", fontsize=8, color="0.35", transform=axtab.transAxes)
-        for x_, vv in zip(xc, vals):
-            axtab.text(x_, yv, vv, ha="center", va="center", fontsize=9 if bold else 8, fontweight="bold" if bold else "normal", transform=axtab.transAxes)
-    axtab.plot([0.05, 0.95], [0.97, 0.97], color="0.6", lw=0.5, transform=axtab.transAxes); axtab.plot([0.05, 0.95], [0.25, 0.25], color="0.6", lw=0.5, transform=axtab.transAxes)
-    axtab.text(0.5, 0.05, "$c = c_0 + c_f\\,(1-f) + c_a\\,(1-\\mathrm{align})$", ha="center", va="center", fontsize=9, transform=axtab.transAxes)
-    label(gA[0, 0], "a", "Measurement quality")
+        axv = fig.add_subplot(gA[0, k]); crop_vessel(axv, _r[2], VC[0] if k == 0 else CL_OTHER)
+    axtab = fig.add_subplot(gA[1, :]); axtab.axis("off"); T = axtab.transAxes
+    xs_ = [0.5, 0.25, 0.75]; hdr_y, rows_y = 0.87, [0.65, 0.49, 0.33]
+    axtab.text(xs_[1], hdr_y, "High quality", ha="center", va="center", fontsize=8.5, fontweight="bold", transform=T)
+    axtab.text(xs_[2], hdr_y, "Low quality", ha="center", va="center", fontsize=8.5, fontweight="bold", transform=T)
+    tab_rows = [("sections kept", [f"{int(v['vm'].sum())}/{len(v['vm'])}" for i, _, _, v, _ in pair]),
+                ("alignment", [f"{al(M[(tj, E[i])]):.2f}" for i, *_ in pair]), ("$c$", [f"{c[i]:.2f}" for i, *_ in pair])]
+    for yv, (nm, vals) in zip(rows_y, tab_rows):
+        axtab.text(xs_[0], yv, nm, ha="center", va="center", fontsize=8, color="0.35", transform=T)
+        for x_, vv in zip(xs_[1:], vals):
+            axtab.text(x_, yv, vv, ha="center", va="center", fontsize=8, fontweight="bold" if nm == "$c$" else "normal", transform=T)
+    for yl, lw_ in ((0.98, 0.8), (0.76, 0.4), (0.22, 0.8)):
+        axtab.plot([0.03, 0.97], [yl, yl], color="0.2", lw=lw_, transform=T)
+    axtab.text(0.5, 0.07, "$c = c_0 + c_f\\,(1-f) + c_a\\,(1-\\mathrm{align})$", ha="center", va="center", fontsize=7.5, color="0.25", transform=T)
+    label(gA[0, 0], "a", "")
 
     # ---- b: held-out calibration
-    gB = gTop[1].subgridspec(2, 1, height_ratios=[0.5, 1], hspace=0.1); axS = fig.add_subplot(gB[0]); axS.axis("off")
-    axS.set_xlim(0, 1); axS.set_ylim(0, 1); jx, jy = 0.1, 0.5
-    for (dx, dy, lab_, inward) in ((-0.065, 0.28, "$y_1$", True), (-0.065, -0.28, "$y_2$", True), (0.08, 0.0, "$y_3$", False)):
-        x0_, y0_ = jx + dx, jy + dy
-        axS.annotate("", xy=(jx, jy) if inward else (x0_, y0_), xytext=(x0_, y0_) if inward else (jx, jy),
-                     arrowprops=dict(arrowstyle="-|>", lw=0.9, color="0.25", shrinkA=1, shrinkB=3, mutation_scale=7))
-        axS.text(x0_ + (-0.015 if dx < 0 else 0.015), y0_, lab_, ha="right" if dx < 0 else "left", va="center", fontsize=8.5)
-    axS.plot(jx, jy, "o", ms=4.5, color="0.25")
-    for yv, nm, eq in ((0.85, "imbalance", "$r_j = \\Sigma_e\\, s_e\\, y_e$"),
-                       (0.5, "predicted from $c$", "$\\sigma_j = (\\Sigma_e\\, c_e^2\\, y_e^2 + \\sigma_0^2)^{1/2}$"),
-                       (0.13, "standardized", "$z_j = r_j\\, /\\, \\sigma_j$")):
-        axS.text(0.3, yv, nm, fontsize=8, color="0.35", va="center")
-        axS.text(0.58, yv, eq, fontsize=8.5, va="center")
-    axB = fig.add_subplot(gB[1]); bins = np.linspace(-5, 5, 51)
+    axB = fig.add_subplot(gTop[1]); bins = np.linspace(-5, 5, 51)
     axB.hist(np.clip(z, -5, 5), bins=bins, density=True, color="#b9cde2", ec="white", lw=0.4)
     xg = np.linspace(-5, 5, 400); pdf = np.exp(-xg ** 2 / 2) / np.sqrt(2 * np.pi); axB.plot(xg, pdf, "k-", lw=1.0)
-    axB.annotate("N(0, 1)", xy=(-1.25, np.exp(-1.25 ** 2 / 2) / np.sqrt(2 * np.pi)), xytext=(-4.7, 0.3), fontsize=8, arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"))
+    axB.annotate("N(0, 1)", xy=(1.35, np.exp(-1.35 ** 2 / 2) / np.sqrt(2 * np.pi)), xytext=(2.5, 0.27), fontsize=8, arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
     for v_ in (-1.96, 1.96):
-        axB.axvline(v_, color="0.55", ls="--", lw=0.6)
-    axB.set_xlim(-5, 5); axB.set_yticks([]); axB.spines[["top", "right", "left"]].set_visible(False)
-    axB.set_xlabel("$z_j$  (held-out same-tile junctions)")
-    axB.text(0.98, 0.97, f"RMS $z$ = {cov[0]:.2f}\n{100 * cov[2]:.1f}% within $|z|$ < 1.96", transform=axB.transAxes, ha="right", va="top", fontsize=8)
-    label(axS, "b", "")
+        axB.axvline(v_, color="0.6", ls="--", lw=0.6)
+    axB.set_xlim(-5, 5); axB.set_ylim(0, 0.62); axB.set_yticks([]); axB.spines[["top", "right", "left"]].set_visible(False)
+    axB.set_xlabel("standardized junction residual $z_j$")
+    axB.text(0.99, 0.99, f"RMS $z$ = {cov[0]:.2f}\n95% within $|z|$ < 1.96", transform=axB.transAxes, ha="right", va="top", fontsize=8)
+    axS = axB.inset_axes([0.0, 0.5, 0.36, 0.5]); axS.set_xlim(0, 1); axS.set_ylim(0, 1); axS.set_xticks([]); axS.set_yticks([])
+    for sp in axS.spines.values():
+        sp.set_linewidth(0.5); sp.set_color("0.55")
+    axS.set_facecolor("white"); axS.set_zorder(5)
+    axS.text(0.06, 0.9, "same-tile junction $j$", fontsize=7.5, fontweight="bold", va="center")
+    jx, jy = 0.24, 0.66
+    for (dx, dy, lab_, inward) in ((-0.1, 0.09, "$y_1$", True), (-0.1, -0.09, "$y_2$", True), (0.12, 0.0, "$y_3$", False)):
+        x0_, y0_ = jx + dx, jy + dy
+        axS.annotate("", xy=(jx, jy) if inward else (x0_, y0_), xytext=(x0_, y0_) if inward else (jx, jy),
+                     arrowprops=dict(arrowstyle="-|>", lw=0.7, color="0.25", shrinkA=0, shrinkB=2, mutation_scale=5))
+        axS.text(x0_ + (-0.02 if dx < 0 else 0.02), y0_, lab_, ha="right" if dx < 0 else "left", va="center", fontsize=7)
+    axS.plot(jx, jy, "o", ms=3, color="0.25")
+    axS.text(0.52, 0.66, "$r_j = \\Sigma_e\\, s_e\\, y_e$", fontsize=7.5, va="center")
+    axS.text(0.06, 0.42, "$\\sigma_j = (\\Sigma_e\\, c_e^2\\, y_e^2 + \\sigma_0^2)^{1/2}$", fontsize=7.5, va="center")
+    axS.text(0.06, 0.16, "$z_j = r_j\\, /\\, \\sigma_j$", fontsize=7.5, va="center", fontweight="bold")
+    label(axB, "b", "")
 
     # ---- c: conservative reconciliation at one junction
-    gC = gs[1].subgridspec(1, 2, width_ratios=[0.62, 1.4], wspace=0.34); axj = fig.add_subplot(gC[0])
+    gC = gs[1].subgridspec(1, 2, width_ratios=[0.78, 1.3], wspace=0.24); axj = fig.add_subplot(gC[0])
     allcl = np.vstack([v["cl"] + v["off"] for v in vinfo]); Rm = max(v["R"] for v in vinfo)
     lo2, hi3 = allcl.min(0) - 1.2 * Rm, allcl.max(0) + 1.2 * Rm; side = max(hi3 - lo2) / 2; ctr = (lo2 + hi3) / 2
     r_lo, r_hi = int(max(ctr[0] - side, 0)), int(min(ctr[0] + side, img.shape[0])); c_lo, c_hi = int(max(ctr[1] - side, 0)), int(min(ctr[1] + side, img.shape[1]))
     cr = img[r_lo:r_hi, c_lo:c_hi]; axj.imshow(img, cmap="gray", vmin=np.percentile(cr, 1), vmax=np.percentile(cr, 99.5), interpolation="nearest")
-    mk = ["o", "s", "^"]
+    jset_k = {E[i] for i, _ in es} | {E[i][::-1] for i, _ in es}
+    for e2, k2 in kdj.items():                                       # faint skeleton: the tile's other measured centrelines
+        if e2 in jset_k or len(k2["cl_used"]) < 3:
+            continue
+        c2 = np.asarray(k2["cl_used"], float) + np.asarray(k2["roi_offset"], float)
+        if ((c2[:, 0] > r_lo) & (c2[:, 0] < r_hi) & (c2[:, 1] > c_lo) & (c2[:, 1] < c_hi)).any():
+            axj.plot(c2[:, 1], c2[:, 0], color="white", lw=0.6, alpha=0.55, zorder=3)
+    ends = [np.array([v["cl"][0] + v["off"], v["cl"][-1] + v["off"]]) for v in vinfo]
+    cand_ = min((p_ for e_ in ends for p_ in e_), key=lambda p_: sum(np.min(np.linalg.norm(e2_ - p_, axis=1)) for e2_ in ends))
+    jpt = np.mean([e_[np.argmin(np.linalg.norm(e_ - cand_, axis=1))] for e_ in ends], axis=0)
     for k, v in enumerate(vinfo):
-        cl = v["cl"] + v["off"]; _, _, nrm = _centerline_geometry(v["cl"]); axj.plot(cl[:, 1], cl[:, 0], color=VC[k], lw=2.0, solid_capstyle="round")
+        cl = v["cl"] + v["off"]; _, _, nrm = _centerline_geometry(v["cl"]); axj.plot(cl[:, 1], cl[:, 0], color=VC[k], lw=2.0, solid_capstyle="round", zorder=4)
         q_ = len(cl) // 2; lb = cl[q_] + 1.4 * v["R"] * nrm[q_]
         axj.text(lb[1], lb[0], str(k + 1), color="white", fontsize=8, fontweight="bold", ha="center", va="center", bbox=dict(boxstyle="circle,pad=0.18", fc=VC[k], ec="white", lw=0.6))
+    axj.plot(jpt[1], jpt[0], "o", ms=4.5, color="white", mec="0.1", mew=0.7, zorder=6)
     axj.set_xlim(c_lo, c_hi); axj.set_ylim(r_hi, r_lo); axj.set_xticks([]); axj.set_yticks([])
     for sp in axj.spines.values():
         sp.set_linewidth(0.5); sp.set_color("0.5")
     axd = fig.add_subplot(gC[1])
     for k, (i, s) in enumerate(es):
         yk = len(es) - 1 - k; a_, b_ = s * y[i], s * Qp[i]
-        axd.plot([a_, b_], [yk, yk], color=VC[k], lw=1.2, zorder=2)
+        axd.plot([a_, b_], [yk, yk], color=VC[k], lw=2.0, zorder=2, solid_capstyle="butt")
         axd.plot(b_, yk, "D", ms=7, mfc="white", mec=VC[k], mew=1.3, zorder=3)
         axd.plot(a_, yk, "o", ms=4.5, color=VC[k], mec="white", mew=0.4, zorder=4)
-    axd.set_yticks(range(len(es))); axd.set_yticklabels([f"{len(es) - j}   $c$ = {c[es[len(es) - 1 - j][0]]:.2f}" for j in range(len(es))], fontsize=8)
+    axd.set_yticks(range(len(es))); axd.set_yticklabels([f"$\\bf{{{len(es) - j}}}$   $c$ = {c[es[len(es) - 1 - j][0]]:.2f}" for j in range(len(es))], fontsize=8)
     for j, tl_ in enumerate(axd.get_yticklabels()):
         tl_.set_color(VC[len(es) - 1 - j])
     axd.tick_params(axis="y", length=0); axd.axvline(0, color="0.6", lw=0.6, zorder=1); axd.set_ylim(-0.6, len(es) - 0.4)
     lim = 1.15 * max(abs(v_) for i, s in es for v_ in (y[i], Qp[i])); axd.set_xlim(-lim, lim)
     axd.spines[["top", "right", "left"]].set_visible(False); axd.set_xlabel("flow (nL/s)   (− into junction, + out)")
-    axd.plot([], [], "o", ms=5.5, color="0.4", label="measured $y$"); axd.plot([], [], "D", ms=5.5, mfc="white", mec="0.3", mew=1.2, label="reconciled Q′")
-    axd.legend(loc="lower right", fontsize=8, frameon=False, handletextpad=0.3)
-    axd.text(0.5, 1.04, f"|Σ s·y| = {abs(before):.3f} nL/s   →   |Σ s·Q′| = 0", transform=axd.transAxes, ha="center", va="bottom", fontsize=8.5)
+    axd.plot([], [], "o", ms=4, color="0.4", label="measured"); axd.plot([], [], "D", ms=5, mfc="white", mec="0.3", mew=1.1, label="reconciled")
+    axd.legend(loc="upper left", fontsize=7.5, frameon=False, handletextpad=0.2, borderaxespad=0.1, labelspacing=0.3)
+    axd.text(0.99, 0.04, f"measured imbalance   {abs(before):.3f} nL/s\nreconciled imbalance   0", transform=axd.transAxes, ha="right", va="bottom", fontsize=8, linespacing=1.5)
     label(axj, "c", "Conservative reconciliation at one junction")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
