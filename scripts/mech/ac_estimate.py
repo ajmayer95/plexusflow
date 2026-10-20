@@ -37,9 +37,10 @@ def main():
     ap.add_argument("--gauge-passes", type=int, default=2)
     ap.add_argument("--n-jobs", type=int, default=8)
     ap.add_argument("--out", default="ac_estimate_v3")
+    ap.add_argument("--field", default="ac_field_v2", help="results/<field>.pkl (default ac_field_v2)")
     a = ap.parse_args()
     G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
-    A = pickle.loads((paths.RESULTS / "ac_field_v2.pkl").read_bytes())
+    A = pickle.loads((paths.RESULTS / f"{a.field}.pkl").read_bytes())
     if "var_phi" not in A:
         sys.exit("results/ac_field_v2.pkl predates the per-beat uncertainties — rerun scripts/ac_field.py")
     model = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text()); model["c_T"] = {int(k): v for k, v in model["c_T"].items()}

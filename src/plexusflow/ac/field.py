@@ -40,8 +40,44 @@ def _sync(pa, pb, pw, pz, nT, ref_i, start=None, n_iter=2000):
     return np.angle(z * np.conj(z[ref_i]))
 
 
-def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=50):
-    """dc: output of reconcile_dc (needs edges, Qp).  Returns the field dict (H is 3 × nE, u→v frame)."""
+def _sync_objective(pa, pb, pw, pz, psi):
+    """Σ w·Re(z_ab e^{i(ψ_b − ψ_a)}): the synchronisation objective (larger = more consistent)."""
+    return float(np.sum(pw * np.real(pz * np.exp(1j * (psi[pb] - psi[pa])))))
+
+
+def sync_diagnostics(pa, pb, pw, pz, nT, ref_i, psi, n_starts=50, step_deg=5.0, seed=0):
+    """Is the tile gauge a unique optimum?  (1) multi-start: the solve from n_starts random phases; (2) the weakest cut of the
+    tile graph (sign of the Fiedler vector of the weighted Laplacian, weights Σ ρ_aρ_b per tile pair): rotate the side not
+    holding the reference tile by θ (0–360°), re-optimise locally, record the objective.  Returns a dict with the objective
+    of `psi`, the restart objectives and their circular distance to `psi` (median over tiles), the best restart solution,
+    the cut (block tiles, cut weight / total weight) and the rotation profile (θ, objective after refinement)."""
+    rng = np.random.default_rng(seed); f0 = _sync_objective(pa, pb, pw, pz, psi); rs = []
+    for _ in range(n_starts):
+        p_ = _sync(pa, pb, pw, pz, nT, ref_i, start=rng.uniform(-np.pi, np.pi, nT))
+        dist = float(np.degrees(np.median(np.abs(np.angle(np.exp(1j * (p_ - psi)))))))
+        rs.append((_sync_objective(pa, pb, pw, pz, p_), dist, p_))
+    best = max(rs, key=lambda r: r[0])
+    A = np.zeros((nT, nT)); np.add.at(A, (pa, pb), pw); A = A + A.T; deg = A.sum(1)
+    weak = deg < 0.05 * np.median(deg)                   # near-unconstrained tiles: reported, left out of the cut
+    keep = np.flatnonzero(~weak); Ak = A[np.ix_(keep, keep)]; dk = Ak.sum(1)
+    Ln = np.eye(len(keep)) - Ak / np.sqrt(np.outer(dk, dk))   # normalised Laplacian: the cut balances link weight, not tile count
+    _, V = np.linalg.eigh(Ln); side = np.zeros(nT, bool); side[keep[V[:, 1] / np.sqrt(dk) > 0]] = True
+    if side[ref_i]:
+        side[keep] = ~side[keep]
+    cut = float(A[np.ix_(side, ~side)].sum() / max(A.sum() / 2, 1e-30)); prof = []
+    for th in np.arange(0, 360, step_deg):
+        p0 = psi + np.radians(th) * side; p_ = _sync(pa, pb, pw, pz, nT, ref_i, start=p0, n_iter=400)
+        prof.append((float(th), _sync_objective(pa, pb, pw, pz, p_), float(np.degrees(np.angle(np.exp(1j * np.median(p_[side] - psi[side])))))))
+    rigid = [(float(th), _sync_objective(pa, pb, pw, pz, psi + np.radians(th) * side)) for th in np.arange(0, 360, step_deg)]
+    return dict(objective=f0, restarts=[(r[0], r[1]) for r in rs], best=best[2], best_objective=best[0], block=np.flatnonzero(side),
+                cut_fraction=cut, rotation=prof, rigid_rotation=rigid, weak=np.flatnonzero(weak))
+
+
+def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=50, sync_extra_edges=None):
+    """dc: output of reconcile_dc (needs edges, Qp).  Returns the field dict (H is 3 × nE, u→v frame).
+
+    sync_extra_edges: edges outside the carved domain whose repeated measurements also constrain the tile gauge (e.g. the
+    dorsal-aorta stubs, seen in several tiles); they enter the synchronisation only, never the field."""
     from joblib import Parallel, delayed
     tf0 = G.graph["tile_f0_piv"]; f_ref = tf0[ref_tile]
     band = {t for t, f in tf0.items() if abs(f / f_ref - 1) <= f0_band}
@@ -51,7 +87,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
     band = {t for t in band if (_st.get(t) or {}).get("status") not in ("no_signal", "excluded", "no measurements")}
     sub = dc["edges"]; eix = {e: i for i, e in enumerate(sub)}
     items = []
-    for e in sub:
+    for e in list(sub) + [e for e in (sync_extra_edges or []) if e not in eix]:
         for m in G.edges[e].get("measurements_piv") or []:
             if (m.get("quality") or {}).get("kl_ok") and m["tile_id"] in band and m.get("Q_t") is not None:
                 items.append((e, m["tile_id"], m["Q_t"]))
@@ -81,6 +117,10 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
                     pairs.append((e, a, b))
     pa, pb, pw, pz, pv = map(np.asarray, (pa, pb, pw, pz, pv))
     psi_vec = _sync(pa, pb, pw, pz, nT, ti[ref_tile])
+    diag = sync_diagnostics(pa, pb, pw, pz, nT, ti[ref_tile], psi_vec)
+    if diag["best_objective"] > diag["objective"] + 1e-9:          # a restart found a better optimum: use it
+        psi_vec = diag["best"]
+    diag["block_tiles"] = [tiles[i] for i in diag["block"]]; diag["weak_tiles"] = [tiles[i] for i in diag["weak"]]
     psi = {t: float(psi_vec[ti[t]]) for t in tiles}
     # per-tile gauge uncertainty: bootstrap over vessels (a vessel's pairs are resampled together)
     rng = np.random.default_rng(0); nv = int(pv.max()) + 1 if len(pv) else 0; boots = []
@@ -98,6 +138,8 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
     sc_w = np.full(nE, np.nan); rho_w = np.full(nE, np.nan); a0_w = np.full(nE, np.nan)
     vphi_w = np.full((2, nE), np.nan); vpi_w = np.full(nE, np.nan)
     for e, d in meas.items():
+        if e not in eix:                     # synchronisation-only edge
+            continue
         i = eix[e]
         cand = [(t, x) for t, x in d.items() if abs(x["a0"]) > Q_DET and x["rho"] >= RHO_MIN and np.sign(x["a0"]) == np.sign(Qp[i])]
         if not cand or abs(Qp[i]) <= Q_DET:     # reconciled flow ~0 (e.g. forced to zero by conservation): Option-A scale vanishes
@@ -111,7 +153,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
         sc_w[i] = x["scatter"]; rho_w[i] = x["rho"]; a0_w[i] = x["a0"]; vphi_w[:, i] = x["var_phi"]; vpi_w[i] = x["var_logpi"]
     return dict(edges=sub, H=Hf, elig=elig, tile=win_t, psi=psi, scatter=sc_w, rho=rho_w, a0=a0_w, var_phi=vphi_w,
                 var_logpi=vpi_w, f_ref=f_ref, band=sorted(band), ref_tile=ref_tile, Qp=Qp, gauge_sd_deg=gauge_sd_deg,
-                _meas=meas, _pairs=pairs)
+                _meas=meas, _pairs=pairs, _sync_diag=diag)
 
 
 def supported(field, ratio_max=5.0):
