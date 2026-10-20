@@ -5,9 +5,10 @@ comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gau
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
   a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
-  b  one offset per tile describes all overlaps: for every overlapping tile pair with ≥ 5 shared coherent vessels
-     (both ρ ≥ 0.1), the offset measured from its shared vessels (ρ_aρ_b-weighted circular mean of the H1 differences) vs
-     the offset implied by the global solution ψ_a − ψ_b (unwrapped onto it); 1:1 line; dot size ∝ √(shared vessels)
+  b  held-out overlap prediction: for every overlapping tile pair with ≥ 5 shared coherent vessels (both ρ ≥ 0.1) that is
+     not a bridge of the overlap graph, all links between the two tiles are removed, ψ is refitted from the rest of the
+     network, and ψ_a − ψ_b is predicted; vs the offset measured from the pair's shared vessels (ρ_aρ_b-weighted circular
+     mean of the H1 differences).  1:1 line; dot size ∝ √(shared vessels)
   c  validation on vessels imaged in two tiles: same-vessel phase difference between tiles after alignment, H1 (fitted)
      and H2 (not fitted; aligned with 2ψ), median |Δφ|; raw medians in the log (for the caption)
   (waveform scaling to Q′ is shown in fig. 9; one vessel's waveform in two tiles is a supplement panel)
@@ -115,29 +116,44 @@ def main():
     axA.set_xlabel("tile number"); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
     label(gs[0], "a")
 
-    # ---- b: can all overlaps be described by one offset per tile?  measured pair offset vs global ψ_a − ψ_b
+    # ---- b: held-out overlap prediction — drop all links between a and b, refit ψ from the rest, predict ψa − ψb
+    from plexusflow.ac.field import _sync
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    tl = sorted(band); ti_ = {t: i for i, t in enumerate(tl)}; nT_ = len(tl); PA, PB, PW, PZ = [], [], [], []
+    for e, x in meas.items():                                  # the same pair set as build_ac_field (all pairs, ρ_aρ_b weights)
+        ok = [t for t, y in x.items() if t in ti_ and abs(y["H"][0]) > 0 and np.isfinite(y["rho"])]
+        for i in range(len(ok)):
+            for j in range(i + 1, len(ok)):
+                a, b = ok[i], ok[j]; ua = x[a]["H"][0] / abs(x[a]["H"][0]); ub = x[b]["H"][0] / abs(x[b]["H"][0])
+                PA.append(ti_[a]); PB.append(ti_[b]); PW.append(max(x[a]["rho"], 0.0) * max(x[b]["rho"], 0.0)); PZ.append(ua * np.conj(ub))
+    PA, PB, PW, PZ = map(np.asarray, (PA, PB, PW, PZ)); psi0 = np.array([psi[t] for t in tl])
     acc = {}
     for e, a, b in pairs:
         xa, xb = meas[e][a], meas[e][b]; w = max(xa["rho"], 0) * max(xb["rho"], 0)
-        z = xa["H"][0] / abs(xa["H"][0]) * np.conj(xb["H"][0] / abs(xb["H"][0]))
-        acc.setdefault((a, b), []).append((w, z))
-    NMIN = 5; obs, pred, nn = [], [], []
+        acc.setdefault((a, b), []).append((w, xa["H"][0] / abs(xa["H"][0]) * np.conj(xb["H"][0] / abs(xb["H"][0]))))
+    NMIN = 5; obs, pred, fitd, nn, n_bridge = [], [], [], [], 0
     for (a, b), L in acc.items():
         if len(L) < NMIN:
             continue
-        w = np.array([l[0] for l in L]); z = np.array([l[1] for l in L])
-        o = np.degrees(np.angle(np.sum(w * z))); pr = np.degrees(np.angle(np.exp(1j * (psi[a] - psi[b]))))
-        obs.append(pr + (o - pr + 180) % 360 - 180); pred.append(pr); nn.append(len(L))      # unwrapped onto the prediction
-    obs, pred, nn = map(np.asarray, (obs, pred, nn)); res = np.abs(obs - pred)
-    log(f"  (b) {len(obs)} tile pairs with ≥ {NMIN} shared vessels: median |measured − global| {np.median(res):.1f}°, 90th {np.percentile(res, 90):.1f}°, max {res.max():.1f}°")
+        ia, ib = ti_[a], ti_[b]; keep = ~(((PA == ia) & (PB == ib)) | ((PA == ib) & (PB == ia)))
+        A = coo_matrix((np.ones(keep.sum()), (PA[keep], PB[keep])), shape=(nT_, nT_))
+        if connected_components(A, directed=False)[0] > connected_components(coo_matrix((np.ones(len(PA)), (PA, PB)), shape=(nT_, nT_)), directed=False)[0]:
+            n_bridge += 1; continue
+        ps = _sync(PA[keep], PB[keep], PW[keep], PZ[keep], nT_, ti_[ref], start=psi0)
+        pr = np.degrees(np.angle(np.exp(1j * (ps[ia] - ps[ib])))); pf = np.degrees(np.angle(np.exp(1j * (psi[a] - psi[b]))))
+        w = np.array([l[0] for l in L]); z = np.array([l[1] for l in L]); o = np.degrees(np.angle(np.sum(w * z)))
+        obs.append(pr + (o - pr + 180) % 360 - 180); pred.append(pr); fitd.append(pf); nn.append(len(L))
+    obs, pred, fitd, nn = map(np.asarray, (obs, pred, fitd, nn)); res = np.abs(obs - pred); resf = np.abs(((obs - fitd) + 180) % 360 - 180)
+    log(f"  (b) held out {len(obs)} tile pairs with ≥ {NMIN} shared vessels ({n_bridge} bridges skipped): median |measured − predicted| "
+        f"{np.median(res):.1f}°, 90th {np.percentile(res, 90):.1f}°, max {res.max():.1f}°  (in-sample: median {np.median(resf):.1f}°)")
     axP = fig.add_subplot(gs[1]); axP.set_aspect("equal")
     axP.plot([-200, 200], [-200, 200], color="0.6", lw=0.7, ls="--", zorder=1)
     axP.scatter(obs, pred, s=4 + 18 * np.sqrt(nn / nn.max()), color="0.25", alpha=0.75, lw=0, zorder=3)
     axP.set_xlim(-200, 200); axP.set_ylim(-200, 200); axP.set_xticks([-180, 0, 180]); axP.set_yticks([-180, 0, 180])
-    axP.set_xlabel("offset measured from shared vessels (deg)"); axP.set_ylabel("$\\psi_a - \\psi_b$, global fit (deg)", labelpad=0)
+    axP.set_xlabel("tile-pair offset measured\nfrom shared vessels (deg)"); axP.set_ylabel("predicted with pair held out (deg)", labelpad=0)
     axP.spines[["top", "right"]].set_visible(False)
-    axP.text(0.03, 0.97, "tile $a$ ↔ tile $b$\n$\\Delta\\phi \\approx \\psi_a - \\psi_b$", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
-    axP.text(0.97, 0.03, f"{len(obs)} tile pairs", transform=axP.transAxes, ha="right", va="bottom", fontsize=7.5, color="0.3")
+    axP.text(0.03, 0.97, f"{len(obs)} tile pairs\nmedian error {np.median(res):.0f}°", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
     label(gs[1], "b")
 
     # ---- c: repeated-vessel agreement after alignment
