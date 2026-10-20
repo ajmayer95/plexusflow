@@ -184,7 +184,11 @@ def main():
     for t, pgon in polys.items():
         if t in tf0:
             axM.add_patch(Polygon(pgon, closed=True, fc="none", ec="0.55" if t in band else "0.8", lw=0.35, zorder=1))
-    cmp = plt.cm.twilight_shifted; nph = mcolors.Normalize(-180, 180)      # delays wrap (some tiles ~half a beat): cyclic map
+    # delays as positive lags: wrap into [−30°, 330°) so small negatives near the boundary stay ≈ 0; colour range [0, max]
+    tdel = {t: (v + 30) % 360 - 30 for t, v in tdel.items()}
+    dmax = max(v for t, v in tdel.items() if sd.get(t, np.inf) <= SD_MAX); vtop = 10 * np.ceil(dmax / 10)
+    log(f"  (b) max delay over determined tiles {dmax:.0f}° (tile {max((v, t) for t, v in tdel.items() if sd.get(t, np.inf) <= SD_MAX)[1]})")
+    cmp = plt.cm.cividis_r; nph = mcolors.Normalize(0, vtop)
     for t, v in tdel.items():
         ok = sd.get(t, np.inf) <= SD_MAX; col = cmp(nph(v))
         if ok:
@@ -195,7 +199,7 @@ def main():
         n_ = nds[i]; xy = (G.nodes[n_]["x"], mos.shape[0] - G.nodes[n_]["y"])
         axM.plot(*xy, marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
-    cb = fig.colorbar(sm, ax=axM, fraction=0.045, pad=0.01, shrink=0.8, ticks=[-180, -90, 0, 90, 180])
+    cb = fig.colorbar(sm, ax=axM, fraction=0.045, pad=0.01, shrink=0.8, ticks=[0, 60, 120, 180] if vtop >= 180 else [0, vtop / 2, vtop], extend="min")
     cb.set_label("H1 phase delay from boundary (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
     label(gs[1], "b")
 
