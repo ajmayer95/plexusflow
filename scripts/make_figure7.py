@@ -5,9 +5,9 @@ comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gau
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
   a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
-  b  how one relative tile phase is measured, for the tile pair sharing the most coherent vessels (both ρ ≥ 0.1): one
-     shared vessel's waveform in each tile and its two H1 phases (Δφ_e between them); then Δφ_e for every shared vessel
-     (that vessel circled) with ψ_a − ψ_b from the global solution (blue; not a separate fit to this pair)
+  b  one offset per tile describes all overlaps: for every overlapping tile pair with ≥ 5 shared coherent vessels
+     (both ρ ≥ 0.1), the offset measured from its shared vessels (ρ_aρ_b-weighted circular mean of the H1 differences) vs
+     the offset implied by the global solution ψ_a − ψ_b (unwrapped onto it); 1:1 line; dot size ∝ √(shared vessels)
   c  validation on vessels imaged in two tiles: same-vessel phase difference between tiles after alignment, H1 (fitted)
      and H2 (not fitted; aligned with 2ψ), median |Δφ|; raw medians in the log (for the caption)
   (waveform scaling to Q′ is shown in fig. 9; one vessel's waveform in two tiles is a supplement panel)
@@ -99,7 +99,7 @@ def main():
         [s_.set_visible(False) for s_ in ax.spines.values()]
 
     fig = plt.figure(figsize=(7.5, 3.3), facecolor="white")
-    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1.15, 1], wspace=0.3, left=0.07, right=0.985, top=0.9, bottom=0.17)
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1], wspace=0.38, left=0.07, right=0.985, top=0.9, bottom=0.17)
 
     def label(cell, letter):
         b_ = cell.get_position(fig); fig.text(b_.x0 - 0.045, b_.y1 + 0.03, letter, fontsize=10, fontweight="bold", va="bottom", ha="left")
@@ -115,35 +115,29 @@ def main():
     axA.set_xlabel("tile number"); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
     label(gs[0], "a")
 
-    # ---- b: how one relative tile phase is measured — one overlapping pair
-    npair = {}
+    # ---- b: can all overlaps be described by one offset per tile?  measured pair offset vs global ψ_a − ψ_b
+    acc = {}
     for e, a, b in pairs:
-        npair[(a, b)] = npair.get((a, b), 0) + 1
-    (pa_, pb_), npb = max(npair.items(), key=lambda kv: kv[1])
-    dv = np.degrees([np.angle(meas[e][pa_]["H"][0] * np.conj(meas[e][pb_]["H"][0])) for e, aa, bb in pairs if (aa, bb) == (pa_, pb_)])
-    dv = (dv + 180) % 360 - 180; fit = np.degrees(np.angle(np.exp(1j * (psi[pa_] - psi[pb_]))))
-    log(f"  (b) pair {pa_}–{pb_}: {npb} shared vessels, fitted ψa−ψb {fit:+.0f}°, median |Δφ_e − fit| {np.median(np.abs((dv - fit + 180) % 360 - 180)):.1f}°")
-    shared = [e for e, aa, bb in pairs if (aa, bb) == (pa_, pb_)]
-    e1 = max(shared, key=lambda e: min(meas[e][pa_]["rho"], meas[e][pb_]["rho"]))
-    gB = gs[1].subgridspec(2, 1, height_ratios=[0.75, 1], hspace=0.42); TC = {pa_: "#0072B2", pb_: "#D55E00"}
-    axF = fig.add_subplot(gB[0]); axF.set_aspect("equal"); axF.axis("off"); th = np.linspace(0, 2 * np.pi, 200)
-    axF.plot(np.cos(th), np.sin(th), color="0.8", lw=0.5)
-    ph = {t: np.angle(meas[e1][t]["H"][0]) for t in (pa_, pb_)}
-    for t in (pa_, pb_):
-        axF.annotate("", xy=(np.cos(ph[t]), np.sin(ph[t])), xytext=(0, 0), arrowprops=dict(arrowstyle="-|>", lw=1.1, color=TC[t], mutation_scale=7))
-        axF.text(1.75 * np.cos(ph[t]), 1.6 * np.sin(ph[t]), f"tile {t}", color=TC[t], fontsize=7.5, ha="center", va="center")
-    d1 = np.angle(np.exp(1j * (ph[pa_] - ph[pb_]))); arc = np.linspace(ph[pb_], ph[pb_] + d1, 50)
-    axF.plot(0.4 * np.cos(arc), 0.4 * np.sin(arc), color="0.2", lw=0.8)
-    am = ph[pb_] + d1 / 2; axF.text(0.62 * np.cos(am), 0.62 * np.sin(am), "$\\Delta\\phi_e$", fontsize=7.5, ha="center", va="center")
-    axF.set_xlim(-2.3, 2.3); axF.set_ylim(-1.7, 1.5)
-    axP = fig.add_subplot(gB[1])
-    yj = np.random.default_rng(1).uniform(-1, 1, len(dv))
-    axP.plot(dv, yj, "o", ms=2.2, color="0.5", alpha=0.65, mew=0, zorder=2)
-    axP.axvline(fit, color="#2b5c8a", lw=1.6, zorder=3)
-    axP.text(fit + 8, 1.15, "tile offset", color="#2b5c8a", fontsize=8, va="bottom", ha="left")
-    axP.set_xlim(-180, 180); axP.set_xticks([-180, -90, 0, 90, 180]); axP.set_ylim(-1.4, 1.9); axP.set_yticks([])
-    axP.spines[["top", "right", "left"]].set_visible(False); axP.set_xlabel(f"H1 phase difference of the same vessel,\ntile {pa_} − tile {pb_} (deg)")
-    axP.text(0.99, 0.97, f"$N$ = {npb}", transform=axP.transAxes, ha="right", va="top", fontsize=7.5, color="0.35")
+        xa, xb = meas[e][a], meas[e][b]; w = max(xa["rho"], 0) * max(xb["rho"], 0)
+        z = xa["H"][0] / abs(xa["H"][0]) * np.conj(xb["H"][0] / abs(xb["H"][0]))
+        acc.setdefault((a, b), []).append((w, z))
+    NMIN = 5; obs, pred, nn = [], [], []
+    for (a, b), L in acc.items():
+        if len(L) < NMIN:
+            continue
+        w = np.array([l[0] for l in L]); z = np.array([l[1] for l in L])
+        o = np.degrees(np.angle(np.sum(w * z))); pr = np.degrees(np.angle(np.exp(1j * (psi[a] - psi[b]))))
+        obs.append(pr + (o - pr + 180) % 360 - 180); pred.append(pr); nn.append(len(L))      # unwrapped onto the prediction
+    obs, pred, nn = map(np.asarray, (obs, pred, nn)); res = np.abs(obs - pred)
+    log(f"  (b) {len(obs)} tile pairs with ≥ {NMIN} shared vessels: median |measured − global| {np.median(res):.1f}°, 90th {np.percentile(res, 90):.1f}°, max {res.max():.1f}°")
+    axP = fig.add_subplot(gs[1]); axP.set_aspect("equal")
+    axP.plot([-200, 200], [-200, 200], color="0.6", lw=0.7, ls="--", zorder=1)
+    axP.scatter(obs, pred, s=4 + 18 * np.sqrt(nn / nn.max()), color="0.25", alpha=0.75, lw=0, zorder=3)
+    axP.set_xlim(-200, 200); axP.set_ylim(-200, 200); axP.set_xticks([-180, 0, 180]); axP.set_yticks([-180, 0, 180])
+    axP.set_xlabel("offset measured from shared vessels (deg)"); axP.set_ylabel("$\\psi_a - \\psi_b$, global fit (deg)", labelpad=0)
+    axP.spines[["top", "right"]].set_visible(False)
+    axP.text(0.03, 0.97, "tile $a$ ↔ tile $b$\n$\\Delta\\phi \\approx \\psi_a - \\psi_b$", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
+    axP.text(0.97, 0.03, f"{len(obs)} tile pairs", transform=axP.transAxes, ha="right", va="bottom", fontsize=7.5, color="0.3")
     label(gs[1], "b")
 
     # ---- c: repeated-vessel agreement after alignment
@@ -154,8 +148,6 @@ def main():
         ax.set_xlim(-60, 60); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-60, 0, 60])
         ax.text(0.0, 0.97, "H1" if k == 1 else "H2", transform=ax.transAxes, fontsize=8, fontweight="bold", va="top")
         ax.text(1.0, 0.97, f"{np.median(np.abs(d[k]['aligned'])):.0f}°", transform=ax.transAxes, fontsize=8, va="top", ha="right", color="0.2")
-        if r_ == 0:
-            ax.text(1.0, 1.22, "median |Δφ|", transform=ax.transAxes, fontsize=7, va="top", ha="right", color="0.4")
         if r_ == 0:
             ax.set_xticklabels([])
         else:
