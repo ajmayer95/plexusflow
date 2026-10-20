@@ -5,8 +5,9 @@ comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gau
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
   a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
-  b  assigned tile phase offsets ψ_t relative to the reference tile, on the organ: accepted tiles as dots coloured by ψ_t
-     (cyclic map), open = bootstrap SD > 30°, square = reference; faint outlines = tile footprints (excluded tiles lighter)
+  b  tile-averaged aligned H1 phase, in the common cardiac frame (zero = the reference tile's clock): for each accepted
+     tile, the ρ-weighted axial circular mean of its vessels' H1 phases (ρ ≥ 0.1, relative to each vessel's flow direction,
+     mod 180° as in fig 10, after the tile offset ψ_t); dot size ∝ within-tile coherence R; open = tile offset SD > 30°
   supplement (fig7_supp_heldout): held-out overlap prediction — for every overlapping tile pair with ≥ 5 shared coherent
      vessels that is not a bridge, all links between the two tiles removed, ψ refitted, ψ_a − ψ_b predicted vs measured
   c  validation on vessels imaged in two tiles: same-vessel phase difference between tiles after alignment, H1 (fitted)
@@ -147,20 +148,34 @@ def main():
     obs, pred, fitd, nn = map(np.asarray, (obs, pred, fitd, nn)); res = np.abs(obs - pred); resf = np.abs(((obs - fitd) + 180) % 360 - 180)
     log(f"  (b) held out {len(obs)} tile pairs with ≥ {NMIN} shared vessels ({n_bridge} bridges skipped): median |measured − predicted| "
         f"{np.median(res):.1f}°, 90th {np.percentile(res, 90):.1f}°, max {res.max():.1f}°  (in-sample: median {np.median(resf):.1f}°)")
-    # b — spatial map of the assigned tile phase offsets ψ_t (relative to the reference tile)
+    # b — tile-averaged aligned H1 phase (relative to each vessel's own flow direction, mod 180°, as in fig 10)
+    #     axial circular mean: φ̄_t = ½ arg Σ_e w_e e^{2iφ_e},  φ_e = arg(sgn(a0)·H1·e^{−iψ_t});  R_t = |Σ w e^{2iφ}| / Σ w
+    tphase, tR, tn, tphase_u = {}, {}, {}, {}
+    for t in band:
+        zs, ws = [], []
+        for e, x in meas.items():
+            y = x.get(t)
+            if y is None or not np.isfinite(y["rho"]) or y["rho"] < 0.1 or abs(y["H"][0]) == 0:
+                continue
+            ph = np.angle(np.sign(y["a0"]) * y["H"][0] * np.exp(-1j * psi[t])); zs.append(np.exp(2j * ph)); ws.append(y["rho"])
+        if len(zs) >= 5:
+            zs, ws = np.array(zs), np.array(ws); S = np.sum(ws * zs)
+            tphase[t] = np.degrees(np.angle(S) / 2) % 180; tR[t] = abs(S) / ws.sum(); tn[t] = len(zs)
+            tphase_u[t] = np.degrees(np.angle(zs.sum()) / 2) % 180
+    dw = np.array([abs(((tphase[t] - tphase_u[t]) + 90) % 180 - 90) for t in tphase])
+    log(f"  (b) tile-averaged H1 phase: {len(tphase)} tiles; within-tile axial resultant R median {np.median(list(tR.values())):.2f} "
+        f"(range {min(tR.values()):.2f}–{max(tR.values()):.2f}); ρ-weighted vs unweighted mean differ by median {np.median(dw):.1f}°, max {dw.max():.1f}°")
     axM = fig.add_subplot(gs[1]); organ(axM)
     for t, pgon in polys.items():
         if t in tf0:
             axM.add_patch(Polygon(pgon, closed=True, fc="none", ec="0.55" if t in band else "0.8", lw=0.35, zorder=1))
-    cmp = plt.cm.twilight_shifted; npsi = mcolors.Normalize(-180, 180)
-    for t in band:
-        col = cmp(npsi(np.degrees(np.angle(np.exp(1j * psi[t]))))); ok = sd.get(t, np.inf) <= SD_MAX
-        axM.plot(*cen[t], "o", ms=5.5, mfc=col if ok else "white", mec="0.15" if ok else col, mew=0.4 if ok else 1.3, zorder=4)
-    axM.plot(*cen[ref], "s", ms=8.5, mfc="none", mec="black", mew=1.1, zorder=5)
-    axM.annotate("ref", xy=cen[ref], xytext=(cen[ref][0] + 0.09 * (XL[1] - XL[0]), cen[ref][1] - 0.07 * (YL[0] - YL[1])), fontsize=7,
-                 arrowprops=dict(arrowstyle="-", lw=0.4, color="0.3"), zorder=6)
-    sm = plt.cm.ScalarMappable(norm=npsi, cmap=cmp); cb = fig.colorbar(sm, ax=axM, fraction=0.045, pad=0.01, shrink=0.8, ticks=[-180, 0, 180])
-    cb.set_label("tile phase offset $\\psi_t$ (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
+    cmp = plt.cm.twilight_shifted; nph = mcolors.Normalize(0, 180)
+    for t, v in tphase.items():
+        ok = sd.get(t, np.inf) <= SD_MAX; col = cmp(nph(v))
+        axM.plot(*cen[t], "o", ms=3 + 5 * tR[t], mfc=col if ok else "white", mec="0.15" if ok else col, mew=0.4 if ok else 1.3, zorder=4)
+    log("  (b) tile-averaged phases (deg): " + ", ".join(f"{t}:{v:.0f}" for t, v in sorted(tphase.items())))
+    sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp); cb = fig.colorbar(sm, ax=axM, fraction=0.045, pad=0.01, shrink=0.8, ticks=[0, 90, 180])
+    cb.set_label("tile-averaged H1 phase (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
     label(gs[1], "b")
 
     # ---- c: repeated-vessel agreement after alignment
