@@ -269,7 +269,7 @@ def main():
         sp.set_linewidth(0.5); sp.set_color("0.5")
     axd = fig.add_subplot(gC[1])
     for k, (i, s) in enumerate(es):
-        yk = len(es) - 1 - k; a_, b_ = 1e3 * s * y[i], 1e3 * s * Qp[i]          # nL/s → pL/s
+        yk = len(es) - 1 - k; a_, b_ = s * y[i], s * Qp[i]
         axd.plot([a_, b_], [yk, yk], color=VC[k], lw=1.2, zorder=2)
         axd.plot(b_, yk, "D", ms=7, mfc="white", mec=VC[k], mew=1.3, zorder=3)
         axd.plot(a_, yk, "o", ms=4.5, color=VC[k], mec="white", mew=0.4, zorder=4)
@@ -277,11 +277,11 @@ def main():
     for j, tl_ in enumerate(axd.get_yticklabels()):
         tl_.set_color(VC[len(es) - 1 - j])
     axd.tick_params(axis="y", length=0); axd.axvline(0, color="0.6", lw=0.6, zorder=1); axd.set_ylim(-0.6, len(es) - 0.4)
-    lim = 1.15e3 * max(abs(v_) for i, s in es for v_ in (y[i], Qp[i])); axd.set_xlim(-lim, lim)
-    axd.spines[["top", "right", "left"]].set_visible(False); axd.set_xlabel("flow (pL/s)   (− into junction, + out)")
+    lim = 1.15 * max(abs(v_) for i, s in es for v_ in (y[i], Qp[i])); axd.set_xlim(-lim, lim)
+    axd.spines[["top", "right", "left"]].set_visible(False); axd.set_xlabel("flow (nL/s)   (− into junction, + out)")
     axd.plot([], [], "o", ms=5.5, color="0.4", label="measured $y$"); axd.plot([], [], "D", ms=5.5, mfc="white", mec="0.3", mew=1.2, label="reconciled Q′")
     axd.legend(loc="lower right", fontsize=8, frameon=False, handletextpad=0.3)
-    axd.text(0.5, 1.04, f"|Σ s·y| = {1e3 * abs(before):.0f} pL/s   →   |Σ s·Q′| = 0", transform=axd.transAxes, ha="center", va="bottom", fontsize=8.5)
+    axd.text(0.5, 1.04, f"|Σ s·y| = {abs(before):.3f} nL/s   →   |Σ s·Q′| = 0", transform=axd.transAxes, ha="center", va="bottom", fontsize=8.5)
     label(axj, "c", "Conservative reconciliation at one junction")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
