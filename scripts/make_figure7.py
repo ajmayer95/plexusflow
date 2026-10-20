@@ -125,16 +125,8 @@ def main():
     log(f"  (b) pair {pa_}–{pb_}: {npb} shared vessels, fitted ψa−ψb {fit:+.0f}°, median |Δφ_e − fit| {np.median(np.abs((dv - fit + 180) % 360 - 180)):.1f}°")
     shared = [e for e, aa, bb in pairs if (aa, bb) == (pa_, pb_)]
     e1 = max(shared, key=lambda e: min(meas[e][pa_]["rho"], meas[e][pb_]["rho"]))
-    gB = gs[1].subgridspec(2, 1, height_ratios=[0.85, 1], hspace=0.55)
-    gBt = gB[0].subgridspec(1, 2, width_ratios=[1.25, 1], wspace=0.15); TC = {pa_: "#0072B2", pb_: "#D55E00"}
-    axW = fig.add_subplot(gBt[0]); tau = np.linspace(0, 1, 300)
-    for t in (pa_, pb_):
-        x = meas[e1][t]; q = x["a0"] + sum((x["H"][n - 1] * np.exp(2j * np.pi * n * tau)).real for n in (1, 2, 3))
-        axW.plot(tau, q / x["a0"], color=TC[t], lw=1.1, label=f"tile {t}")
-    axW.set_xlim(0, 1); axW.set_xticks([0, 1]); axW.set_xlabel("$\\tau$", labelpad=0); axW.set_ylabel("$Q/\\bar Q$", labelpad=1)
-    axW.spines[["top", "right"]].set_visible(False); axW.legend(fontsize=6.5, frameon=False, loc="upper left", bbox_to_anchor=(0, 1.22), ncol=2, handlelength=1.0, columnspacing=0.8)
-    axW.set_title("one shared vessel", fontsize=7.5, pad=12, loc="left", color="0.3")
-    axF = fig.add_subplot(gBt[1]); axF.set_aspect("equal"); axF.axis("off"); th = np.linspace(0, 2 * np.pi, 200)
+    gB = gs[1].subgridspec(2, 1, height_ratios=[0.75, 1], hspace=0.42); TC = {pa_: "#0072B2", pb_: "#D55E00"}
+    axF = fig.add_subplot(gB[0]); axF.set_aspect("equal"); axF.axis("off"); th = np.linspace(0, 2 * np.pi, 200)
     axF.plot(np.cos(th), np.sin(th), color="0.8", lw=0.5)
     ph = {t: np.angle(meas[e1][t]["H"][0]) for t in (pa_, pb_)}
     for t in (pa_, pb_):
@@ -143,26 +135,26 @@ def main():
     d1 = np.angle(np.exp(1j * (ph[pa_] - ph[pb_]))); arc = np.linspace(ph[pb_], ph[pb_] + d1, 50)
     axF.plot(0.4 * np.cos(arc), 0.4 * np.sin(arc), color="0.2", lw=0.8)
     am = ph[pb_] + d1 / 2; axF.text(0.62 * np.cos(am), 0.62 * np.sin(am), "$\\Delta\\phi_e$", fontsize=7.5, ha="center", va="center")
-    axF.set_xlim(-1.6, 1.6); axF.set_ylim(-1.6, 1.6); axF.set_title("H1 phase", fontsize=7.5, pad=2, color="0.3")
+    axF.set_xlim(-1.7, 1.7); axF.set_ylim(-1.5, 1.5)
+    axF.set_title(f"one shared vessel: H1 phase in tiles {pa_} ($a$), {pb_} ($b$)", fontsize=7.5, pad=3, color="0.3")
     axP = fig.add_subplot(gB[1])
     yj = np.random.default_rng(1).uniform(-1, 1, len(dv))
     axP.plot(dv, yj, "o", ms=2.2, color="0.5", alpha=0.65, mew=0, zorder=2)
-    i1_ = shared.index(e1); axP.plot(dv[i1_], yj[i1_], "o", ms=4, mfc="none", mec="black", mew=0.8, zorder=4)
     axP.axvline(fit, color="#2b5c8a", lw=1.6, zorder=3)
-    axP.text(fit + 8, 1.15, "$\\psi_a - \\psi_b$", color="#2b5c8a", fontsize=8, va="bottom", ha="left")
+    axP.text(fit + 8, 1.15, "global fit: $\\psi_a - \\psi_b$", color="#2b5c8a", fontsize=8, va="bottom", ha="left")
     axP.set_xlim(-180, 180); axP.set_xticks([-180, -90, 0, 90, 180]); axP.set_ylim(-1.4, 1.9); axP.set_yticks([])
     axP.spines[["top", "right", "left"]].set_visible(False); axP.set_xlabel("$\\Delta\\phi_e = \\phi_{e,a} - \\phi_{e,b}$ (deg)")
-    axP.set_title(f"all {npb} vessels shared by tiles {pa_} ($a$) and {pb_} ($b$)", fontsize=7.5, pad=2, loc="left", color="0.3")
+    axP.set_title(f"all {npb} vessels shared by the two tiles", fontsize=7.5, pad=2, loc="left", color="0.3")
     label(gs[1], "b")
 
     # ---- c: repeated-vessel agreement after alignment
-    gD = gs[2].subgridspec(2, 1, hspace=0.3); bins = np.linspace(-90, 90, 37)
+    gD = gs[2].subgridspec(2, 1, hspace=0.3); bins = np.linspace(-60, 60, 31)
     for r_, k in enumerate((1, 2)):
         ax = fig.add_subplot(gD[r_]); v = d[k]["aligned"]
         ax.hist(v, bins=bins, density=True, color="#8fb0d3", ec="white", lw=0.3)
-        ax.set_xlim(-90, 90); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-90, 0, 90])
+        ax.set_xlim(-60, 60); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-60, 0, 60])
         ax.text(0.0, 0.97, "H1" if k == 1 else "H2", transform=ax.transAxes, fontsize=8, fontweight="bold", va="top")
-        ax.text(0.0, 0.7, "used to estimate\ntile offsets" if k == 1 else "no additional\nfitting", transform=ax.transAxes, fontsize=7, va="top", color="0.35")
+        ax.text(0.0, 0.8, "used to\nestimate $\\psi_t$" if k == 1 else "corrected\nusing $2\\psi_t$", transform=ax.transAxes, fontsize=7, va="top", color="0.35")
         ax.text(1.0, 0.97, f"median\n|Δφ| {np.median(np.abs(d[k]['aligned'])):.0f}°", transform=ax.transAxes, fontsize=7.5, va="top", ha="right", color="0.25")
         if r_ == 0:
             ax.set_xticklabels([])
