@@ -131,20 +131,19 @@ def main():
     ph = {t: np.angle(meas[e1][t]["H"][0]) for t in (pa_, pb_)}
     for t in (pa_, pb_):
         axF.annotate("", xy=(np.cos(ph[t]), np.sin(ph[t])), xytext=(0, 0), arrowprops=dict(arrowstyle="-|>", lw=1.1, color=TC[t], mutation_scale=7))
-        axF.text(1.38 * np.cos(ph[t]), 1.38 * np.sin(ph[t]), f"$\\phi_{{e,{'a' if t == pa_ else 'b'}}}$", color=TC[t], fontsize=7.5, ha="center", va="center")
+        axF.text(1.75 * np.cos(ph[t]), 1.6 * np.sin(ph[t]), f"tile {t}", color=TC[t], fontsize=7.5, ha="center", va="center")
     d1 = np.angle(np.exp(1j * (ph[pa_] - ph[pb_]))); arc = np.linspace(ph[pb_], ph[pb_] + d1, 50)
     axF.plot(0.4 * np.cos(arc), 0.4 * np.sin(arc), color="0.2", lw=0.8)
     am = ph[pb_] + d1 / 2; axF.text(0.62 * np.cos(am), 0.62 * np.sin(am), "$\\Delta\\phi_e$", fontsize=7.5, ha="center", va="center")
-    axF.set_xlim(-1.7, 1.7); axF.set_ylim(-1.5, 1.5)
-    axF.set_title(f"one shared vessel: H1 phase in tiles {pa_} ($a$), {pb_} ($b$)", fontsize=7.5, pad=3, color="0.3")
+    axF.set_xlim(-2.3, 2.3); axF.set_ylim(-1.7, 1.5)
     axP = fig.add_subplot(gB[1])
     yj = np.random.default_rng(1).uniform(-1, 1, len(dv))
     axP.plot(dv, yj, "o", ms=2.2, color="0.5", alpha=0.65, mew=0, zorder=2)
     axP.axvline(fit, color="#2b5c8a", lw=1.6, zorder=3)
-    axP.text(fit + 8, 1.15, "global fit: $\\psi_a - \\psi_b$", color="#2b5c8a", fontsize=8, va="bottom", ha="left")
+    axP.text(fit + 8, 1.15, "tile offset", color="#2b5c8a", fontsize=8, va="bottom", ha="left")
     axP.set_xlim(-180, 180); axP.set_xticks([-180, -90, 0, 90, 180]); axP.set_ylim(-1.4, 1.9); axP.set_yticks([])
-    axP.spines[["top", "right", "left"]].set_visible(False); axP.set_xlabel("$\\Delta\\phi_e = \\phi_{e,a} - \\phi_{e,b}$ (deg)")
-    axP.set_title(f"all {npb} vessels shared by the two tiles", fontsize=7.5, pad=2, loc="left", color="0.3")
+    axP.spines[["top", "right", "left"]].set_visible(False); axP.set_xlabel("$\\Delta\\phi_e$ (deg)")
+    axP.text(0.99, 0.97, f"$N$ = {npb}", transform=axP.transAxes, ha="right", va="top", fontsize=7.5, color="0.35")
     label(gs[1], "b")
 
     # ---- c: repeated-vessel agreement after alignment
@@ -154,8 +153,9 @@ def main():
         ax.hist(v, bins=bins, density=True, color="#8fb0d3", ec="white", lw=0.3)
         ax.set_xlim(-60, 60); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-60, 0, 60])
         ax.text(0.0, 0.97, "H1" if k == 1 else "H2", transform=ax.transAxes, fontsize=8, fontweight="bold", va="top")
-        ax.text(0.0, 0.8, "used to\nestimate $\\psi_t$" if k == 1 else "corrected\nusing $2\\psi_t$", transform=ax.transAxes, fontsize=7, va="top", color="0.35")
-        ax.text(1.0, 0.97, f"median\n|Δφ| {np.median(np.abs(d[k]['aligned'])):.0f}°", transform=ax.transAxes, fontsize=7.5, va="top", ha="right", color="0.25")
+        ax.text(1.0, 0.97, f"{np.median(np.abs(d[k]['aligned'])):.0f}°", transform=ax.transAxes, fontsize=8, va="top", ha="right", color="0.2")
+        if r_ == 0:
+            ax.text(1.0, 1.22, "median |Δφ|", transform=ax.transAxes, fontsize=7, va="top", ha="right", color="0.4")
         if r_ == 0:
             ax.set_xticklabels([])
         else:
