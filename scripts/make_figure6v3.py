@@ -200,8 +200,7 @@ def main():
     gTop = gs[0].subgridspec(1, 2, width_ratios=[1.12, 1], wspace=0.16)
 
     def label(bbox_from, letter, heading):
-        b_ = bbox_from.get_position(fig); fig.text(b_.x0 - 0.012, b_.y1 + 0.028, letter, fontsize=11, fontweight="bold", va="bottom")
-        fig.text(b_.x0 + 0.012, b_.y1 + 0.028, heading, fontsize=9.5, fontweight="bold", va="bottom")
+        b_ = bbox_from.get_position(fig); fig.text(b_.x0 - 0.015, b_.y1 + 0.022, letter, fontsize=11, fontweight="bold", va="bottom")
 
     def crop_vessel(ax, v, side_R=3.6):
         cl = v["cl"] + v["off"]; R = v["R"]; vf = v["vf"]; H, W = vf.shape[:2]; _, tang, nrm = _centerline_geometry(v["cl"])
@@ -242,16 +241,29 @@ def main():
     label(gA[0, 0], "a", "Measurement quality")
 
     # ---- b: held-out calibration
-    axB = fig.add_subplot(gTop[1]); bins = np.linspace(-5, 5, 51)
+    gB = gTop[1].subgridspec(2, 1, height_ratios=[0.5, 1], hspace=0.1); axS = fig.add_subplot(gB[0]); axS.axis("off")
+    axS.set_xlim(0, 1); axS.set_ylim(0, 1); jx, jy = 0.1, 0.5
+    for (dx, dy, lab_, inward) in ((-0.065, 0.28, "$y_1$", True), (-0.065, -0.28, "$y_2$", True), (0.08, 0.0, "$y_3$", False)):
+        x0_, y0_ = jx + dx, jy + dy
+        axS.annotate("", xy=(jx, jy) if inward else (x0_, y0_), xytext=(x0_, y0_) if inward else (jx, jy),
+                     arrowprops=dict(arrowstyle="-|>", lw=0.9, color="0.25", shrinkA=1, shrinkB=3, mutation_scale=7))
+        axS.text(x0_ + (-0.015 if dx < 0 else 0.015), y0_, lab_, ha="right" if dx < 0 else "left", va="center", fontsize=8.5)
+    axS.plot(jx, jy, "o", ms=4.5, color="0.25")
+    for yv, nm, eq in ((0.85, "imbalance", "$r_j = \\Sigma_e\\, s_e\\, y_e$"),
+                       (0.5, "predicted from $c$", "$\\sigma_j = (\\Sigma_e\\, c_e^2\\, y_e^2 + \\sigma_0^2)^{1/2}$"),
+                       (0.13, "standardized", "$z_j = r_j\\, /\\, \\sigma_j$")):
+        axS.text(0.3, yv, nm, fontsize=8, color="0.35", va="center")
+        axS.text(0.58, yv, eq, fontsize=8.5, va="center")
+    axB = fig.add_subplot(gB[1]); bins = np.linspace(-5, 5, 51)
     axB.hist(np.clip(z, -5, 5), bins=bins, density=True, color="#b9cde2", ec="white", lw=0.4)
     xg = np.linspace(-5, 5, 400); pdf = np.exp(-xg ** 2 / 2) / np.sqrt(2 * np.pi); axB.plot(xg, pdf, "k-", lw=1.0)
-    axB.annotate("N(0, 1)", xy=(-1.25, np.exp(-1.25 ** 2 / 2) / np.sqrt(2 * np.pi)), xytext=(-4.6, 0.3), fontsize=8, arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"))
+    axB.annotate("N(0, 1)", xy=(-1.25, np.exp(-1.25 ** 2 / 2) / np.sqrt(2 * np.pi)), xytext=(-4.7, 0.3), fontsize=8, arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"))
     for v_ in (-1.96, 1.96):
         axB.axvline(v_, color="0.55", ls="--", lw=0.6)
     axB.set_xlim(-5, 5); axB.set_yticks([]); axB.spines[["top", "right", "left"]].set_visible(False)
-    axB.set_xlabel("standardized junction residual $z$")
+    axB.set_xlabel("$z_j$  (held-out same-tile junctions)")
     axB.text(0.98, 0.97, f"RMS $z$ = {cov[0]:.2f}\n{100 * cov[2]:.1f}% within $|z|$ < 1.96", transform=axB.transAxes, ha="right", va="top", fontsize=8)
-    label(axB, "b", "Held-out calibration")
+    label(axS, "b", "")
 
     # ---- c: conservative reconciliation at one junction
     gC = gs[1].subgridspec(1, 2, width_ratios=[0.62, 1.4], wspace=0.34); axj = fig.add_subplot(gC[0])
