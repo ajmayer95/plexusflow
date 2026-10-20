@@ -276,16 +276,22 @@ def main():
     lo2, hi3 = allcl.min(0) - 1.2 * Rm, allcl.max(0) + 1.2 * Rm; side = max(hi3 - lo2) / 2; ctr = (lo2 + hi3) / 2
     r_lo, r_hi = int(max(ctr[0] - side, 0)), int(min(ctr[0] + side, img.shape[0])); c_lo, c_hi = int(max(ctr[1] - side, 0)), int(min(ctr[1] + side, img.shape[1]))
     cr = img[r_lo:r_hi, c_lo:c_hi]; axj.imshow(img, cmap="gray", vmin=np.percentile(cr, 1), vmax=np.percentile(cr, 99.5), interpolation="nearest")
-    jset_k = {E[i] for i, _ in es} | {E[i][::-1] for i, _ in es}
-    for e2, k2 in kdj.items():                                       # faint skeleton: the tile's other measured centrelines
-        if e2 in jset_k or len(k2["cl_used"]) < 3:
+    # raw (unsmoothed) graph skeleton — every edge's path, mapped from the graph frame into this tile's pixels
+    import re as _re
+    from plexusflow.config import StageConfig
+    from plexusflow.analyze.geometry import load_tile_geometry, graph_to_tile_batch
+    shp = {}
+    for f_ in (_paths.STAGE / "tiles" / "maxmed").glob("vid*_maxmed.tif"):
+        with tifffile.TiffFile(f_) as tf_:
+            shp[int(_re.match(r"vid(\d+)_", f_.name).group(1))] = tf_.pages[0].shape[:2]
+    mgeom = load_tile_geometry(StageConfig.load(_paths.STAGE), video_shapes=shp)
+    for u_, v_, pth in G.edges(data="path"):
+        if pth is None or len(pth) < 2:
             continue
-        c2 = np.asarray(k2["cl_used"], float) + np.asarray(k2["roi_offset"], float)
-        if ((c2[:, 0] > r_lo) & (c2[:, 0] < r_hi) & (c2[:, 1] > c_lo) & (c2[:, 1] < c_hi)).any():
-            axj.plot(c2[:, 1], c2[:, 0], color="white", lw=0.6, alpha=0.55, zorder=3)
-    ends = [np.array([v["cl"][0] + v["off"], v["cl"][-1] + v["off"]]) for v in vinfo]
-    cand_ = min((p_ for e_ in ends for p_ in e_), key=lambda p_: sum(np.min(np.linalg.norm(e2_ - p_, axis=1)) for e2_ in ends))
-    jpt = np.mean([e_[np.argmin(np.linalg.norm(e_ - cand_, axis=1))] for e_ in ends], axis=0)
+        loc = graph_to_tile_batch(np.asarray(pth, float), mgeom, tj)
+        if ((loc[:, 0] > r_lo) & (loc[:, 0] < r_hi) & (loc[:, 1] > c_lo) & (loc[:, 1] < c_hi)).any():
+            axj.plot(loc[:, 1], loc[:, 0], color="white", lw=0.7, alpha=0.75, zorder=3)
+    jpt = graph_to_tile_batch(np.array([[G.nodes[nodes[jn]]["x"], G.nodes[nodes[jn]]["y"]]]), mgeom, tj)[0]
     for k, v in enumerate(vinfo):
         cl = v["cl"] + v["off"]; _, _, nrm = _centerline_geometry(v["cl"]); axj.plot(cl[:, 1], cl[:, 0], color=VC[k], lw=2.0, solid_capstyle="round", zorder=4)
         q_ = len(cl) // 2; lb = cl[q_] + 1.4 * v["R"] * nrm[q_]
