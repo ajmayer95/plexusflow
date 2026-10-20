@@ -5,10 +5,10 @@ comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gau
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
   a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
-  b  held-out overlap prediction: for every overlapping tile pair with ≥ 5 shared coherent vessels (both ρ ≥ 0.1) that is
-     not a bridge of the overlap graph, all links between the two tiles are removed, ψ is refitted from the rest of the
-     network, and ψ_a − ψ_b is predicted; vs the offset measured from the pair's shared vessels (ρ_aρ_b-weighted circular
-     mean of the H1 differences).  1:1 line; dot size ∝ √(shared vessels)
+  b  assigned tile phase offsets ψ_t relative to the reference tile, on the organ: accepted tiles as dots coloured by ψ_t
+     (cyclic map), open = bootstrap SD > 30°, square = reference; faint outlines = tile footprints (excluded tiles lighter)
+  supplement (fig7_supp_heldout): held-out overlap prediction — for every overlapping tile pair with ≥ 5 shared coherent
+     vessels that is not a bridge, all links between the two tiles removed, ψ refitted, ψ_a − ψ_b predicted vs measured
   c  validation on vessels imaged in two tiles: same-vessel phase difference between tiles after alignment, H1 (fitted)
      and H2 (not fitted; aligned with 2ψ), median |Δφ|; raw medians in the log (for the caption)
   (waveform scaling to Q′ is shown in fig. 9; one vessel's waveform in two tiles is a supplement panel)
@@ -147,13 +147,20 @@ def main():
     obs, pred, fitd, nn = map(np.asarray, (obs, pred, fitd, nn)); res = np.abs(obs - pred); resf = np.abs(((obs - fitd) + 180) % 360 - 180)
     log(f"  (b) held out {len(obs)} tile pairs with ≥ {NMIN} shared vessels ({n_bridge} bridges skipped): median |measured − predicted| "
         f"{np.median(res):.1f}°, 90th {np.percentile(res, 90):.1f}°, max {res.max():.1f}°  (in-sample: median {np.median(resf):.1f}°)")
-    axP = fig.add_subplot(gs[1]); axP.set_aspect("equal")
-    axP.plot([-200, 200], [-200, 200], color="0.6", lw=0.7, ls="--", zorder=1)
-    axP.scatter(obs, pred, s=4 + 18 * np.sqrt(nn / nn.max()), color="0.25", alpha=0.75, lw=0, zorder=3)
-    axP.set_xlim(-200, 200); axP.set_ylim(-200, 200); axP.set_xticks([-180, 0, 180]); axP.set_yticks([-180, 0, 180])
-    axP.set_xlabel("tile-pair offset measured\nfrom shared vessels (deg)"); axP.set_ylabel("predicted with pair held out (deg)", labelpad=0)
-    axP.spines[["top", "right"]].set_visible(False)
-    axP.text(0.03, 0.97, f"{len(obs)} tile pairs\nmedian error {np.median(res):.0f}°", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
+    # b — spatial map of the assigned tile phase offsets ψ_t (relative to the reference tile)
+    axM = fig.add_subplot(gs[1]); organ(axM)
+    for t, pgon in polys.items():
+        if t in tf0:
+            axM.add_patch(Polygon(pgon, closed=True, fc="none", ec="0.55" if t in band else "0.8", lw=0.35, zorder=1))
+    cmp = plt.cm.twilight_shifted; npsi = mcolors.Normalize(-180, 180)
+    for t in band:
+        col = cmp(npsi(np.degrees(np.angle(np.exp(1j * psi[t]))))); ok = sd.get(t, np.inf) <= SD_MAX
+        axM.plot(*cen[t], "o", ms=5.5, mfc=col if ok else "white", mec="0.15" if ok else col, mew=0.4 if ok else 1.3, zorder=4)
+    axM.plot(*cen[ref], "s", ms=8.5, mfc="none", mec="black", mew=1.1, zorder=5)
+    axM.annotate("ref", xy=cen[ref], xytext=(cen[ref][0] + 0.09 * (XL[1] - XL[0]), cen[ref][1] - 0.07 * (YL[0] - YL[1])), fontsize=7,
+                 arrowprops=dict(arrowstyle="-", lw=0.4, color="0.3"), zorder=6)
+    sm = plt.cm.ScalarMappable(norm=npsi, cmap=cmp); cb = fig.colorbar(sm, ax=axM, fraction=0.045, pad=0.01, shrink=0.8, ticks=[-180, 0, 180])
+    cb.set_label("tile phase offset $\\psi_t$ (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
     label(gs[1], "b")
 
     # ---- c: repeated-vessel agreement after alignment
@@ -170,6 +177,16 @@ def main():
             ax.set_xlabel("same-vessel phase difference\nbetween tiles, aligned (deg)")
     label(gs[2], "c")
 
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # supplement — held-out overlap prediction (fig7_supp_heldout)
+    fs = plt.figure(figsize=(2.6, 2.6), facecolor="white"); axP = fs.add_axes([0.24, 0.22, 0.72, 0.72]); axP.set_aspect("equal")
+    axP.plot([-200, 200], [-200, 200], color="0.6", lw=0.7, ls="--", zorder=1)
+    axP.scatter(obs, pred, s=4 + 18 * np.sqrt(nn / nn.max()), color="0.25", alpha=0.75, lw=0, zorder=3)
+    axP.set_xlim(-200, 200); axP.set_ylim(-200, 200); axP.set_xticks([-180, 0, 180]); axP.set_yticks([-180, 0, 180])
+    axP.set_xlabel("tile-pair offset measured\nfrom shared vessels (deg)"); axP.set_ylabel("predicted with pair held out (deg)", labelpad=0)
+    axP.spines[["top", "right"]].set_visible(False)
+    axP.text(0.03, 0.97, f"{len(obs)} tile pairs\nmedian error {np.median(res):.0f}°", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
+    fs.savefig(OUT_DIR / "fig7_supp_heldout.png", dpi=300, facecolor="white"); fs.savefig(OUT_DIR / "fig7_supp_heldout.pdf", facecolor="white")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT_DIR / "fig7.png", dpi=300, facecolor="white"); fig.savefig(OUT_DIR / "fig7.pdf", facecolor="white")
     fig.savefig(OUT_DIR / "fig7.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
