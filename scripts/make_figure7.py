@@ -169,12 +169,13 @@ def main():
     for t, pgon in polys.items():
         if t in tf0:
             axM.add_patch(Polygon(pgon, closed=True, fc="none", ec="0.55" if t in band else "0.8", lw=0.35, zorder=1))
-    cmp = plt.cm.twilight_shifted; nph = mcolors.Normalize(0, 180)
+    vals = np.array(list(tphase.values())); assert vals.min() > 45, "tile phases approach the 0/180 wrap; use a cyclic map"
+    cmp = plt.cm.cividis; nph = mcolors.Normalize(90, 180)          # no wrap in the data (min ~98°): sequential map for contrast
     for t, v in tphase.items():
         ok = sd.get(t, np.inf) <= SD_MAX; col = cmp(nph(v))
         axM.plot(*cen[t], "o", ms=3 + 5 * tR[t], mfc=col if ok else "white", mec="0.15" if ok else col, mew=0.4 if ok else 1.3, zorder=4)
     log("  (b) tile-averaged phases (deg): " + ", ".join(f"{t}:{v:.0f}" for t, v in sorted(tphase.items())))
-    sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp); cb = fig.colorbar(sm, ax=axM, fraction=0.045, pad=0.01, shrink=0.8, ticks=[0, 90, 180])
+    sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp); cb = fig.colorbar(sm, ax=axM, fraction=0.045, pad=0.01, shrink=0.8, ticks=[90, 135, 180])
     cb.set_label("tile-averaged H1 phase (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
     label(gs[1], "b")
 
