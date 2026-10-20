@@ -4,14 +4,12 @@ Every tile is a separate recording with its own (arbitrary) time origin, so a ve
 comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gauge ψ_t per tile from the vessels imaged
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
-  a  tiles on the organ, coloured by their heart rate f0; tiles outside the accepted band (|f0/f_ref − 1| > 0.15) hatched;
-     reference tile outlined
-  b  one vessel imaged in two overlapping tiles: its waveform Q(t)/Q̄ in each, as recorded (raw time origins) and after
-     the tile gauges
-  c  the synchronisation network: tiles linked by the vessels they share (line width ∝ Σ ρ_a ρ_b), coloured by ψ_t;
-     open circle = gauge less certain than 30° (bootstrap SD)
-  d  validation on vessels imaged in two tiles (both ρ ≥ 0.1): cross-tile phase difference of H1 (used to fit ψ) and H2
-     (not used; aligned with 2ψ), raw vs aligned
+  a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
+  b  tile gauges on the overlap graph: retained tiles linked by the vessels they share (width ∝ √Σ ρ_a ρ_b), coloured
+     by ψ_t; open = gauge bootstrap SD > 30°; square = reference tile
+  c  validation on vessels imaged in two tiles (both ρ ≥ 0.1): same-vessel phase difference between tiles for H1 (fitted)
+     and H2 (not fitted; aligned with 2ψ), as recorded vs aligned, with the median |Δφ|
+  (supplement: one vessel's waveform in two tiles before / after the gauges)
 Reads the graph and results/dc_reconciled_v2.pkl (recomputes the AC field); writes figures/fig7_sync/fig7.{png,pdf,tif}.
 """
 from __future__ import annotations
@@ -88,101 +86,64 @@ def main():
             for j in range(i + 1, len(ts)):
                 a, b = sorted((ts[i], ts[j])); link[(a, b)] = link.get((a, b), 0.0) + max(x[a]["rho"], 0) * max(x[b]["rho"], 0)
 
-    # example vessel for b: both tiles coherent, the largest raw H1 offset
-    best = None
-    for e, a, b in pairs:
-        xa, xb = meas[e][a], meas[e][b]
-        if min(xa["rho"], xb["rho"]) < 0.5 or abs(xa["a0"]) < 0.05:
-            continue
-        off = abs(np.angle(xa["H"][0] * np.conj(xb["H"][0]))); al = abs(np.angle(xa["H"][0] * np.exp(-1j * psi[a]) * np.conj(xb["H"][0] * np.exp(-1j * psi[b]))))
-        score = off - 2 * al
-        if best is None or score > best[0]:
-            best = (score, e, a, b)
-    _, ex_e, ex_a, ex_b = best
-    log(f"  (b) example {ex_e}: tiles {ex_a}/{ex_b}, ρ {meas[ex_e][ex_a]['rho']:.2f}/{meas[ex_e][ex_b]['rho']:.2f}")
-
     mos = tifffile.imread(str(_paths.MOSAIC)); mos = mos.mean(axis=-1) if mos.ndim == 3 else mos; Hm, Wm = mos.shape
     polys = tile_polygons(_paths.STAGE); cen = {t: p.mean(0) for t, p in polys.items()}
-
-    fig = plt.figure(figsize=(7.5, 6.4), facecolor="white")
-    gs = fig.add_gridspec(2, 2, height_ratios=[1.15, 1], width_ratios=[1, 1], hspace=0.28, wspace=0.12, left=0.07, right=0.93, top=0.96, bottom=0.07)
-
-    def label(cell, letter):
-        b_ = cell.get_position(fig); fig.text(b_.x0 - 0.012, b_.y1 + 0.012, letter, fontsize=10, fontweight="bold", va="bottom", ha="left")
-
-    allp = np.vstack([polys[t] for t in polys if t in tf0]); pad_ = 20
+    allp = np.vstack([polys[t] for t in band]); pad_ = 15
     XL, YL = (allp[:, 0].min() - pad_, allp[:, 0].max() + pad_), (allp[:, 1].max() + pad_, allp[:, 1].min() - pad_)
 
     def organ(ax):
-        ax.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), zorder=0, alpha=0.55)
-        ax.set_xlim(*XL); ax.set_ylim(*YL); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([]); [s_.set_visible(False) for s_ in ax.spines.values()]
+        ax.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), zorder=0, alpha=0.35)
+        ax.set_xlim(*XL); ax.set_ylim(*YL); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
+        [s_.set_visible(False) for s_ in ax.spines.values()]
 
-    # ---- a: tile heart rates
-    axA = fig.add_subplot(gs[0, 0]); organ(axA)
-    fin = [tf0[t] for t in band]; nf = mcolors.Normalize(min(fin), max(fin)); cmf = plt.cm.cividis
-    for t, p in polys.items():
-        if t not in tf0:
-            continue
-        inb = t in band
-        axA.add_patch(Polygon(p, closed=True, fc=cmf(nf(tf0[t])) if inb else "none", ec="0.25" if inb else "0.4", lw=0.4, alpha=0.45 if inb else 1,
-                              hatch=None if inb else "////", zorder=2))
-    axA.add_patch(Polygon(polys[ref], closed=True, fc="none", ec="black", lw=1.4, zorder=4))
-    sm = plt.cm.ScalarMappable(norm=nf, cmap=cmf); cb = fig.colorbar(sm, ax=axA, fraction=0.04, pad=0.01, shrink=0.7); cb.set_label("tile heart rate $f_0$ (Hz)"); cb.ax.tick_params(labelsize=7)
-    axA.text(0.02, 0.02, f"reference tile ({f_ref:.2f} Hz) outlined\nhatched: outside ±{100 * F0_BAND:.0f}% of reference", transform=axA.transAxes, fontsize=7, va="bottom", bbox=dict(fc="white", ec="none", alpha=0.85, pad=1.5), zorder=6)
-    label(gs[0, 0], "a")
+    fig = plt.figure(figsize=(7.5, 3.0), facecolor="white")
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1.2, 1], wspace=0.3, left=0.07, right=0.985, top=0.9, bottom=0.17)
 
-    # ---- c: synchronisation network coloured by ψ
-    axC = fig.add_subplot(gs[0, 1]); organ(axC)
-    for t in band:
-        axC.add_patch(Polygon(polys[t], closed=True, fc="none", ec="0.6", lw=0.3, zorder=1))
+    def label(cell, letter):
+        b_ = cell.get_position(fig); fig.text(b_.x0 - 0.045, b_.y1 + 0.03, letter, fontsize=10, fontweight="bold", va="bottom", ha="left")
+
+    # ---- a: heart rate per tile and the accepted band
+    axA = fig.add_subplot(gs[0]); ts = sorted(tf0); f = np.array([tf0[t] for t in ts]); inb = np.array([t in band for t in ts])
+    axA.axhspan(f_ref * (1 - F0_BAND), f_ref * (1 + F0_BAND), color="#dfe8f2", zorder=0, lw=0)
+    axA.axhline(f_ref, color="0.45", lw=0.6, ls="--", zorder=1)
+    axA.plot(np.array(ts)[inb], f[inb], "o", ms=3.2, color="#2b5c8a", zorder=3, label="retained")
+    axA.plot(np.array(ts)[~inb], f[~inb], "o", ms=3.2, mfc="white", mec="0.45", mew=0.7, zorder=3, label="excluded")
+    axA.plot(ref, f_ref, "s", ms=5, mfc="none", mec="black", mew=1.0, zorder=4, label=f"reference (tile {ref})")
+    axA.set_xlabel("tile number"); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
+    axA.text(0.98, f_ref * (1 + F0_BAND), f"±{100 * F0_BAND:.0f}%", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=7, color="0.35")
+    axA.legend(fontsize=7, frameon=False, loc="lower right", handletextpad=0.2, borderaxespad=0.2, labelspacing=0.3)
+    label(gs[0], "a")
+
+    # ---- b: tile gauges on the overlap graph
+    axC = fig.add_subplot(gs[1]); organ(axC)
     wmax = max(link.values()); segs, lws = [], []
     for (a, b), w in link.items():
-        segs.append([cen[a], cen[b]]); lws.append(0.3 + 2.2 * np.sqrt(w / wmax))
-    axC.add_collection(LineCollection(segs, linewidths=lws, colors="0.25", alpha=0.6, zorder=2))
+        segs.append([cen[a], cen[b]]); lws.append(0.25 + 1.4 * np.sqrt(w / wmax))
+    axC.add_collection(LineCollection(segs, linewidths=lws, colors="0.35", alpha=0.35, zorder=2))
     cmp = plt.cm.twilight; npsi = mcolors.Normalize(-180, 180)
     for t in band:
         ok = sd.get(t, np.inf) <= SD_MAX; col = cmp(npsi(np.degrees(psi[t])))
-        axC.plot(*cen[t], "o", ms=6.5, mfc=col if ok else "white", mec=col if not ok else "0.15", mew=1.4 if not ok else 0.5, zorder=4)
-    axC.plot(*cen[ref], "s", ms=8, mfc="none", mec="black", mew=1.2, zorder=5)
-    sm = plt.cm.ScalarMappable(norm=npsi, cmap=cmp); cb = fig.colorbar(sm, ax=axC, fraction=0.04, pad=0.01, shrink=0.7, ticks=[-180, -90, 0, 90, 180])
-    cb.set_label("tile time gauge $\\psi_t$ (deg)"); cb.ax.tick_params(labelsize=7)
-    n_unc = sum(1 for t in band if sd.get(t, np.inf) > SD_MAX)
-    axC.text(0.02, 0.02, f"links: vessels shared by two tiles\nopen: gauge SD > {SD_MAX:.0f}° ({n_unc} tiles)", transform=axC.transAxes, fontsize=7, va="bottom", bbox=dict(fc="white", ec="none", alpha=0.85, pad=1.5), zorder=6)
-    label(gs[0, 1], "c")
+        axC.plot(*cen[t], "o", ms=4.6, mfc=col if ok else "white", mec="0.2" if ok else col, mew=0.4 if ok else 1.2, zorder=4)
+    axC.plot(*cen[ref], "s", ms=6.5, mfc="none", mec="black", mew=1.0, zorder=5)
+    sm = plt.cm.ScalarMappable(norm=npsi, cmap=cmp); cb = fig.colorbar(sm, ax=axC, fraction=0.045, pad=0.01, shrink=0.75, ticks=[-180, 0, 180])
+    cb.set_label("tile gauge $\\psi_t$ (deg)", fontsize=8, labelpad=1); cb.ax.yaxis.set_label_position("left"); cb.ax.tick_params(labelsize=7)
+    cb.outline.set_linewidth(0.4)
+    label(gs[1], "b")
 
-    # ---- b: one vessel in two tiles, raw and aligned
-    gB = gs[1, 0].subgridspec(1, 2, wspace=0.16); t_ = np.linspace(0, 1, 300); TC = ["#0072B2", "#D55E00"]
-    for j, mode in enumerate(("raw", "aligned")):
-        ax = fig.add_subplot(gB[j])
-        for k_, t in enumerate((ex_a, ex_b)):
-            x = meas[ex_e][t]; H = x["H"] * (np.exp(-1j * np.arange(1, 4) * psi[t]) if mode == "aligned" else 1)
-            q = x["a0"] + sum((H[n - 1] * np.exp(2j * np.pi * n * t_)).real for n in (1, 2, 3)); q = q / x["a0"]
-            ax.plot(t_, q, color=TC[k_], lw=1.3, label=f"tile {t}")
-        ax.set_xlabel("$t\\,/\\,T$"); ax.set_xlim(0, 1); ax.set_xticks([0, 0.5, 1]); ax.spines[["top", "right"]].set_visible(False)
-        ax.set_title("as recorded" if mode == "raw" else "after tile gauges", fontsize=8.5, pad=3)
-        if j == 0:
-            ax.set_ylabel("$Q(t)\\,/\\,\\bar Q$"); ax.legend(fontsize=7, frameon=False, loc="upper left", handlelength=1.5)
-        else:
-            ax.set_yticklabels([])
-    yl = [min(a_.get_ylim()[0] for a_ in fig.axes[-2:]), max(a_.get_ylim()[1] for a_ in fig.axes[-2:])]
-    for a_ in fig.axes[-2:]:
-        a_.set_ylim(*yl)
-    label(gs[1, 0], "b")
-
-    # ---- d: validation, cross-tile phase differences
-    gD = gs[1, 1].subgridspec(2, 1, hspace=0.18); bins = np.linspace(-180, 180, 37)
+    # ---- c: validation, cross-tile phase differences of the same vessel
+    gD = gs[2].subgridspec(2, 1, hspace=0.25); bins = np.linspace(-180, 180, 37)
     for r_, k in enumerate((1, 2)):
         ax = fig.add_subplot(gD[r_])
-        ax.hist(d[k]["raw"], bins=bins, density=True, histtype="step", color="0.5", lw=1.0, label="as recorded")
-        ax.hist(d[k]["aligned"], bins=bins, density=True, color="#8fb0d3", ec="white", lw=0.3, label="after tile gauges")
+        ax.hist(d[k]["raw"], bins=bins, density=True, histtype="step", color="0.5", lw=0.8, label="as recorded")
+        ax.hist(d[k]["aligned"], bins=bins, density=True, color="#8fb0d3", ec="white", lw=0.3, label="aligned")
         ax.set_xlim(-180, 180); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-180, -90, 0, 90, 180])
-        ax.text(0.01, 0.95, f"H{k}" + ("" if k == 1 else "  (not used to fit $\\psi$)"), transform=ax.transAxes, fontsize=8, fontweight="bold", va="top")
-        ax.text(0.99, 0.95, f"median |Δφ|  {np.median(np.abs(d[k]['raw'])):.0f}° → {np.median(np.abs(d[k]['aligned'])):.0f}°", transform=ax.transAxes, fontsize=7.5, ha="right", va="top")
+        ax.text(0.0, 0.97, f"H{k}" + ("" if k == 1 else "  (not fitted)"), transform=ax.transAxes, fontsize=8, fontweight="bold", va="top")
+        ax.text(1.0, 0.97, f"{np.median(np.abs(d[k]['raw'])):.0f}° → {np.median(np.abs(d[k]['aligned'])):.0f}°", transform=ax.transAxes, fontsize=8, ha="right", va="top")
         if r_ == 0:
-            ax.set_xticklabels([]); ax.legend(fontsize=7, frameon=False, loc="center right", bbox_to_anchor=(1.0, 0.55))
+            ax.set_xticklabels([]); ax.legend(fontsize=7, frameon=False, loc="center right", bbox_to_anchor=(1.03, 0.5), handlelength=1.2)
         else:
-            ax.set_xlabel("phase difference between tiles, same vessel (deg)")
-    label(gs[1, 1], "d")
+            ax.set_xlabel("same-vessel phase difference\nbetween tiles (deg)")
+    label(gs[2], "c")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT_DIR / "fig7.png", dpi=300, facecolor="white"); fig.savefig(OUT_DIR / "fig7.pdf", facecolor="white")
