@@ -5,9 +5,9 @@ comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gau
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
   a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
-  b  how ψ_t is obtained: for the three tile pairs sharing the most coherent vessels (both ρ ≥ 0.1), each shared vessel's
-     raw H1 phase difference Δφ_e with the fitted offset ψ_a − ψ_b; then the fitted ψ_t of every retained tile with its
-     bootstrap SD (open: SD > 30°; square: reference, ψ = 0)
+  b  how one relative tile phase is measured: the tile pair sharing the most coherent vessels (both ρ ≥ 0.1); each shared
+     vessel's H1 phase difference Δφ_e (grey) and the fitted ψ_a − ψ_b (blue).  The pairwise constraints over the whole
+     overlap graph give one ψ_t per tile (reference tile ψ = 0) — caption, not drawn
   c  validation on vessels imaged in two tiles: same-vessel phase difference between tiles after alignment, H1 (fitted)
      and H2 (not fitted; aligned with 2ψ), median |Δφ|; raw medians in the log (for the caption)
   (waveform scaling to Q′ is shown in fig. 9; one vessel's waveform in two tiles is a supplement panel)
@@ -99,7 +99,7 @@ def main():
         [s_.set_visible(False) for s_ in ax.spines.values()]
 
     fig = plt.figure(figsize=(7.5, 2.9), facecolor="white")
-    gs = fig.add_gridspec(1, 3, width_ratios=[0.95, 1.6, 0.9], wspace=0.32, left=0.07, right=0.985, top=0.9, bottom=0.17)
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1.15, 1], wspace=0.3, left=0.07, right=0.985, top=0.9, bottom=0.17)
 
     def label(cell, letter):
         b_ = cell.get_position(fig); fig.text(b_.x0 - 0.045, b_.y1 + 0.03, letter, fontsize=10, fontweight="bold", va="bottom", ha="left")
@@ -115,32 +115,29 @@ def main():
     axA.set_xlabel("tile number"); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
     label(gs[0], "a")
 
-    # ---- b: shared-vessel phase constraints → fitted tile gauges
-    gB = gs[1].subgridspec(1, 2, width_ratios=[1, 1.15], wspace=0.42)
+    # ---- b: how one relative tile phase is measured — one overlapping pair
     npair = {}
     for e, a, b in pairs:
         npair[(a, b)] = npair.get((a, b), 0) + 1
-    top3 = [k for k, _ in sorted(npair.items(), key=lambda kv: -kv[1])[:3]]
-    axP = fig.add_subplot(gB[0])
-    for r_, (a, b) in enumerate(top3):
-        dv = np.degrees([np.angle(meas[e][a]["H"][0] * np.conj(meas[e][b]["H"][0])) for e, aa, bb in pairs if (aa, bb) == (a, b)])
-        fit = np.degrees(np.angle(np.exp(1j * (psi[a] - psi[b]))))
-        dv = (dv + 180) % 360 - 180
-        yj = r_ + np.random.default_rng(r_).uniform(-0.18, 0.18, len(dv))
-        axP.plot(dv, yj, "o", ms=1.6, color="0.45", alpha=0.6, mew=0, zorder=2)
-        axP.plot([fit, fit], [r_ - 0.32, r_ + 0.32], color="#2b5c8a", lw=1.6, zorder=3)
-    axP.set_yticks(range(len(top3))); axP.set_yticklabels([f"{a}–{b}" for a, b in top3], fontsize=7); axP.set_ylim(-0.6, len(top3) - 0.4)
-    axP.set_xlabel("shared-vessel $\\Delta\\phi_e$ (deg)"); axP.set_ylabel("tile pair", labelpad=1); axP.spines[["top", "right"]].set_visible(False)
-    axP.tick_params(axis="y", length=0)
-    axP.set_xlim(-180, 180); axP.set_xticks([-180, 0, 180])
-    axP.plot([], [], "-", color="#2b5c8a", lw=1.6, label="fitted $\\psi_a - \\psi_b$"); axP.legend(fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(-0.02, 0.98), handlelength=1.0, borderaxespad=0)
-    axG = fig.add_subplot(gB[1]); tb_ = sorted(band); pg = np.degrees([np.angle(np.exp(1j * psi[t])) for t in tb_]); sg_ = np.array([sd.get(t, np.nan) for t in tb_])
-    okg = sg_ <= SD_MAX
-    axG.errorbar(np.array(tb_)[okg], pg[okg], yerr=sg_[okg], fmt="o", ms=2.6, color="0.15", elinewidth=0.6, capsize=0, zorder=3)
-    axG.errorbar(np.array(tb_)[~okg], pg[~okg], yerr=np.minimum(sg_[~okg], 180), fmt="o", ms=2.6, mfc="white", mec="0.45", ecolor="0.6", elinewidth=0.6, capsize=0, zorder=3)
-    axG.plot(ref, 0, "s", ms=5, mfc="white", mec="black", mew=0.9, zorder=4)
-    axG.set_ylim(-190, 190); axG.set_yticks([-180, -90, 0, 90, 180]); axG.set_xlabel("tile number"); axG.set_ylabel("tile gauge $\\psi_t$ (deg)", labelpad=1)
-    axG.spines[["top", "right"]].set_visible(False)
+    (pa_, pb_), npb = max(npair.items(), key=lambda kv: kv[1])
+    dv = np.degrees([np.angle(meas[e][pa_]["H"][0] * np.conj(meas[e][pb_]["H"][0])) for e, aa, bb in pairs if (aa, bb) == (pa_, pb_)])
+    dv = (dv + 180) % 360 - 180; fit = np.degrees(np.angle(np.exp(1j * (psi[pa_] - psi[pb_]))))
+    log(f"  (b) pair {pa_}–{pb_}: {npb} shared vessels, fitted ψa−ψb {fit:+.0f}°, median |Δφ_e − fit| {np.median(np.abs((dv - fit + 180) % 360 - 180)):.1f}°")
+    gB = gs[1].subgridspec(2, 1, height_ratios=[0.42, 1], hspace=0.12)
+    axS = fig.add_subplot(gB[0]); axS.axis("off"); axS.set_xlim(0, 1); axS.set_ylim(0, 1)
+    for x0_, t, nm in ((0.08, pa_, "a"), (0.62, pb_, "b")):
+        axS.add_patch(matplotlib.patches.FancyBboxPatch((x0_, 0.38), 0.3, 0.42, boxstyle="round,pad=0.01,rounding_size=0.04", fc="#f2f4f7", ec="0.5", lw=0.6))
+        axS.text(x0_ + 0.15, 0.59, f"tile {t}  (${nm}$)", ha="center", va="center", fontsize=8)
+    axS.annotate("", xy=(0.61, 0.59), xytext=(0.39, 0.59), arrowprops=dict(arrowstyle="<->", lw=0.8, color="0.3", mutation_scale=7))
+    axS.text(0.5, 0.86, f"{npb} shared vessels", ha="center", va="bottom", fontsize=7, color="0.35")
+    axS.text(0.5, 0.06, "$\\Delta\\phi_e \\approx \\psi_a - \\psi_b$", ha="center", va="center", fontsize=8.5)
+    axP = fig.add_subplot(gB[1])
+    yj = np.random.default_rng(1).uniform(-1, 1, len(dv))
+    axP.plot(dv, yj, "o", ms=2.2, color="0.5", alpha=0.65, mew=0, zorder=2)
+    axP.axvline(fit, color="#2b5c8a", lw=1.6, zorder=3)
+    axP.text(fit + 8, 1.25, "fitted $\\psi_a - \\psi_b$", color="#2b5c8a", fontsize=7.5, va="bottom", ha="left")
+    axP.set_xlim(-180, 180); axP.set_xticks([-180, -90, 0, 90, 180]); axP.set_ylim(-1.5, 1.9); axP.set_yticks([])
+    axP.spines[["top", "right", "left"]].set_visible(False); axP.set_xlabel("H1 phase difference of each shared vessel, $\\Delta\\phi_e$ (deg)")
     label(gs[1], "b")
 
     # ---- c: repeated-vessel agreement after alignment
@@ -149,7 +146,8 @@ def main():
         ax = fig.add_subplot(gD[r_]); v = d[k]["aligned"]
         ax.hist(v, bins=bins, density=True, color="#8fb0d3", ec="white", lw=0.3)
         ax.set_xlim(-90, 90); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-90, 0, 90])
-        ax.text(0.0, 0.97, "H1" if k == 1 else "H2 validation", transform=ax.transAxes, fontsize=8, fontweight="bold", va="top")
+        ax.text(0.0, 0.97, "H1" if k == 1 else "H2", transform=ax.transAxes, fontsize=8, fontweight="bold", va="top")
+        ax.text(0.0, 0.7, "used to fit $\\psi_t$" if k == 1 else "predicted with $2\\psi_t$", transform=ax.transAxes, fontsize=7, va="top", color="0.35")
         ax.text(1.0, 0.97, f"median\n|Δφ| {np.median(np.abs(d[k]['aligned'])):.0f}°", transform=ax.transAxes, fontsize=7.5, va="top", ha="right", color="0.25")
         if r_ == 0:
             ax.set_xticklabels([])
