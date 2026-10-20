@@ -5,16 +5,17 @@ comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gau
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
   a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
-  b  H1 phase delay from the dorsal aorta (zero = DA H1 phase in the reference tile), per accepted tile as an arrow: colour =
-     the tile's ρ-weighted mean delay (flow-direction frame, sign of Q′); direction = within-tile delay gradient (weighted
-     plane fit of the vessels' delays vs position), i.e. the local direction of pulse travel; length ∝ steepness (floor 45 %);
-     dot = gradient not significant (|z| < 2); dashed = weakly linked block (offset from the weak cross-links / symmetry);
-     open grey = tile offset undetermined (bootstrap SD > 30°) or near-unconstrained; star = venous outflow
-  supplement (fig7_supp_heldout): held-out overlap prediction — for every overlapping tile pair with ≥ 5 shared coherent
-     vessels that is not a bridge, all links between the two tiles removed, ψ refitted, ψ_a − ψ_b predicted vs measured
-  c  validation on vessels imaged in two tiles: same-vessel phase difference between tiles after alignment, H1 (fitted)
-     and H2 (not fitted; aligned with 2ψ), median |Δφ|; raw medians in the log (for the caption)
-  (waveform scaling to Q′ is shown in fig. 9; one vessel's waveform in two tiles is a supplement panel)
+  b  one overlapping tile pair of the core (most shared coherent vessels): every measurement of a carved vessel in either
+     tile, coloured by its H1 delay from the DA/V boundary, with isochrones (10°) of the smoothed field (σ 60 µm) — the
+     contours run continuously across the seam
+  c  organ scale: circular kernel smoothing (σ 150 µm, ρ-weighted phasors) of all shown tiles' vessel delays, isochrones every
+     20°; hatched = the weakly linked left block (offset constrained to ~±40° by weak cross-links, consistent with left-right
+     boundary symmetry); open dots = tiles with undetermined offset (not used); stars = venous outflow; dashed = tiles of b
+  d  validation on vessels imaged in two tiles: same-vessel phase difference after alignment, H1 (used to estimate ψ_t) and
+     H2 (corrected with 2ψ_t, not fitted), median |Δφ|
+  Phases: synchronisation anchored on the dorsal aorta (= results/ac_field_v3); zero = tile-14 physiological boundary
+  (2 DA + 2 V stubs, one recording); flow-direction frame (sgn Q′); measurements against the reconciled flow not used.
+  (supplement fig7_supp_heldout: held-out overlap prediction)
 Reads the graph and results/dc_reconciled_v2.pkl (recomputes the AC field); writes figures/fig7_sync/fig7.{png,pdf,tif}.
 """
 from __future__ import annotations
@@ -112,14 +113,15 @@ def main():
         ax.set_xlim(*XL); ax.set_ylim(*YL); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
         [s_.set_visible(False) for s_ in ax.spines.values()]
 
-    fig = plt.figure(figsize=(7.5, 3.3), facecolor="white")
-    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1], wspace=0.38, left=0.07, right=0.985, top=0.9, bottom=0.17)
+    fig = plt.figure(figsize=(7.5, 6.6), facecolor="white")
+    gs = fig.add_gridspec(2, 2, width_ratios=[1, 1.15], height_ratios=[1, 1.25], wspace=0.3, hspace=0.28, left=0.08, right=0.97, top=0.95, bottom=0.08)
+    GA, GB, GC, GD = gs[0, 0], gs[0, 1], gs[1, 0], gs[1, 1]
 
     def label(cell, letter):
         b_ = cell.get_position(fig); fig.text(b_.x0 - 0.045, b_.y1 + 0.03, letter, fontsize=10, fontweight="bold", va="bottom", ha="left")
 
     # ---- a: which tiles are comparable — heart rate per tile, accepted band
-    axA = fig.add_subplot(gs[0]); ts = sorted(tf0); f = np.array([tf0[t] for t in ts]); inb = np.array([t in band for t in ts])
+    axA = fig.add_subplot(GA); ts = sorted(tf0); f = np.array([tf0[t] for t in ts]); inb = np.array([t in band for t in ts])
     axA.axhspan(f_ref * (1 - F0_BAND), f_ref * (1 + F0_BAND), color="#e9eef4", zorder=0, lw=0)
     axA.plot(np.array(ts)[inb], f[inb], "o", ms=2.8, color="0.15", zorder=3)
     axA.plot(np.array(ts)[~inb], f[~inb], "o", ms=2.8, color="0.72", zorder=3)
@@ -127,7 +129,7 @@ def main():
     axA.text(0.97, f_ref * (1 - F0_BAND) + 0.04, "accepted $f_0$ range", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=7, color="0.4")
     axA.annotate("reference", xy=(ref, f_ref), xytext=(ref - 3, f_ref + 0.22), fontsize=7, color="0.3", ha="right", arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
     axA.set_xlabel("tile number"); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
-    label(gs[0], "a")
+    label(GA, "a")
 
     # ---- b: held-out overlap prediction — drop all links between a and b, refit ψ from the rest, predict ψa − ψb
     from plexusflow.ac.field import _sync
@@ -232,45 +234,93 @@ def main():
     log(f"  (b) boundary H1 phase {np.degrees(phi_b):.0f}° from {nb.sum()} vessels ≤ 1 hop; tile delays {vals.min():.0f}° … {vals.max():.0f}° "
         f"(median {np.median(vals):.0f}°); within-tile R median {np.median(list(tR.values())):.2f}")
     log("  (b) tile delay° (R): " + ", ".join(f"{t}:{tdel[t]:.0f}({tR[t]:.2f})" for t in sorted(tdel)))
-    axM = fig.add_subplot(gs[1]); organ(axM)
-    for t, pgon in polys.items():
-        if t in tf0:
-            axM.add_patch(Polygon(pgon, closed=True, fc="none", ec="0.55" if t in band else "0.8", lw=0.35, zorder=1))
-    # delays as positive lags: wrap into [−30°, 330°) so small negatives near the boundary stay ≈ 0; colour range [0, max]
+    # ---- vessel delays for the maps: every measurement of a carved vessel in a shown tile (core or the weakly linked block,
+    #      offset determined), aligned (ψ_t), flow-direction frame (sgn Q′), delay = wrap(φ_zero − φ) in [−30°, 330°)
+    from scipy.ndimage import gaussian_filter
+    shown_t = {t for t in band if t not in masked and sd.get(t, np.inf) <= SD_MAX}
+    def pts(e, step=2.0):
+        pth = G.edges[e].get("path")
+        p_ = np.asarray(pth, float) if pth is not None and len(pth) >= 2 else np.array([[G.nodes[n]["x"], G.nodes[n]["y"]] for n in e], float)
+        p_ = np.c_[p_[:, 0], Hm_ - p_[:, 1]]; sl = np.r_[0, np.cumsum(np.hypot(*np.diff(p_, axis=0).T))]
+        ss = np.linspace(0, sl[-1], max(int(sl[-1] / step), 2)); return np.c_[np.interp(ss, sl, p_[:, 0]), np.interp(ss, sl, p_[:, 1])]
+    V = []                                                    # (points, delay°, weight, tile)
+    for e, x in meas.items():
+        i_ = eixf.get(e)
+        if i_ is None or F["Qp"][i_] == 0:
+            continue
+        for t, y in x.items():
+            if t not in shown_t or not np.isfinite(y["rho"]) or y["rho"] < 0.1 or abs(y["H"][0]) == 0 or np.sign(y["a0"]) != np.sign(F["Qp"][i_]):
+                continue                                      # (a measurement against the reconciled flow direction is not used, as in the field)
+            dl = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(np.sign(F["Qp"][i_]) * y["H"][0] * np.exp(-1j * psi[t]))))
+            V.append((pts(e), (dl + 30) % 360 - 30, y["rho"], t))
     tdel = {t: (v + 30) % 360 - 30 for t, v in tdel.items()}
-    dmax = max(v for t, v in tdel.items() if t in core and sd.get(t, np.inf) <= SD_MAX); vtop = 10 * np.ceil(dmax / 10)
-    log(f"  (b) max delay over determined tiles {dmax:.0f}° (tile {max((v, t) for t, v in tdel.items() if t in core and sd.get(t, np.inf) <= SD_MAX)[1]})")
-    cmp = plt.cm.cividis_r; nph = mcolors.Normalize(0, vtop)
-    # arrows: direction of increasing delay (pulse travel), length ∝ gradient steepness, colour = tile mean delay; dot if |z| < 2
-    side_len = np.median([np.linalg.norm(polys[t][1] - polys[t][0]) for t in band]); Lmax = 0.95 * side_len
-    sig = {t: g for t, (g, z) in tvec.items() if z >= 2}; gref = np.percentile([np.linalg.norm(g) for g in sig.values()], 90) if sig else 1
-    da_xy = np.mean([[G.nodes[n]["x"], Hm_ - G.nodes[n]["y"]] for n in dom["DA"]], axis=0); away = []
-    for t, v in tdel.items():
-        shown = (t in core or t in block_t) and t not in masked and sd.get(t, np.inf) <= SD_MAX
-        if not shown:                                             # tile offset undetermined: no phase shown
-            axM.plot(*cen[t], "o", ms=5, mfc="white", mec="0.55", mew=0.9, zorder=4); continue
-        col = cmp(nph(v)); dashed = t in block_t
-        if t in sig:
-            g = sig[t]; u = g / np.linalg.norm(g); L = Lmax * (0.45 + 0.55 * min(np.linalg.norm(g) / gref, 1.0))
-            away.append(float(np.dot(u, (cen[t] - da_xy) / np.linalg.norm(cen[t] - da_xy))))
-            axM.add_patch(matplotlib.patches.FancyArrowPatch(cen[t] - 0.5 * L * u, cen[t] + 0.5 * L * u, arrowstyle="simple,head_width=3.2,head_length=3.2,tail_width=1.2",
-                          mutation_scale=1.4, fc=col, ec="0.1", lw=0.6, ls="--" if dashed else "-", zorder=4))
-        else:
-            axM.plot(*cen[t], "o", ms=3.5, mfc=col, mec="0.15", mew=0.4, ls="none", zorder=4)
-    gm = np.array([np.linalg.norm(g) for g in sig.values()]) * 100 / FUSE_UM_PX
-    log(f"  (b) delay gradients: {len(sig)} of {len(tvec)} fitted tiles with |z| ≥ 2; steepness median {np.median(gm):.0f}°/100 µm "
-        f"(10–90 % {np.percentile(gm, 10):.0f}–{np.percentile(gm, 90):.0f}); pointing away from the aorta (cos > 0) in {np.mean(np.array(away) > 0):.0%}, "
-        f"median cos {np.median(away):.2f}")
-    for i in [int(i) for i in dom["out"]]:                                   # venous outflow nodes, for orientation
-        n_ = nds[i]; xy = (G.nodes[n_]["x"], mos.shape[0] - G.nodes[n_]["y"])
-        axM.plot(*xy, marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
+    dmax = max(v for t, v in tdel.items() if t in shown_t); vtop = 20 * np.ceil(np.percentile([v[1] for v in V], 98) / 20)
+    cmp = plt.cm.cividis_r; nph = mcolors.Normalize(0, vtop); LEV = np.arange(0, vtop + 1, 20)
+
+    def smooth_field(vs, sigma_um, step_px, box):
+        """Circular kernel smoothing of vessel delays on a grid: Z = G_σ * Σ w e^{iδ}; masked where the kernel weight is small."""
+        (x0, x1), (y0, y1) = box; nx, ny = int((x1 - x0) / step_px) + 1, int((y1 - y0) / step_px) + 1
+        Z = np.zeros((ny, nx), complex); Wg = np.zeros((ny, nx)); Wb = np.zeros((ny, nx))
+        for p_, dl, w, t in vs:
+            ix_ = np.clip(((p_[:, 0] - x0) / step_px).astype(int), 0, nx - 1); iy_ = np.clip(((p_[:, 1] - y0) / step_px).astype(int), 0, ny - 1)
+            np.add.at(Z, (iy_, ix_), w * np.exp(1j * np.radians(dl))); np.add.at(Wg, (iy_, ix_), w)
+            if t in block_t:
+                np.add.at(Wb, (iy_, ix_), w)
+        sg = sigma_um / FUSE_UM_PX / step_px
+        Zs = gaussian_filter(Z.real, sg) + 1j * gaussian_filter(Z.imag, sg); Ws = gaussian_filter(Wg, sg); Wbs = gaussian_filter(Wb, sg)
+        ok = Ws > 0.15 * np.percentile(Ws[Ws > 0], 75)
+        dd = (np.degrees(np.angle(Zs)) + 30) % 360 - 30
+        return np.ma.masked_where(~ok, dd), np.ma.masked_where(~ok, Wbs / np.maximum(Ws, 1e-12)), (x0, x1, y1, y0)
+
+    # ---- b: one overlapping tile pair of the core — measured vessel delays and the smoothed isochrones across the seam
+    cnt = {}
+    for e, a, b in pairs:
+        if a in shown_t and b in shown_t and a not in block_t and b not in block_t:
+            cnt[(a, b)] = cnt.get((a, b), 0) + 1
+    (ta, tb), npair_ = max(cnt.items(), key=lambda kv: kv[1])
+    pp = np.vstack([polys[ta], polys[tb]]); box = ((pp[:, 0].min(), pp[:, 0].max()), (pp[:, 1].min(), pp[:, 1].max()))
+    axB = fig.add_subplot(GB); x0, x1 = box[0]; y0, y1 = box[1]
+    axB.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.45, zorder=0)
+    vsel = [v for v in V if v[3] in (ta, tb)]
+    for p_, dl, w, t in vsel:
+        axB.plot(p_[:, 0], p_[:, 1], color=cmp(nph(dl)), lw=1.4, solid_capstyle="round", zorder=3)
+    fz, _, ext = smooth_field(vsel, 60.0, 3.0, box)
+    cs = axB.contour(np.linspace(x0, x1, fz.shape[1]), np.linspace(y0, y1, fz.shape[0]), fz, levels=np.arange(0, vtop + 1, 10), colors="0.1", linewidths=0.5, zorder=4)
+    axB.clabel(cs, levels=cs.levels[::2], fmt="%d°", fontsize=6, inline_spacing=1)
+    for t, colr in ((ta, "#0072B2"), (tb, "#D55E00")):
+        axB.add_patch(Polygon(polys[t], closed=True, fc="none", ec=colr, lw=1.0, ls="--", zorder=5))
+        axB.text(*(polys[t].mean(0) + 0.42 * (polys[t][0] - polys[t].mean(0))), f"tile {t}", color=colr, fontsize=7.5, fontweight="bold", zorder=6,
+                 bbox=dict(fc="white", ec="none", alpha=0.8, pad=0.8))
+    axB.set_xlim(x0, x1); axB.set_ylim(y1, y0); axB.set_aspect("equal"); axB.set_xticks([]); axB.set_yticks([])
+    for sp in axB.spines.values():
+        sp.set_linewidth(0.5); sp.set_color("0.5")
+    log(f"  (b) tile pair {ta}/{tb} ({npair_} shared coherent vessels); {len(vsel)} vessel measurements")
+    label(GB, "b")
+
+    # ---- c: organ-scale smoothed delay field with isochrones; the weakly linked block hatched
+    axC = fig.add_subplot(GC); organ(axC)
+    big = ((XL[0], XL[1]), (YL[1], YL[0]))
+    fo, fb, ext = smooth_field(V, 150.0, 6.0, big)
+    gx = np.linspace(big[0][0], big[0][1], fo.shape[1]); gy = np.linspace(big[1][0], big[1][1], fo.shape[0])
+    axC.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.9, zorder=1, interpolation="bilinear")
+    cs = axC.contour(gx, gy, fo, levels=LEV, colors="0.1", linewidths=0.45, zorder=3)
+    axC.clabel(cs, fmt="%d°", fontsize=6, inline_spacing=1)
+    plt.rcParams["hatch.linewidth"] = 0.4; plt.rcParams["hatch.color"] = "0.35"
+    axC.contourf(gx, gy, np.ma.filled(fb, 0), levels=[0.5, 1.01], colors="none", hatches=["////"], zorder=4)
+    for t in band:
+        if t not in shown_t:
+            axC.plot(*cen[t], "o", ms=3.5, mfc="white", mec="0.55", mew=0.7, zorder=5)
+    for i in [int(i) for i in dom["out"]]:
+        n_ = nds[i]; axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
+    axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.8, ls="--", zorder=5))
+    axC.add_patch(Polygon(polys[tb], closed=True, fc="none", ec="#D55E00", lw=0.8, ls="--", zorder=5))
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
-    cb = fig.colorbar(sm, ax=axM, fraction=0.045, pad=0.01, shrink=0.8, ticks=[0, 60, 120, 180] if vtop >= 180 else [0, vtop / 2, vtop], extend="min")
+    cax = axC.inset_axes([0.2, -0.05, 0.6, 0.028]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=LEV[::3], extend="min")
     cb.set_label("H1 phase delay from DA/V boundary (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
-    label(gs[1], "b")
+    label(GC, "c")
 
     # ---- c: repeated-vessel agreement after alignment
-    gD = gs[2].subgridspec(2, 1, hspace=0.3); bins = np.linspace(-60, 60, 31)
+    gD = GD.subgridspec(2, 1, hspace=0.3); bins = np.linspace(-60, 60, 31)
     for r_, k in enumerate((1, 2)):
         ax = fig.add_subplot(gD[r_]); v = d[k]["aligned"]
         ax.hist(v, bins=bins, density=True, color="#8fb0d3", ec="white", lw=0.3)
@@ -281,7 +331,7 @@ def main():
             ax.set_xticklabels([])
         else:
             ax.set_xlabel("same-vessel phase difference\nbetween tiles, aligned (deg)")
-    label(gs[2], "c")
+    label(GD, "d")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     # supplement — held-out overlap prediction (fig7_supp_heldout)
