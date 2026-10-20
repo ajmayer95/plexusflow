@@ -184,9 +184,9 @@ def main():
     _, Vk = np.linalg.eigh(np.eye(len(kp_)) - Wk / np.sqrt(np.outer(dk_, dk_))); side_ = Vk[:, 1] / np.sqrt(dk_) > 0
     if side_[list(kp_).index(ix_t[ref])]:
         side_ = ~side_
-    masked = {tl_[i] for i in np.flatnonzero(weak_)} | {tl_[kp_[i]] for i in np.flatnonzero(side_)}
+    block_t = {tl_[kp_[i]] for i in np.flatnonzero(side_)}; masked = {tl_[i] for i in np.flatnonzero(weak_)}
     core = [t for t in tl_ if t not in masked]
-    log(f"  (b) core {len(core)} of {len(tl_)} tiles; masked: weakly linked block {sorted(tl_[kp_[i]] for i in np.flatnonzero(side_))}, "
+    log(f"  (b) shown {len(core)} of {len(tl_)} tiles (dashed: weakly linked block); grey: undetermined offset or {sorted(tl_[kp_[i]] for i in np.flatnonzero(side_))}, "
         f"near-unconstrained {sorted(tl_[i] for i in np.flatnonzero(weak_))}")
     tdel, tR, nflip, ntot = {}, {}, {}, {}; eixf = {e: i for i, e in enumerate(Ef)}
     for t in band:
@@ -218,6 +218,9 @@ def main():
     log(f"  (b) max delay over determined tiles {dmax:.0f}° (tile {max((v, t) for t, v in tdel.items() if t in core and sd.get(t, np.inf) <= SD_MAX)[1]})")
     cmp = plt.cm.cividis_r; nph = mcolors.Normalize(0, vtop)
     for t, v in tdel.items():
+        if t in block_t and t not in masked and sd.get(t, np.inf) <= SD_MAX:   # weakly linked block: coloured, dashed outline
+            axM.scatter(*cen[t], s=(3 + 5 * tR[t]) ** 2, color=cmp(nph(v)), edgecolors="0.1", linewidths=0.9, linestyles="--", zorder=4)
+            continue
         ok = t in core and sd.get(t, np.inf) <= SD_MAX; col = cmp(nph(v))
         if ok:
             axM.plot(*cen[t], "o", ms=3 + 5 * tR[t], mfc=col, mec="0.15", mew=0.4, zorder=4)
