@@ -300,7 +300,7 @@ def main():
     ca, cb_ = cen[ta], cen[tb]; nrm_s = (cb_ - ca) / np.linalg.norm(cb_ - ca); mid_s = (ca + cb_) / 2
     side = lambda p_: np.dot(p_.mean(0) - mid_s, nrm_s)
     cmc = plt.cm.twilight_shifted; ncy = mcolors.Normalize(-180, 180)
-    gBs = GB.subgridspec(2, 2, height_ratios=[1, 0.18], wspace=0.05, hspace=0.0)
+    gBs = GB.subgridspec(2, 2, height_ratios=[1, 0.18], wspace=0.2, hspace=0.0)
     for j_, (VV, ttl) in enumerate(((Vraw, "as recorded"), (V, "one phase offset per tile"))):
         ax = fig.add_subplot(gBs[0, j_])
         ax.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.3, zorder=0)
@@ -320,11 +320,15 @@ def main():
         for sp in ax.spines.values():
             sp.set_linewidth(0.5); sp.set_color("0.5")
         ax.set_title(ttl, fontsize=8, pad=3)
+    axb0, axb1 = fig.axes[-2], fig.axes[-1]; p0_, p1_ = axb0.get_position(), axb1.get_position()
+    fig.patches.append(matplotlib.patches.FancyArrowPatch((p0_.x1 - 0.004, p0_.y0 + 0.5 * p0_.height), (p1_.x0 + 0.004, p0_.y0 + 0.5 * p0_.height),
+                       transform=fig.transFigure, arrowstyle="-|>", mutation_scale=9, lw=1.0, color="black", zorder=10))
+    fig.text((p0_.x1 + p1_.x0) / 2, p0_.y0 + 0.5 * p0_.height + 0.012, r"$-\psi_t$", ha="center", va="bottom", fontsize=8, zorder=10)
     caxb = fig.add_subplot(gBs[1, :]); caxb.axis("off")
     cbi = caxb.inset_axes([0.3, 0.55, 0.4, 0.18]); cbb = fig.colorbar(plt.cm.ScalarMappable(norm=ncy, cmap=cmc), cax=cbi, orientation="horizontal", ticks=[-180, 0, 180])
     cbb.ax.tick_params(labelsize=6.5); cbb.outline.set_linewidth(0.4); cbb.set_label("H1 phase (deg)", fontsize=7, labelpad=1)
     bb = GB.get_position(fig)
-    fig.text(bb.x0 + 0.5 * bb.width, bb.y0 + 0.24 * bb.height, r"$\phi^{\rm aligned}_{e,t} = \phi^{\rm obs}_{e,t} - \psi_t$", ha="center", fontsize=8.5)
+    fig.text(bb.x0 + 0.5 * bb.width, bb.y0 + 0.235 * bb.height, r"$\phi^{\rm aligned}_{e,t} = \phi^{\rm obs}_{e,t} - \psi_t$", ha="center", fontsize=8.5)
 
     log(f"  (b) tile pair {ta}/{tb} ({npair_} shared coherent vessels)")
     label(GB, "b")
@@ -336,7 +340,7 @@ def main():
     gx = np.linspace(big[0][0], big[0][1], fo.shape[1]); gy = np.linspace(big[1][0], big[1][1], fo.shape[0])
     axC.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.9, zorder=1, interpolation="bilinear")
     cs = axC.contour(gx, gy, fo, levels=LEV, colors="0.1", linewidths=0.45, zorder=3)
-    axC.clabel(cs, levels=[v for v in LEV if v % 40 == 0], fmt="%d°", fontsize=6, inline_spacing=1)
+    axC.clabel(cs, levels=[v for v in LEV if v in (40, 80, 160)], fmt="%d°", fontsize=6, inline_spacing=1)
     plt.rcParams["hatch.linewidth"] = 0.3; plt.rcParams["hatch.color"] = "0.5"
     fbf = np.ma.filled(fb, 0)
     axC.contourf(gx, gy, fbf, levels=[0.5, 1.01], colors="none", hatches=["///"], zorder=4)
@@ -349,19 +353,19 @@ def main():
         axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="v", ms=5.5, color="white", mec="black", mew=0.6, zorder=6)
     for i in [int(i) for i in dom["out"]]:
         n_ = nds[i]; axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
-    rp = np.array(refpts); axC.annotate("DA/V reference\n(recorded together, 0°)", xy=(rp[:, 0].mean(), rp[:, 1].min() - 20),
-                                        xytext=(rp[:, 0].mean(), YL[1] + 0.02 * (YL[0] - YL[1])), ha="center", va="top", fontsize=6.5,
+    rp = np.array(refpts); axC.annotate("simultaneous DA/V\nreference, 0°", xy=(rp[:, 0].mean(), rp[:, 1].min() - 20),
+                                        xytext=(rp[:, 0].mean() + 0.30 * (XL[1] - XL[0]), YL[1] + 0.02 * (YL[0] - YL[1])), ha="center", va="top", fontsize=6.5,
                                         arrowprops=dict(arrowstyle="-", lw=0.5, color="0.3"), zorder=7)
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
-    axC.legend(handles=[Patch(fc="none", ec="0.4", hatch="///", ls="--", label="common phase offset uncertain"),
+    axC.legend(handles=[Patch(fc="none", ec="0.4", hatch="///", ls="--", label="phase relative to DA/V undetermined"),
                         Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile phase undetermined")],
-               loc="lower left", bbox_to_anchor=(-0.02, -0.02), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
+               loc="upper left", bbox_to_anchor=(-0.04, 1.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
     axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.8, ls="--", zorder=5))
     axC.add_patch(Polygon(polys[tb], closed=True, fc="none", ec="#D55E00", lw=0.8, ls="--", zorder=5))
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
     cax = axC.inset_axes([0.2, -0.05, 0.6, 0.028]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=LEV[::3], extend="min")
-    cb.set_label("H1 phase relative to simultaneous DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
+    cb.set_label("H1 phase lag behind simultaneous DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
     label(GC, "c")
 
     # ---- c: repeated-vessel agreement after alignment
@@ -373,7 +377,7 @@ def main():
         ax.axvline(0, color="0.3", lw=0.6, zorder=3)
         ax.text(0.0, 0.97, "H1" if k == 1 else "H2", transform=ax.transAxes, fontsize=8, fontweight="bold", va="top")
         if k == 2:
-            ax.text(0.0, 0.80, "not used for\nsynchronization", transform=ax.transAxes, fontsize=6.5, va="top", color="0.35")
+            ax.text(0.075, 0.965, "not used in synchronization", transform=ax.transAxes, fontsize=6.8, va="top", color="0.35")
         ax.text(1.0, 0.97, f"median $|\\Delta\\phi|$ = {np.median(np.abs(d[k]['aligned'])):.0f}°", transform=ax.transAxes, fontsize=7.5, va="top", ha="right", color="0.2")
         if r_ == 0:
             ax.set_xticklabels([])
