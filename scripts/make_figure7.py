@@ -5,9 +5,9 @@ comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gau
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
   a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
-  b  one overlapping tile pair of the core (most shared coherent vessels): every measurement of a carved vessel in either
-     tile, coloured by its H1 delay from the DA/V boundary, with isochrones (10°) of the smoothed field (σ 60 µm) — the
-     contours run continuously across the seam
+  b  one overlapping tile pair of the core (most shared coherent vessels), split at a seam (dotted) through the overlap: each side
+     shows its own tile's vessels coloured by H1 phase (cyclic).  As recorded the colours jump at the seam (arbitrary clock of each
+     tile); after one phase offset per tile, φ_aligned = φ_obs − ψ_t, they run continuously.  No spatial gradient is imposed.
   c  organ scale: circular kernel smoothing (σ 150 µm, ρ-weighted phasors) of all shown tiles' vessel delays, isochrones every
      20°; hatched = the weakly linked left block (offset constrained to ~±40° by weak cross-links, consistent with left-right
      boundary symmetry); open dots = tiles with undetermined offset (not used); stars = venous outflow; dashed = tiles of b
@@ -122,13 +122,27 @@ def main():
 
     # ---- a: which tiles are comparable — heart rate per tile, accepted band
     axA = fig.add_subplot(GA); ts = sorted(tf0); f = np.array([tf0[t] for t in ts]); inb = np.array([t in band for t in ts])
+    # acquisition time: time stamp of each tile's first raw frame (file modification time), minutes after the first tile
+    import glob as _glob, os as _os, re as _re
+    from plexusflow.config import StageConfig as _SC
+    _cfg = _SC.load(_paths.STAGE); _rd = _os.path.expanduser(str(_cfg.external_raw_video_dir or "")); tacq = {}
+    for t in ts:                                     # the recording the pipeline analysed: raw_video_dir_pattern with this tile id
+        _cands = _glob.glob(_os.path.join(_rd, _cfg.raw_video_dir_pattern.format(vid=t)))
+        _fs = sorted(_glob.glob(_os.path.join(sorted(_cands)[0], "*.tif")))[:1] if _cands else []
+        if _fs:
+            tacq[t] = _os.stat(_fs[0]).st_mtime
+    if all(t in tacq for t in ts):
+        _t0 = min(tacq.values()); xs_a = np.array([(tacq[t] - _t0) / 60 for t in ts]); xlab = "acquisition time (min)"
+    else:
+        xs_a = np.array(ts, float); xlab = "acquisition order (tile)"
+    xref = xs_a[ts.index(ref)]
     axA.axhspan(f_ref * (1 - F0_BAND), f_ref * (1 + F0_BAND), color="#e9eef4", zorder=0, lw=0)
-    axA.plot(np.array(ts)[inb], f[inb], "o", ms=2.8, color="0.15", zorder=3)
-    axA.plot(np.array(ts)[~inb], f[~inb], "o", ms=2.8, color="0.72", zorder=3)
-    axA.plot(ref, f_ref, "s", ms=5, mfc="white", mec="black", mew=0.9, zorder=4)
-    axA.text(0.97, f_ref * (1 - F0_BAND) + 0.04, "accepted $f_0$ range", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=7, color="0.4")
-    axA.annotate("reference", xy=(ref, f_ref), xytext=(ref - 3, f_ref + 0.22), fontsize=7, color="0.3", ha="right", arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
-    axA.set_xlabel("tile number"); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
+    axA.plot(xs_a[inb], f[inb], "o", ms=2.8, color="0.15", zorder=3)
+    axA.plot(xs_a[~inb], f[~inb], "o", ms=2.8, color="0.72", zorder=3)
+    axA.plot(xref, f_ref, "s", ms=5, mfc="white", mec="black", mew=0.9, zorder=4)
+    axA.text(0.97, f_ref * (1 - F0_BAND) + 0.04, "retained for phase reconstruction", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=7, color="0.4")
+    axA.annotate("reference tile", xy=(xref, f_ref), xytext=(xref - 0.06 * xs_a.max(), f_ref + 0.22), fontsize=7, color="0.3", ha="right", arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
+    axA.set_xlabel(xlab); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
     label(GA, "a")
 
     # ---- b: held-out overlap prediction — drop all links between a and b, refit ψ from the rest, predict ψa − ψb
@@ -243,7 +257,7 @@ def main():
         p_ = np.asarray(pth, float) if pth is not None and len(pth) >= 2 else np.array([[G.nodes[n]["x"], G.nodes[n]["y"]] for n in e], float)
         p_ = np.c_[p_[:, 0], Hm_ - p_[:, 1]]; sl = np.r_[0, np.cumsum(np.hypot(*np.diff(p_, axis=0).T))]
         ss = np.linspace(0, sl[-1], max(int(sl[-1] / step), 2)); return np.c_[np.interp(ss, sl, p_[:, 0]), np.interp(ss, sl, p_[:, 1])]
-    V = []                                                    # (points, delay°, weight, tile)
+    V, Vraw = [], []                                          # (points, delay°, weight, tile)
     for e, x in meas.items():
         i_ = eixf.get(e)
         if i_ is None or F["Qp"][i_] == 0:
@@ -253,6 +267,8 @@ def main():
                 continue                                      # (a measurement against the reconciled flow direction is not used, as in the field)
             dl = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(np.sign(F["Qp"][i_]) * y["H"][0] * np.exp(-1j * psi[t]))))
             V.append((pts(e), (dl + 30) % 360 - 30, y["rho"], t))
+            dr = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(np.sign(F["Qp"][i_]) * y["H"][0])))   # as recorded (no ψ_t)
+            Vraw.append((V[-1][0], (dr + 30) % 360 - 30, y["rho"], t))
     tdel = {t: (v + 30) % 360 - 30 for t, v in tdel.items()}
     dmax = max(v for t, v in tdel.items() if t in shown_t); vtop = 20 * np.ceil(np.percentile([v[1] for v in V], 98) / 20)
     cmp = plt.cm.cividis_r; nph = mcolors.Normalize(0, vtop); LEV = np.arange(0, vtop + 1, 20)
@@ -279,22 +295,38 @@ def main():
             cnt[(a, b)] = cnt.get((a, b), 0) + 1
     (ta, tb), npair_ = max(cnt.items(), key=lambda kv: kv[1])
     pp = np.vstack([polys[ta], polys[tb]]); box = ((pp[:, 0].min(), pp[:, 0].max()), (pp[:, 1].min(), pp[:, 1].max()))
-    axB = fig.add_subplot(GB); x0, x1 = box[0]; y0, y1 = box[1]
-    axB.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.45, zorder=0)
-    vsel = [v for v in V if v[3] in (ta, tb)]
-    for p_, dl, w, t in vsel:
-        axB.plot(p_[:, 0], p_[:, 1], color=cmp(nph(dl)), lw=1.4, solid_capstyle="round", zorder=3)
-    fz, _, ext = smooth_field(vsel, 60.0, 3.0, box)
-    cs = axB.contour(np.linspace(x0, x1, fz.shape[1]), np.linspace(y0, y1, fz.shape[0]), fz, levels=np.arange(0, vtop + 1, 10), colors="0.1", linewidths=0.5, zorder=4)
-    axB.clabel(cs, levels=cs.levels[::2], fmt="%d°", fontsize=6, inline_spacing=1)
-    for t, colr in ((ta, "#0072B2"), (tb, "#D55E00")):
-        axB.add_patch(Polygon(polys[t], closed=True, fc="none", ec=colr, lw=1.0, ls="--", zorder=5))
-        axB.text(*(polys[t].mean(0) + 0.42 * (polys[t][0] - polys[t].mean(0))), f"tile {t}", color=colr, fontsize=7.5, fontweight="bold", zorder=6,
-                 bbox=dict(fc="white", ec="none", alpha=0.8, pad=0.8))
-    axB.set_xlim(x0, x1); axB.set_ylim(y1, y0); axB.set_aspect("equal"); axB.set_xticks([]); axB.set_yticks([])
-    for sp in axB.spines.values():
-        sp.set_linewidth(0.5); sp.set_color("0.5")
-    log(f"  (b) tile pair {ta}/{tb} ({npair_} shared coherent vessels); {len(vsel)} vessel measurements")
+    x0, x1 = box[0]; y0, y1 = box[1]; TCOL = {ta: "#0072B2", tb: "#D55E00"}
+    # each vessel shown with the phase from the tile whose centre is nearer (a seam through the overlap); colour = H1 phase (cyclic)
+    ca, cb_ = cen[ta], cen[tb]; nrm_s = (cb_ - ca) / np.linalg.norm(cb_ - ca); mid_s = (ca + cb_) / 2
+    side = lambda p_: np.dot(p_.mean(0) - mid_s, nrm_s)
+    cmc = plt.cm.twilight_shifted; ncy = mcolors.Normalize(-180, 180)
+    gBs = GB.subgridspec(2, 2, height_ratios=[1, 0.18], wspace=0.05, hspace=0.0)
+    for j_, (VV, ttl) in enumerate(((Vraw, "as recorded"), (V, "one phase offset per tile"))):
+        ax = fig.add_subplot(gBs[0, j_])
+        ax.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.3, zorder=0)
+        for p_, dl, w, t in VV:
+            if t not in (ta, tb) or (side(p_) < 0) != (t == ta):
+                continue
+            ph_ = ((dl + 180) % 360) - 180
+            ax.plot(p_[:, 0], p_[:, 1], color=cmc(ncy(ph_)), lw=1.5, solid_capstyle="round", zorder=3)
+        sx = np.array([-nrm_s[1], nrm_s[0]]); L_ = 2 * max(x1 - x0, y1 - y0)
+        ax.plot([mid_s[0] - L_ * sx[0], mid_s[0] + L_ * sx[0]], [mid_s[1] - L_ * sx[1], mid_s[1] + L_ * sx[1]], color="black", lw=1.0, ls=":", zorder=4)
+        for t in (ta, tb):
+            ax.add_patch(Polygon(polys[t], closed=True, fc="none", ec=TCOL[t], lw=1.0, ls="--", zorder=5))
+            if j_ == 0:
+                ax.text(*(polys[t].mean(0) + 0.42 * (polys[t][0] - polys[t].mean(0))), f"tile {t}", color=TCOL[t], fontsize=7, fontweight="bold", zorder=6,
+                        bbox=dict(fc="white", ec="none", alpha=0.8, pad=0.6))
+        ax.set_xlim(x0, x1); ax.set_ylim(y1, y0); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_linewidth(0.5); sp.set_color("0.5")
+        ax.set_title(ttl, fontsize=8, pad=3)
+    caxb = fig.add_subplot(gBs[1, :]); caxb.axis("off")
+    cbi = caxb.inset_axes([0.3, 0.55, 0.4, 0.18]); cbb = fig.colorbar(plt.cm.ScalarMappable(norm=ncy, cmap=cmc), cax=cbi, orientation="horizontal", ticks=[-180, 0, 180])
+    cbb.ax.tick_params(labelsize=6.5); cbb.outline.set_linewidth(0.4); cbb.set_label("H1 phase (deg)", fontsize=7, labelpad=1)
+    bb = GB.get_position(fig)
+    fig.text(bb.x0 + 0.5 * bb.width, bb.y0 + 0.24 * bb.height, r"$\phi^{\rm aligned}_{e,t} = \phi^{\rm obs}_{e,t} - \psi_t$", ha="center", fontsize=8.5)
+
+    log(f"  (b) tile pair {ta}/{tb} ({npair_} shared coherent vessels)")
     label(GB, "b")
 
     # ---- c: organ-scale smoothed delay field with isochrones; the weakly linked block hatched
@@ -304,19 +336,32 @@ def main():
     gx = np.linspace(big[0][0], big[0][1], fo.shape[1]); gy = np.linspace(big[1][0], big[1][1], fo.shape[0])
     axC.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.9, zorder=1, interpolation="bilinear")
     cs = axC.contour(gx, gy, fo, levels=LEV, colors="0.1", linewidths=0.45, zorder=3)
-    axC.clabel(cs, fmt="%d°", fontsize=6, inline_spacing=1)
-    plt.rcParams["hatch.linewidth"] = 0.4; plt.rcParams["hatch.color"] = "0.35"
-    axC.contourf(gx, gy, np.ma.filled(fb, 0), levels=[0.5, 1.01], colors="none", hatches=["////"], zorder=4)
+    axC.clabel(cs, levels=[v for v in LEV if v % 40 == 0], fmt="%d°", fontsize=6, inline_spacing=1)
+    plt.rcParams["hatch.linewidth"] = 0.3; plt.rcParams["hatch.color"] = "0.5"
+    fbf = np.ma.filled(fb, 0)
+    axC.contourf(gx, gy, fbf, levels=[0.5, 1.01], colors="none", hatches=["///"], zorder=4)
+    axC.contour(gx, gy, fbf, levels=[0.5], colors="0.3", linewidths=0.7, linestyles="--", zorder=4)
     for t in band:
         if t not in shown_t:
             axC.plot(*cen[t], "o", ms=3.5, mfc="white", mec="0.55", mew=0.7, zorder=5)
+    refpts = [(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"]) for n_ in list(dom["DA"]) + [nds[int(i)] for i in dom["out"]]]
+    for n_ in dom["DA"]:
+        axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="v", ms=5.5, color="white", mec="black", mew=0.6, zorder=6)
     for i in [int(i) for i in dom["out"]]:
         n_ = nds[i]; axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
+    rp = np.array(refpts); axC.annotate("DA/V reference\n(recorded together, 0°)", xy=(rp[:, 0].mean(), rp[:, 1].min() - 20),
+                                        xytext=(rp[:, 0].mean(), YL[1] + 0.02 * (YL[0] - YL[1])), ha="center", va="top", fontsize=6.5,
+                                        arrowprops=dict(arrowstyle="-", lw=0.5, color="0.3"), zorder=7)
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    axC.legend(handles=[Patch(fc="none", ec="0.4", hatch="///", ls="--", label="common phase offset uncertain"),
+                        Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile phase undetermined")],
+               loc="lower left", bbox_to_anchor=(-0.02, -0.02), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
     axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.8, ls="--", zorder=5))
     axC.add_patch(Polygon(polys[tb], closed=True, fc="none", ec="#D55E00", lw=0.8, ls="--", zorder=5))
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
     cax = axC.inset_axes([0.2, -0.05, 0.6, 0.028]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=LEV[::3], extend="min")
-    cb.set_label("H1 phase delay from DA/V boundary (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
+    cb.set_label("H1 phase relative to simultaneous DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
     label(GC, "c")
 
     # ---- c: repeated-vessel agreement after alignment
@@ -325,8 +370,11 @@ def main():
         ax = fig.add_subplot(gD[r_]); v = d[k]["aligned"]
         ax.hist(v, bins=bins, density=True, color="#8fb0d3", ec="white", lw=0.3)
         ax.set_xlim(-60, 60); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-60, 0, 60])
+        ax.axvline(0, color="0.3", lw=0.6, zorder=3)
         ax.text(0.0, 0.97, "H1" if k == 1 else "H2", transform=ax.transAxes, fontsize=8, fontweight="bold", va="top")
-        ax.text(1.0, 0.97, f"{np.median(np.abs(d[k]['aligned'])):.0f}°", transform=ax.transAxes, fontsize=8, va="top", ha="right", color="0.2")
+        if k == 2:
+            ax.text(0.0, 0.80, "not used for\nsynchronization", transform=ax.transAxes, fontsize=6.5, va="top", color="0.35")
+        ax.text(1.0, 0.97, f"median $|\\Delta\\phi|$ = {np.median(np.abs(d[k]['aligned'])):.0f}°", transform=ax.transAxes, fontsize=7.5, va="top", ha="right", color="0.2")
         if r_ == 0:
             ax.set_xticklabels([])
         else:
