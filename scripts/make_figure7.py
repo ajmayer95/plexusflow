@@ -174,6 +174,15 @@ def main():
     early = {t for t in ts if t not in band and tf0[t] < f_ref * (1 - BAND)}; N_MEAS = 15
     nmeas = {t: sum(1 for x in mall.values() if t in x and np.isfinite(x[t]["rho"]) and x[t]["rho"] >= 0.2) for t in ts}
     lowp = {t for t in band if nmeas[t] < N_MEAS}; stitch = set(band) - lowp
+    # the early-tile footprint is transient as a whole: vessels whose midpoint lies inside it are left out of the retained displays
+    # and statistics even where a retained tile's edge also recorded them (8 vessels, tiles 14 / 15); the synchronization is unchanged
+    from matplotlib.path import Path as _MPath
+    def _mid(e_):
+        pth = G.edges[e_].get("path"); q_ = np.asarray(pth, float)[len(pth) // 2] if pth is not None and len(pth) else np.array(
+            [np.mean([G.nodes[n]["x"] for n in e_]), np.mean([G.nodes[n]["y"] for n in e_])]); return (q_[0], Hm - q_[1])
+    _ep = [_MPath(polys[t]) for t in early]
+    ezone_e = {e_ for e_ in mall if G.has_edge(*e_) and any(pp_.contains_point(_mid(e_)) for pp_ in _ep)}
+    log(f"  early-tile footprint: {len(ezone_e)} vessels")
     RCOL = {"T": "#b23a48", "L": "#8a8a8a", "S": "#2b5c8a"}
     RLAB = {"T": "transient", "L": "low pulsatility", "S": "retained"}
     reg = lambda t: "T" if t in early else ("L" if t in lowp else ("S" if t in stitch else None))
@@ -204,8 +213,8 @@ def main():
     axK.axhline(N_MEAS, color="0.6", lw=0.6, ls=":"); axK.set_xscale("log"); axK.set_yscale("log"); axK.set_ylim(0.45, 320)
     axK.set_yticks([0.6, 1, 10, 100]); axK.set_yticklabels(["0", "1", "10", "100"])
     axK.text(0.99, N_MEAS * 1.15, "threshold", transform=axK.get_yaxis_transform(), ha="right", va="bottom", fontsize=6.5, color="0.45")
-    axK.set_xlabel("tile pulsatile amplitude, median $|H_1|$ (nL/s)", fontsize=7.5, labelpad=1)
-    axK.set_ylabel("vessels with\nmeasurable H1 phase", fontsize=7.5, labelpad=1); axK.tick_params(labelsize=7)
+    axK.set_xlabel("amplitude of the fundamental, tile median $|H_1|$ (nL/s)", fontsize=7.5, labelpad=1)
+    axK.set_ylabel("vessels with measurable\nphase of the fundamental", fontsize=7.5, labelpad=1); axK.tick_params(labelsize=7)
     axK.spines[["top", "right"]].set_visible(False)
     rs7 = _spr([h1t7[t] for t in tl_k], [nmeas[t] for t in tl_k])[0]
     axK.text(0.02, 0.97, f"Spearman $r_s$ = {rs7:.2f}", transform=axK.transAxes, fontsize=6.5, va="top", color="0.3")
@@ -226,7 +235,7 @@ def main():
         for i_ in range(len(ok_)):
             for j_ in range(i_ + 1, len(ok_)):
                 a_, b_ = ok_[i_], ok_[j_]; ya, yb = x_[a_], x_[b_]
-                g_ = "E" if (a_ in early and b_ in early) else ("B" if (a_ in stitch and b_ in stitch) else None)
+                g_ = "E" if (a_ in early and b_ in early) else ("B" if (a_ in stitch and b_ in stitch and e_ not in ezone_e) else None)
                 if g_ is None or np.sign(ya["a0"]) != np.sign(yb["a0"]):
                     continue
                 d_ = _D(ya, yb); SP[g_].append(d_); vD[g_].setdefault(e_, []).append(d_)
@@ -262,11 +271,11 @@ def main():
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]; dEX = _D(mall[EXe][EXA], mall[EXe][EXB])
     LPe = LPV if LPV in mall else LPV[::-1]; yL_ = mall[LPe][LPT]
     ttl_ = [("1  transient", f"12 min apart · D = {dEX:.2f}"),
-            ("2  low pulsatility", f"small $|H_1|$ · ρ = {yL_['rho']:.2f}"),
+            ("2  low pulsatility", f"weak fundamental · ρ = {yL_['rho']:.2f}"),
             ("3  retained", f"{len(rv_t)} recordings · D = {min(dRV):.2f}–{max(dRV):.2f}")]
     for k_, (ax_, cl_) in enumerate(zip(axs_d, ("T", "L", "S"))):
         ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2] if k_ == 2 else [0, 1])
-        ax_.set_ylim(-1.0, 2.6); ax_.set_xlabel("beats (H1-aligned)" if k_ == 1 else "", fontsize=7.5, labelpad=1); ax_.tick_params(labelsize=7)
+        ax_.set_ylim(-1.0, 2.6); ax_.set_xlabel("beats (aligned on the fundamental)" if k_ == 1 else "", fontsize=7.5, labelpad=1); ax_.tick_params(labelsize=7)
         ax_.spines[["top", "right"]].set_visible(False)
         ax_.text(0.0, 1.13, ttl_[k_][0], transform=ax_.transAxes, fontsize=7.5, fontweight="bold", color=RCOL[cl_], va="bottom")
         ax_.text(0.0, 1.02, ttl_[k_][1], transform=ax_.transAxes, fontsize=6.2, color="0.35", va="bottom")
@@ -318,11 +327,11 @@ def main():
             m_ |= _MPath(polys[t]).contains_points(P2)
         return m_.reshape(GX_.shape)
     cS, cL, cT = _cover(stitch), _cover(lowp), _cover(early)
-    # one partition of the organ: each point takes one regime (priority stitchable > low pulsatility > transient, i.e. transient =
-    # imaged only in the early recordings); each indicator is smoothed and every point takes the strongest, so neighbouring regions
+    # one partition of the organ: each point takes one regime (transient = the whole early-tile footprint; elsewhere retained >
+    # low pulsatility); each indicator is smoothed and every point takes the strongest, so neighbouring regions
     # share one boundary; islands smaller than ~2 % of the organ are absorbed by their surroundings
     from scipy.ndimage import label as _lab, binary_fill_holes as _fill
-    raw_ = np.full(GX_.shape, -1); raw_[organ_m & cT] = 0; raw_[organ_m & cL] = 1; raw_[organ_m & cS] = 2
+    raw_ = np.full(GX_.shape, -1); raw_[organ_m & cL] = 1; raw_[organ_m & cS] = 2; raw_[organ_m & cT] = 0      # early footprint wins
     organ_f = _fill(_gf(organ_m.astype(float), 30 / stp) > 0.5)
     sm_ = np.stack([_gf((raw_ == k).astype(float), 45 / stp) for k in range(3)]); lab_ = np.where(organ_f, sm_.argmax(0), -1)
     lab_[organ_f & (sm_.max(0) < 1e-3)] = 2
@@ -545,7 +554,7 @@ def main():
         if i_ is None or F["Qp"][i_] == 0:
             continue
         for t, y in x.items():
-            if t not in shown_t or not np.isfinite(y["rho"]) or y["rho"] < 0.1 or abs(y["H"][0]) == 0 or np.sign(y["a0"]) != np.sign(F["Qp"][i_]):
+            if t not in shown_t or e in ezone_e or not np.isfinite(y["rho"]) or y["rho"] < 0.1 or abs(y["H"][0]) == 0 or np.sign(y["a0"]) != np.sign(F["Qp"][i_]):
                 continue                                      # (a measurement against the reconciled flow direction is not used, as in the field)
             dl = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(np.sign(F["Qp"][i_]) * y["H"][0] * np.exp(-1j * psi[t]) * np.exp(1j * beta.get(t, 0.0)))))
             V.append((pts(e), (dl + 30) % 360 - 30, y["rho"], t))
@@ -610,7 +619,7 @@ def main():
     fig.text(xm_ + 0.012, (p0_.y0 + p1_.y1) / 2, r"$-\psi_t$", ha="left", va="center", fontsize=8, zorder=10)
     caxb = fig.add_subplot(gBs[2, 0]); caxb.axis("off")
     cbi = caxb.inset_axes([0.15, 0.12, 0.7, 0.12]); cbb = fig.colorbar(plt.cm.ScalarMappable(norm=ncy, cmap=cmc), cax=cbi, orientation="horizontal", ticks=[-180, 0, 180])
-    cbb.ax.tick_params(labelsize=6.5); cbb.outline.set_linewidth(0.4); cbb.set_label("H1 phase (deg)", fontsize=7, labelpad=1)
+    cbb.ax.tick_params(labelsize=6.5); cbb.outline.set_linewidth(0.4); cbb.set_label("phase of the fundamental (deg)", fontsize=7, labelpad=1)
     bb = GB.get_position(fig)
     fig.text(bb.x0 + 0.5 * bb.width, bb.y0 + 0.105 * bb.height, r"$\phi^{\rm aligned}_{e,t} = \phi^{\rm obs}_{e,t} - \psi_t$", ha="center", fontsize=8.5)
 
@@ -667,7 +676,7 @@ def main():
     axC.add_patch(Polygon(polys[tb], closed=True, fc="none", ec="#D55E00", lw=0.8, ls="--", zorder=5))
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
     cax = axC.inset_axes([0.2, -0.05, 0.6, 0.028]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=LEV[::3], extend="min")
-    cb.set_label("H1 phase lag behind simultaneous DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
+    cb.set_label("phase lag of the fundamental behind DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
     _pC = axC.get_position(); fig.text(_pC.x0 - 0.01, _pC.y1 + 0.03, "c", fontsize=10, fontweight="bold", va="bottom", ha="left")
 
     # ---- e: repeat-vessel agreement after alignment; H2 is an independent check (not used in the synchronization)
@@ -677,10 +686,11 @@ def main():
         ax.hist(v, bins=bins, density=True, color="#8fb0d3" if k == 1 else "#c9b6d9", ec="white", lw=0.3)
         ax.set_xlim(-60, 60); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-60, 0, 60])
         ax.axvline(0, color="0.3", lw=0.6, zorder=3); ax.tick_params(axis="x", labelsize=7)
-        ax.text(0.0, 1.0, f"H{k}", transform=ax.transAxes, fontsize=8, fontweight="bold", va="bottom")
-        ax.text(1.0, 1.0, f"median $|\\Delta\\phi|$ = {np.median(np.abs(v)):.0f}°", transform=ax.transAxes, fontsize=7, va="bottom", ha="right", color="0.2")
+        ax.text(0.0, 1.0, "fundamental" if k == 1 else "2nd harmonic", transform=ax.transAxes, fontsize=7.5, fontweight="bold", va="bottom")
+        ax.text(0.0, 0.97, f"median $|\\Delta\\phi|$ = {np.median(np.abs(v)):.0f}°", transform=ax.transAxes, fontsize=6.5, va="top", ha="left", color="0.25", zorder=5,
+                bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.4))
         if k == 2:
-            ax.text(0.5, 0.82, "not used in\nsynchronization", transform=ax.transAxes, fontsize=6.5, ha="center", va="top", color="#6a4c93", fontweight="bold",
+            ax.text(1.0, 0.62, "not used to\nsynchronize", transform=ax.transAxes, fontsize=6.3, ha="right", va="top", color="#6a4c93", fontweight="bold",
                     bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.5))
     fig.text(GD.get_position(fig).x0 + 0.5 * GD.get_position(fig).width, GD.get_position(fig).y0 - 0.045,
              "repeat-vessel phase difference, aligned (deg)", ha="center", va="top", fontsize=7.5)
