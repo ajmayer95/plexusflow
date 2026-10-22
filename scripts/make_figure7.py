@@ -125,12 +125,17 @@ def main():
     # two figures: Fig 7 = choosing a stitchable regime (a heart rate / reversal, b early-tile vessel, c band vessel, d repeat-vessel
     # population); Fig 8 = synchronization (a seam before/after, b H1/H2 validation, c organ phase field).  Panels draw on `fig`,
     # which is switched from figR to figS before the synchronization panels.
-    figR = plt.figure(figsize=(7.5, 5.0), facecolor="white")
-    gR = figR.add_gridspec(2, 2, width_ratios=[1, 1], height_ratios=[0.8, 1.05], wspace=0.3, hspace=0.6, left=0.085, right=0.975, top=0.95, bottom=0.09)
-    GA, GE, GT = gR[0, :], gR[1, 0], gR[1, 1]   # a heart rate (+ organ inset, full width) · b early vessel · c D (+ band-vessel inset)
-    figS = plt.figure(figsize=(7.5, 6.6), facecolor="white")
+    # Fig 7 = three regimes: transient (early tiles), low pulsatility (tiles barely linked to the rest), stitchable.
+    #   a organ map of the regimes + example vessels · b heart rate vs acquisition time · c tile link vs pulsatile amplitude ·
+    #   d one example vessel per regime (Q/Q̄) · e repeat-vessel waveform-shape difference D, transient vs stitchable
+    figR = plt.figure(figsize=(7.5, 6.4), facecolor="white")
+    gR = figR.add_gridspec(2, 1, height_ratios=[1.45, 1], hspace=0.36, left=0.075, right=0.975, top=0.94, bottom=0.08)
+    gRt = gR[0].subgridspec(1, 2, width_ratios=[1, 1.08], wspace=0.22); gRr = gRt[1].subgridspec(2, 1, hspace=0.62)
+    gRb = gR[1].subgridspec(1, 4, width_ratios=[1, 1, 1, 1.2], wspace=0.42)
+    GMAP, GA, GK7, GX, GT = gRt[0], gRr[0], gRr[1], [gRb[0], gRb[1], gRb[2]], gRb[3]
+    figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
     gS2 = figS.add_gridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06, left=0.08, right=0.97, top=0.93, bottom=0.1)
-    gL = gS2[0].subgridspec(3, 1, height_ratios=[3.0, 0.85, 1.2], hspace=0.62); GB, GD, GK, GC = gL[0], gL[1], gL[2], gS2[1]
+    gL = gS2[0].subgridspec(2, 1, height_ratios=[3.0, 0.85], hspace=0.2); GB, GD, GC = gL[0], gL[1], gS2[1]
     fig = figR
 
     def label(cell, letter):
@@ -161,27 +166,49 @@ def main():
     else:
         xs_a = np.array(ts, float); xlab = "acquisition order (tile)"
     xref = xs_a[ts.index(ref)]
-    axA.axhspan(f_ref * (1 - BAND), f_ref * (1 + BAND), color="#e9eef4", zorder=0, lw=0)
-    # every tile (all heart rates): fraction of coherent vessels whose flow reverses within the beat (|H1| > |Q̄|), and example waveforms
-    Fall = build_ac_field(G, dc, n_boot=0, f0_band=10.0); mall = Fall["_meas"]; rev = {}; best = {}
-    for e_, x_ in mall.items():
-        for t_, y_ in x_.items():
-            if np.isfinite(y_["rho"]) and y_["rho"] >= 0.1 and abs(y_["a0"]) > 0:
-                rev.setdefault(t_, []).append(abs(y_["H"][0]) > abs(y_["a0"]))
-                if t_ in (ts[0], ref) and (t_ not in best or y_["rho"] > best[t_][0]):
-                    best[t_] = (y_["rho"], y_["a0"], y_["H"])
-    rf = np.array([np.mean(rev[t]) if t in rev else np.nan for t in ts]); cmR = plt.cm.magma_r; nR = mcolors.Normalize(0, 1)
-    axA.scatter(xs_a[inb], f[inb], s=13, c=cmR(nR(rf[inb])), edgecolors="0.15", linewidths=0.5, zorder=3)
-    axA.scatter(xs_a[~inb], f[~inb], s=13, c=cmR(nR(rf[~inb])), edgecolors="0.6", linewidths=0.5, zorder=3)
+    # regimes per tile: transient = heart rate below the band (the first recordings); low pulsatility = band tiles linked to the
+    # rest by < 5 % of the median link weight (Σ ρ_a ρ_b over shared vessels); stitchable = the other band tiles
+    early = {t for t in ts if t not in band and tf0[t] < f_ref * (1 - BAND)}
+    Lt7 = {t: 0.0 for t in band}
+    for (a_, b_), w_ in link.items():
+        Lt7[a_] += w_; Lt7[b_] += w_
+    L_thr7 = 0.05 * np.median(list(Lt7.values())); lowp = {t for t in band if Lt7[t] < L_thr7}; stitch = set(band) - lowp
+    RCOL = {"T": "#b23a48", "L": "#8a8a8a", "S": "#2b5c8a"}
+    RLAB = {"T": "transient (early)", "L": "low pulsatility", "S": "stitchable"}
+    reg = lambda t: "T" if t in early else ("L" if t in lowp else ("S" if t in stitch else None))
+    log(f"  regimes: transient {sorted(early)}; low pulsatility {sorted(lowp)}; stitchable {len(stitch)} tiles")
+    Fall = build_ac_field(G, dc, n_boot=0, f0_band=10.0); mall = Fall["_meas"]
+
+    # ---- b: heart rate over the acquisition, coloured by regime
+    axA.axhspan(f_ref * (1 - BAND), f_ref * (1 + BAND), color="#eef1f5", zorder=0, lw=0)
+    for k_ in ("T", "L", "S"):
+        m_ = np.array([reg(t) == k_ for t in ts])
+        axA.scatter(xs_a[m_], f[m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3, label=RLAB[k_])
     axA.plot(xref, f_ref, "s", ms=6, mfc="none", mec="black", mew=0.9, zorder=4)
-    caxA = axA.inset_axes([0.03, 0.9, 0.16, 0.04]); cbA = fig.colorbar(plt.cm.ScalarMappable(norm=nR, cmap=cmR), cax=caxA, orientation="horizontal", ticks=[0, 0.5, 1])
-    cbA.ax.tick_params(labelsize=6, pad=1); cbA.outline.set_linewidth(0.4); cbA.ax.xaxis.set_label_position("top")
-    cbA.set_label("vessels with reversing flow", fontsize=6.5, labelpad=2)
-    cbA.ax.set_xticklabels(["0", "50%", "100%"])
-    axA.text(0.97, f_ref * (1 - BAND) + 0.04, "retained for stitching", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=7, color="0.4")
-    axA.annotate("reference tile", xy=(xref, f_ref), xytext=(xref + 0.10 * xs_a.max(), f_ref - 0.28), fontsize=7, color="0.3", ha="left", arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
-    axA.set_xlabel(xlab); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
-    label(GA, "a")
+    axA.annotate("reference tile", xy=(xref, f_ref), xytext=(xref + 0.08 * xs_a.max(), f_ref - 0.45), fontsize=6.5, color="0.3", ha="left",
+                 arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
+    axA.text(0.99, f_ref * (1 - BAND) + 0.03, "heart-rate band", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=6.5, color="0.45")
+    axA.set_xlabel(xlab, fontsize=8, labelpad=1); axA.set_ylabel("heart rate $f_0$ (Hz)", fontsize=8); axA.tick_params(labelsize=7)
+    axA.spines[["top", "right"]].set_visible(False)
+    axA.legend(loc="lower right", fontsize=6.5, frameon=False, handletextpad=0.1, borderaxespad=0.1, markerscale=1.1)
+    label(GA, "b")
+
+    # ---- c: why the low-pulsatility tiles cannot be stitched — link to the other tiles vs pulsatile amplitude
+    from scipy.stats import spearmanr as _spr
+    h1t7 = {t: np.median([abs(x[t]["H"][0]) for x in meas.values() if t in x and np.isfinite(x[t]["rho"])]) for t in band}
+    axK = fig.add_subplot(GK7); tl_k = sorted(band)
+    for k_ in ("S", "L"):
+        m_ = [t for t in tl_k if reg(t) == k_]
+        axK.scatter([h1t7[t] for t in m_], [max(Lt7[t], 0.05) for t in m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3)
+    axK.axhline(L_thr7, color="0.6", lw=0.6, ls=":"); axK.set_xscale("log"); axK.set_yscale("log")
+    axK.text(0.99, L_thr7 * 1.3, "stitching limit", transform=axK.get_yaxis_transform(), ha="right", va="bottom", fontsize=6.5, color="0.45")
+    axK.set_xlabel("tile pulsatile amplitude, median $|H_1|$ (nL/s)", fontsize=8, labelpad=1)
+    axK.set_ylabel("link to other tiles\n" + r"$\Sigma\,\rho_a\rho_b$", fontsize=8, labelpad=1); axK.tick_params(labelsize=7)
+    axK.spines[["top", "right"]].set_visible(False)
+    rs7 = _spr([h1t7[t] for t in tl_k], [Lt7[t] for t in tl_k])[0]
+    axK.text(0.02, 0.97, f"Spearman {rs7:+.2f}", transform=axK.transAxes, fontsize=6.5, va="top", color="0.3")
+    log(f"  (c) link vs median |H1|: Spearman {rs7:+.2f}")
+    label(GK7, "c")
 
     # waveform-shape spectrum of one recording, mean-normalised and clock-free: s_n = H_n e^{−inφ1} / Q̄ (n = 1..3, flow-direction frame).
     # Shape difference of two recordings D = ‖s_a − s_b‖ / rms(‖s_a‖, ‖s_b‖) — the relative RMS difference of the H1-aligned Q/Q̄
@@ -191,99 +218,126 @@ def main():
         return H_ * u_ ** np.arange(1, 4) / abs(y_["a0"])
     def _D(ya, yb):
         sa, sb = _shape(ya), _shape(yb); return np.linalg.norm(sa - sb) / np.sqrt((np.linalg.norm(sa) ** 2 + np.linalg.norm(sb) ** 2) / 2)
-    early = {t for t in ts if t not in band and tf0[t] < f_ref * (1 - BAND)}
     SP = {"E": [], "B": []}; vD = {"E": {}, "B": {}}
     for e_, x_ in mall.items():
         ok_ = [t_ for t_, y_ in x_.items() if np.isfinite(y_["rho"]) and y_["rho"] >= 0.2 and abs(y_["a0"]) > 0 and abs(y_["H"][0]) > 0]
         for i_ in range(len(ok_)):
             for j_ in range(i_ + 1, len(ok_)):
                 a_, b_ = ok_[i_], ok_[j_]; ya, yb = x_[a_], x_[b_]
-                g_ = "E" if (a_ in early and b_ in early) else ("B" if (a_ in band and b_ in band) else None)
+                g_ = "E" if (a_ in early and b_ in early) else ("B" if (a_ in stitch and b_ in stitch) else None)
                 if g_ is None or np.sign(ya["a0"]) != np.sign(yb["a0"]):
                     continue
                 d_ = _D(ya, yb); SP[g_].append(d_); vD[g_].setdefault(e_, []).append(d_)
-    SP = {k: np.array(v) for k, v in SP.items()}; SCOL = {"E": "#b23a48", "B": "#2b5c8a"}
-    SLAB = {"E": f"early tiles {min(early)}–{max(early)}", "B": "retained band"}
+    SP = {k: np.array(v) for k, v in SP.items()}; SCOL = {"E": RCOL["T"], "B": RCOL["S"]}
+    SLAB = {"E": "transient", "B": "stitchable"}
     for g_ in ("E", "B"):
-        log(f"  (e) repeat-vessel shape difference D, both in {SLAB[g_]}: {len(SP[g_])} pairs / {len(vD[g_])} vessels, median {np.median(SP[g_]):.2f}, "
+        log(f"  (e) repeat-vessel shape difference D, both {SLAB[g_]}: {len(SP[g_])} pairs / {len(vD[g_])} vessels, median {np.median(SP[g_]):.2f}, "
             f"90th {np.percentile(SP[g_], 90):.2f}")
 
-    # ---- b: early tiles — one vessel recorded twice, 12 min apart (tiles 3 → 5): reversing early, not later; 3-harmonic fits
+    # ---- d: one vessel per regime, Q/Q̄ over two beats (raw trace light, 3-harmonic fit bold); recordings shifted to their own H1 phase
     from plexusflow.reconcile.harmonics import phasors as _phz
-    EXV, EXA, EXB = (1206, 1267), 3, 5
-    _e = EXV if G.has_edge(*EXV) else EXV[::-1]; axX = fig.add_subplot(GE); _tt = np.linspace(0, 1.5, 400)
-    for t_, col_ in ((EXA, "#b23a48"), (EXB, "#e08a96")):
-        _m = next(m for m in G.edges[_e]["measurements_piv"] if int(m["tile_id"]) == t_); _q = np.asarray(_m["Q_t"], float); _q = -_q if np.mean(_q) < 0 else _q
-        _a0, _H = _phz(_q, tf0[t_]); _fit = _a0 + sum((_H[n - 1] * np.exp(2j * np.pi * n * tf0[t_] * _tt)).real for n in (1, 2, 3))
-        axX.plot(_tt, _fit, color=col_, lw=1.3, label=f"tile {t_}, {(xs_a[ts.index(t_)]):.0f} min")
-    EXe = EXV if EXV in mall else EXV[::-1]
-    axX.axhline(0, color="0.3", lw=0.5); axX.set_xlim(0, 1.5); axX.set_xticks([0, 0.5, 1, 1.5])
-    axX.set_xlabel("time (s)"); axX.set_ylabel("flow (nL/s)", labelpad=1); axX.spines[["top", "right"]].set_visible(False)
-    axX.legend(title=f"vessel 1: 2 early-tile recordings\n(D = {_D(mall[EXe][EXA], mall[EXe][EXB]):.2f})", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
-               handlelength=1.0, borderaxespad=0, labelspacing=0.15, ncol=2, columnspacing=0.8, alignment="left")
-    label(GE, "b")
-
-    # ---- c: across all repeat vessels — D, both recordings early vs both in the band; the two examples marked; inset = vessel 2
-    #      (best-measured band repeat vessel, ρ ≥ 0.5 in four tiles): Q/Q̄ over one beat, each recording shifted to its own H1 phase
+    EXV, EXA, EXB = (1206, 1267), 3, 5                     # transient: tiles 3 → 5, 12 min apart
+    LPV, LPT = (24146, 24170), 18                           # low pulsatility: large steady vessel, tile 18 (outside every stitchable tile)
     RV = (49550, 49649); RVe = RV if RV in mall else RV[::-1]; xr_ = mall[RVe]
-    rv_t = sorted([t_ for t_, y_ in xr_.items() if t_ in band and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
+    rv_t = sorted([t_ for t_, y_ in xr_.items() if t_ in stitch and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
+    EXe = EXV if EXV in mall else EXV[::-1]
+    def _trace(ax_, E_, t_, col_, lab_):
+        e_ = E_ if G.has_edge(*E_) else E_[::-1]
+        m_ = next(m for m in G.edges[e_]["measurements_piv"] if int(m["tile_id"]) == t_); q_ = np.asarray(m_["Q_t"], float); q_ = -q_ if np.mean(q_) < 0 else q_
+        a0_, H_ = _phz(q_, tf0[t_]); tt_ = np.arange(len(q_)) / 250.0; tau_ = tf0[t_] * tt_ + np.angle(H_[0]) / (2 * np.pi)
+        tau_ = tau_ - np.floor(tau_[0]); sel_ = (tau_ >= 0) & (tau_ <= 2); tg_ = np.linspace(0, 2, 300)
+        fit_ = a0_ + sum((abs(H_[n - 1]) * np.exp(1j * (np.angle(H_[n - 1]) - n * np.angle(H_[0]))) * np.exp(2j * np.pi * n * tg_)).real for n in (1, 2, 3))
+        ax_.plot(tau_[sel_], q_[sel_] / a0_, color=col_, lw=0.3, alpha=0.18, zorder=2)
+        ax_.plot(tg_, fit_ / a0_, color=col_, lw=1.3, zorder=3, label=lab_)
+        return a0_, H_
+    axs_d = [fig.add_subplot(g_) for g_ in GX]
+    a1_, H1a_ = _trace(axs_d[0], EXV, EXA, "#b23a48", f"tile {EXA}, {xs_a[ts.index(EXA)]:.0f} min")
+    a1b_, _ = _trace(axs_d[0], EXV, EXB, "#e08a96", f"tile {EXB}, {xs_a[ts.index(EXB)]:.0f} min")
+    aL_, HL_ = _trace(axs_d[1], LPV, LPT, RCOL["L"], f"tile {LPT}, {xs_a[ts.index(LPT)]:.0f} min")
+    cRV = plt.cm.viridis(np.linspace(0.05, 0.8, len(rv_t)))
+    for t_, c_ in zip(rv_t, cRV):
+        _trace(axs_d[2], RV, t_, c_, f"{xs_a[ts.index(t_)]:.0f} min")
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]; dEX = _D(mall[EXe][EXA], mall[EXe][EXB])
-    log(f"  (c) band vessel {RV}: tiles {rv_t}, pairwise D " + ", ".join(f"{v:.2f}" for v in dRV))
+    LPe = LPV if LPV in mall else LPV[::-1]; yL_ = mall[LPe][LPT]
+    ttl_ = [f"1  transient: same vessel 12 min apart\nD = {dEX:.2f}",
+            f"2  low pulsatility: $\\bar Q$ = {abs(aL_):.2f} nL/s,\n$|H_1|/\\bar Q$ = {abs(HL_[0]) / abs(aL_):.2f}, ρ = {yL_['rho']:.2f}",
+            f"3  stitchable: same vessel, {len(rv_t)} tiles\nD = {min(dRV):.2f}–{max(dRV):.2f}"]
+    for k_, (ax_, cl_) in enumerate(zip(axs_d, ("T", "L", "S"))):
+        ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2])
+        ax_.set_ylim(-1.0, 2.6); ax_.set_xlabel("beats (H1-aligned)", fontsize=7.5, labelpad=1); ax_.tick_params(labelsize=7)
+        ax_.spines[["top", "right"]].set_visible(False)
+        ax_.set_title(ttl_[k_], fontsize=6.8, loc="left", color=RCOL[cl_], pad=3, linespacing=1.15)
+        if k_ == 0:
+            ax_.set_ylabel(r"$Q\,/\,\bar Q$", fontsize=8, labelpad=1)
+        else:
+            ax_.set_yticklabels([])
+        ax_.legend(loc="lower left", fontsize=5.8, frameon=False, handlelength=0.9, borderaxespad=0.1, labelspacing=0.1, ncol=2 if k_ == 2 else 1,
+                   columnspacing=0.6)
+    log(f"  (d) stitchable vessel {RV}: tiles {rv_t}, pairwise D " + ", ".join(f"{v:.2f}" for v in dRV) + f"; transient vessel D {dEX:.2f}")
+    label(GX[0], "d")
+
+    # ---- e: across all repeat vessels — D, both recordings transient vs both stitchable; examples 1 and 3 marked
     axD = fig.add_subplot(GT); ecdf_ = {}
     for g_ in ("E", "B"):
         v_ = np.sort(SP[g_]); ecdf_[g_] = v_
-        axD.step(v_, np.arange(1, len(v_) + 1) / len(v_), where="post", color=SCOL[g_], lw=1.3, label=f"{SLAB[g_]} ({len(v_)} pairs)")
+        axD.step(v_, np.arange(1, len(v_) + 1) / len(v_), where="post", color=SCOL[g_], lw=1.3, label=f"{SLAB[g_]} ({len(v_)})")
         m_ = np.median(v_); axD.plot([m_], [0.5], "o", ms=3, color=SCOL[g_], zorder=4)
         axD.text(m_, 0.5, f"  {m_:.2f}", color=SCOL[g_], fontsize=7, ha="left", va="top" if g_ == "E" else "bottom", fontweight="bold")
-    def _on(g_, x_):
-        return np.searchsorted(ecdf_[g_], x_, side="right") / len(ecdf_[g_])
-    for g_, xs_, tag_ in (("E", [dEX], "1"), ("B", dRV, "2")):            # example vessels on their curves
+    _on = lambda g_, x_: np.searchsorted(ecdf_[g_], x_, side="right") / len(ecdf_[g_])
+    for g_, xs_, tag_ in (("E", [dEX], "1"), ("B", dRV, "3")):
         for x_ in xs_:
-            axD.plot(x_, _on(g_, x_), "o", ms=4, mfc="white", mec=SCOL[g_], mew=1.0, zorder=5)
-        xm_ = np.median(xs_); axD.annotate(f"vessel {tag_}", xy=(xm_, _on(g_, xm_)), xytext=(xm_ + (0.06 if g_ == "E" else -0.06), _on(g_, xm_) + (0.12 if g_ == "E" else 0.1)),
-                                           fontsize=6.5, color=SCOL[g_], ha="left" if g_ == "E" else "right", arrowprops=dict(arrowstyle="-", lw=0.5, color=SCOL[g_]))
+            axD.plot(x_, _on(g_, x_), "o", ms=3.5, mfc="white", mec=SCOL[g_], mew=0.9, zorder=5)
+        xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + (0.08 if g_ == "E" else -0.08), _on(g_, xm_) + 0.1),
+                                           fontsize=7, fontweight="bold", color=SCOL[g_], ha="center", arrowprops=dict(arrowstyle="-", lw=0.5, color=SCOL[g_]))
     axD.set_xlim(0, 1.2); axD.set_ylim(0, 1.02); axD.set_yticks([0, 0.5, 1]); axD.spines[["top", "right"]].set_visible(False)
-    axD.set_xlabel("waveform-shape difference $D$ between recordings of a vessel", fontsize=7.5, labelpad=1); axD.set_ylabel("cumulative fraction")
-    axD.legend(title="both recordings in", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
-               handlelength=1.0, borderaxespad=0, labelspacing=0.15, alignment="left")
-    axW = axD.inset_axes([0.6, 0.17, 0.4, 0.38]); tau_w = np.linspace(0, 1, 300); cRV = plt.cm.viridis(np.linspace(0.05, 0.8, len(rv_t)))
-    for t_, c_ in zip(rv_t, cRV):
-        s_ = _shape(xr_[t_]); w_ = 1 + sum((s_[n - 1] * np.exp(2j * np.pi * n * tau_w)).real for n in (1, 2, 3))
-        axW.plot(tau_w, w_, color=c_, lw=1.0)
-    axW.axhline(1, color="0.75", lw=0.4, ls=":"); axW.set_xlim(0, 1); axW.set_xticks([0, 1]); axW.set_yticks([0, 1])
-    axW.tick_params(labelsize=6, length=1.5, pad=1); axW.set_xlabel("$t/T$ (H1-aligned)", fontsize=6.5, labelpad=0)
-    axW.set_ylabel(r"$Q/\bar Q$", fontsize=6.5, labelpad=0); [sp_.set_linewidth(0.5) for sp_ in axW.spines.values()]
-    axW.set_title(f"vessel 2, {len(rv_t)} recordings\n{xs_a[ts.index(rv_t[0])]:.0f}–{xs_a[ts.index(rv_t[-1])]:.0f} min", fontsize=6.5, pad=2, color="#2b5c8a")
-    label(GT, "c")
+    axD.set_xlabel("waveform-shape difference $D$\nbetween recordings of a vessel", fontsize=7.5, labelpad=1)
+    axD.set_ylabel("cumulative fraction", fontsize=8, labelpad=1); axD.tick_params(labelsize=7)
+    axD.legend(title="repeat vessel,\nboth recordings", title_fontsize=6.3, fontsize=6.3, frameon=False, loc="lower right", handlelength=1.0,
+               borderaxespad=0.0, labelspacing=0.15, alignment="left", bbox_to_anchor=(1.02, 0.0))
+    label(GT, "e")
 
-    # ---- organ inset in a: early region (tiles 1–6, clipped to the organ, smoothed) and the two example vessels
+    # ---- a: organ map of the three regimes (union of each regime's tiles ∩ organ, smoothed) and the example vessels
     from matplotlib.path import Path as _MPath
     from scipy.ndimage import gaussian_filter as _gf
-    mos_s = mos[::5, ::5]; allq = np.vstack(list(polys.values())); padm = 20; stp = 12.0
+    allq = np.vstack(list(polys.values())); padm = 20; stp = 12.0
     def _path(e_):
         pth = G.edges[e_].get("path")
         q_ = np.asarray(pth, float) if pth is not None and len(pth) >= 2 else np.array([[G.nodes[n]["x"], G.nodes[n]["y"]] for n in e_], float)
         return q_[:, 0], Hm - q_[:, 1]
-    gxs = np.arange(0, Wm, stp); gys = np.arange(0, Hm, stp); GX, GY = np.meshgrid(gxs, gys); P2 = np.c_[GX.ravel(), GY.ravel()]
+    gxs = np.arange(0, Wm, stp); gys = np.arange(0, Hm, stp); GX_, GY_ = np.meshgrid(gxs, gys); P2 = np.c_[GX_.ravel(), GY_.ravel()]
     nxy = np.array([(G.nodes[n]["x"], Hm - G.nodes[n]["y"]) for n in G.nodes if "x" in G.nodes[n]])
     dens, _, _ = np.histogram2d(nxy[:, 1], nxy[:, 0], bins=[np.r_[gys, Hm], np.r_[gxs, Wm]]); dens = _gf(dens, 60 / stp)
-    organ_m = dens > 0.08 * dens.max()                                             # organ = where the vessel network is
-    ein = np.zeros(len(P2), bool)
-    for t in early:
-        ein |= _MPath(polys[t]).contains_points(P2)
-    early_m = _gf((ein.reshape(GX.shape) & organ_m).astype(float), 50 / stp)
-    axT = axA.inset_axes([0.63, 0.01, 0.24, 0.47])
-    axT.imshow(mos_s, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.5, extent=(0, Wm, Hm, 0), zorder=0)
-    axT.contourf(gxs, gys, early_m, levels=[0.5, 2], colors=["#b23a48"], alpha=0.35, zorder=1)
-    axT.contour(gxs, gys, early_m, levels=[0.5], colors=["#b23a48"], linewidths=0.8, zorder=2)
-    axT.set_xlim(allq[:, 0].min() - padm, allq[:, 0].max() + padm); axT.set_ylim(allq[:, 1].max() + padm, allq[:, 1].min() - padm)
-    axT.set_aspect("equal"); axT.set_xticks([]); axT.set_yticks([]); [s_.set_visible(False) for s_ in axT.spines.values()]
-    for E_, tag_, col_, dx_ in ((EXV, "1", "#b23a48", -1), (RV, "2", "#2b5c8a", 1)):
+    organ_m = dens > 0.08 * dens.max()
+    def _cover(tset):
+        m_ = np.zeros(len(P2), bool)
+        for t in tset:
+            m_ |= _MPath(polys[t]).contains_points(P2)
+        return m_.reshape(GX_.shape)
+    cS, cL, cT = _cover(stitch), _cover(lowp), _cover(early)
+    mS = _gf((cS & organ_m).astype(float), 40 / stp); mL = _gf((cL & ~cS & organ_m).astype(float), 40 / stp); mT = _gf((cT & organ_m).astype(float), 40 / stp)
+    axMp = fig.add_subplot(GMAP)
+    axMp.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.45, zorder=0)
+    plt.rcParams["hatch.linewidth"] = 0.5; plt.rcParams["hatch.color"] = "0.45"
+    axMp.contourf(gxs, gys, mS, levels=[0.5, 2], colors=[RCOL["S"]], alpha=0.22, zorder=1)
+    axMp.contour(gxs, gys, mS, levels=[0.5], colors=[RCOL["S"]], linewidths=0.8, zorder=2)
+    axMp.contourf(gxs, gys, mL, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=1)
+    axMp.contourf(gxs, gys, mL, levels=[0.5, 2], colors=[RCOL["L"]], alpha=0.18, zorder=1)
+    axMp.contour(gxs, gys, mL, levels=[0.5], colors=[RCOL["L"]], linewidths=0.8, zorder=2)
+    axMp.contourf(gxs, gys, mT, levels=[0.5, 2], colors=[RCOL["T"]], alpha=0.35, zorder=3)
+    axMp.contour(gxs, gys, mT, levels=[0.5], colors=[RCOL["T"]], linewidths=1.0, zorder=4)
+    for E_, tag_, k_, off_ in ((EXV, "1", "T", (-330, -260)), (LPV, "2", "L", (330, 120)), (RV, "3", "S", (330, -260))):
         e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_)
-        axT.plot(cx_, cy_, "o", ms=3.5, color=col_, zorder=4)
-        axT.annotate(tag_, xy=(cx_, cy_), xytext=(cx_ + dx_ * 420, cy_ - 380), fontsize=7, fontweight="bold", color=col_, ha="center", va="center", zorder=5,
-                     arrowprops=dict(arrowstyle="-", lw=0.5, color=col_))
-    axT.text(1.02, 0.86, f"early\ntiles\n{min(early)}–{max(early)}", transform=axT.transAxes, ha="left", va="center", fontsize=6.5, color="#b23a48", linespacing=1.0)
+        axMp.plot(xx_, yy_, color="black", lw=2.2, zorder=5, solid_capstyle="round")
+        axMp.annotate("", xy=(cx_, cy_), xytext=(cx_ + off_[0], cy_ + off_[1]), arrowprops=dict(arrowstyle="-", lw=0.7, color="black"), zorder=6)
+        axMp.plot(cx_ + off_[0], cy_ + off_[1], "o", ms=10, mfc=RCOL[k_], mec="white", mew=0.8, zorder=7)
+        axMp.text(cx_ + off_[0], cy_ + off_[1], tag_, fontsize=7.5, ha="center", va="center", zorder=8, fontweight="bold", color="white")
+    axMp.set_xlim(allq[:, 0].min() - padm, allq[:, 0].max() + padm); axMp.set_ylim(allq[:, 1].max() + padm, allq[:, 1].min() - padm)
+    axMp.set_aspect("equal"); axMp.set_xticks([]); axMp.set_yticks([]); [s_.set_visible(False) for s_ in axMp.spines.values()]
+    axMp.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.35), ec=RCOL["T"], label=f"transient: first {max(xs_a[ts.index(t)] for t in early) + 4:.0f} min, tiles {min(early)}–{max(early)}"),
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["L"], 0.18), ec=RCOL["L"], hatch="/////", label="low pulsatility: tiles not linked"),
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.22), ec=RCOL["S"], label="stitchable")],
+                loc="upper center", bbox_to_anchor=(0.5, -0.0), fontsize=6.8, frameon=False, handlelength=1.6, borderaxespad=0, ncol=1)
+    label(GMAP, "a")
 
     # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
     figSM = plt.figure(figsize=(4.0, 4.6), facecolor="white"); _fig_main = fig; fig = figSM
@@ -557,15 +611,18 @@ def main():
     axC.contour(gx, gy, fbf, levels=[0.5], colors="0.15", linewidths=0.9, linestyles="--", zorder=4)
     if beta_sd:
         bdeg, bsd, _, _ = beta_sd[0]; ys_, xs_ = np.nonzero(fbf > 0.5)
-        axC.text(gx[int(np.median(xs_))], gy[ys_.max()] + 0.03 * (YL[0] - YL[1]), "second stitching\ncomponent",
-                 ha="center", va="top", fontsize=7, color="0.15", zorder=7, bbox=dict(fc="white", ec="none", alpha=0.75, pad=1.0))
+        axC.text(gx[int(np.median(xs_))], gy[int(np.percentile(ys_, 72))], "second stitching\ncomponent",
+                 ha="center", va="center", fontsize=7, color="0.15", zorder=7, bbox=dict(fc="white", ec="none", alpha=0.75, pad=1.0))
     Lt = {t: 0.0 for t in band}
     for (a_, b_), w_ in link.items():
         Lt[a_] += w_; Lt[b_] += w_
     L_thr = 0.05 * np.median(list(Lt.values())); weak_t = {t for t in band if Lt[t] < L_thr}
     log(f"  (c) weakly constrained tiles (link < 5 % of median, {L_thr:.2f}): {sorted(weak_t)}")
-    for t in sorted(weak_t):
-        axC.add_patch(Polygon(polys[t], closed=True, fc="white", ec="0.45", lw=0.5, hatch="//////", alpha=0.55, zorder=4.5))
+    # low-pulsatility region from Fig 7 (smoothed union of the weakly linked tiles ∩ organ, minus stitchable coverage)
+    plt.rcParams["hatch.color"] = "0.45"; plt.rcParams["hatch.linewidth"] = 0.5
+    axC.contourf(gxs, gys, mL, levels=[0.5, 2], colors=["white"], alpha=0.6, zorder=4.4)
+    axC.contourf(gxs, gys, mL, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=4.5)
+    axC.contour(gxs, gys, mL, levels=[0.5], colors=["0.45"], linewidths=0.7, zorder=4.6)
     for t in band:
         if t not in shown_t and t not in weak_t:
             axC.plot(*cen[t], "o", ms=3.5, mfc="white", mec="0.55", mew=0.7, zorder=5)
@@ -580,7 +637,7 @@ def main():
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="second stitching component"),
-                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="tile offset weakly constrained (see d)"),
+                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="low-pulsatility tiles: offset not constrained (Fig. 7)"),
                         Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile phase undetermined")],
                loc="upper left", bbox_to_anchor=(-0.04, 1.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
     axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.8, ls="--", zorder=5))
@@ -606,23 +663,6 @@ def main():
              "repeat-vessel phase difference, aligned (deg)", ha="center", va="top", fontsize=7.5)
     label(GD, "b")
 
-    # ---- d: why stitching fails where it does — a tile's link to the rest (Σ ρ_a ρ_b over shared vessels) against the size of its
-    #      pulsation (median |H1| of its measured vessels); weakly constrained tiles are those hatched in c
-    from scipy.stats import spearmanr as _spr
-    h1t = {t: np.median([abs(x[t]["H"][0]) for x in meas.values() if t in x and np.isfinite(x[t]["rho"])]) for t in band}
-    tl_k = sorted(band); hx = np.array([h1t[t] for t in tl_k]); ly = np.array([max(Lt[t], 0.05) for t in tl_k]); wk = np.array([t in weak_t for t in tl_k])
-    axK = fig.add_subplot(GK)
-    axK.scatter(hx[~wk], ly[~wk], s=14, color="0.25", lw=0, zorder=3, label="constrained")
-    axK.scatter(hx[wk], ly[wk], s=14, facecolor="white", edgecolor="0.25", lw=0.7, hatch="/////", zorder=3, label="weakly constrained")
-    axK.axhline(L_thr, color="0.6", lw=0.6, ls=":"); axK.set_xscale("log"); axK.set_yscale("log")
-    axK.set_xlabel("pulsatile amplitude of the tile's vessels,\nmedian $|H_1|$ (nL/s)", fontsize=7.5, labelpad=1)
-    axK.set_ylabel("link to other tiles\n" + r"$\Sigma\,\rho_a\rho_b$", fontsize=7.5, labelpad=1)
-    axK.tick_params(labelsize=7); axK.spines[["top", "right"]].set_visible(False)
-    rs_ = _spr(hx, ly)[0]
-    axK.text(0.03, 0.97, f"Spearman {rs_:+.2f}", transform=axK.transAxes, fontsize=7, va="top", color="0.3")
-    axK.legend(loc="lower right", fontsize=6.5, frameon=False, handletextpad=0.2, borderaxespad=0.1)
-    log(f"  (d) tile link vs median |H1|: Spearman {rs_:+.2f}; weak tiles median |H1| {np.median(hx[wk]):.4f} vs {np.median(hx[~wk]):.4f} nL/s")
-    label(GK, "d")
 
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
