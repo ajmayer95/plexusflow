@@ -8,9 +8,11 @@ in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
   b  one overlapping tile pair of the core (most shared coherent vessels), split at a seam (dotted) through the overlap: each side
      shows its own tile's vessels coloured by H1 phase (cyclic).  As recorded the colours jump at the seam (arbitrary clock of each
      tile); after one phase offset per tile, φ_aligned = φ_obs − ψ_t, they run continuously.  No spatial gradient is imposed.
-  c  organ scale: circular kernel smoothing (σ 150 µm, ρ-weighted phasors) of all shown tiles' vessel delays, isochrones every
-     20°; hatched = the weakly linked left block (offset constrained to ~±40° by weak cross-links, consistent with left-right
-     boundary symmetry); open dots = tiles with undetermined offset (not used); stars = venous outflow; dashed = tiles of b
+  c  organ scale: circular kernel smoothing (σ 150 µm, ρ-weighted phasors) of the shown tiles' vessel phases, isochrones every 20°.
+     Tiles fall into stitching components (linked by ≥ 1 shared vessel coherent in both): the main one (with the reference
+     tile) is zeroed at the simultaneous DA/V reference; the second (dashed) is stitched separately and its single offset β to
+     the main one is inferred from arterial-inlet symmetry (inlet vessels of both components carry the same H1 phase; tile
+     bootstrap SD); isolated tiles and tiles with bootstrap SD > 30° are open dots; stars = V, triangles = DA reference
   d  validation on vessels imaged in two tiles: same-vessel phase difference after alignment, H1 (used to estimate ψ_t) and
      H2 (corrected with 2ψ_t, not fitted), median |Δφ|
   Phases: synchronisation anchored on the dorsal aorta (= results/ac_field_v3); zero = tile-14 physiological boundary
@@ -213,10 +215,33 @@ def main():
     _, Vk = np.linalg.eigh(np.eye(len(kp_)) - Wk / np.sqrt(np.outer(dk_, dk_))); side_ = Vk[:, 1] / np.sqrt(dk_) > 0
     if side_[list(kp_).index(ix_t[ref])]:
         side_ = ~side_
-    block_t = {tl_[kp_[i]] for i in np.flatnonzero(side_)}; masked = {tl_[i] for i in np.flatnonzero(weak_)}
+    # stitching components: tiles linked by ≥ 1 shared vessel coherent in both (ρ ≥ 0.1); each component is internally stitched,
+    # its offset to the reference component is a single unknown β_k.  Main = the component of the reference tile; components of
+    # ≥ 3 tiles get β inferred from arterial-inlet symmetry; smaller ones (isolated tiles) are not shown.
+    import networkx as _nx
+    _H = _nx.Graph(); _H.add_nodes_from(tl_)
+    for e_, a_, b_ in pairs:
+        _H.add_edge(a_, b_)
+    comps = sorted(_nx.connected_components(_H), key=len, reverse=True); main_c = next(c for c in comps if ref in c)
+    side_comps = [c for c in comps if c is not main_c and len(c) >= 3]
+    block_t = set().union(*side_comps) if side_comps else set(); masked = set(tl_) - main_c - block_t
     core = [t for t in tl_ if t not in masked]
-    log(f"  (b) shown {len(core)} of {len(tl_)} tiles (dashed: weakly linked block); grey: undetermined offset or {sorted(tl_[kp_[i]] for i in np.flatnonzero(side_))}, "
-        f"near-unconstrained {sorted(tl_[i] for i in np.flatnonzero(weak_))}")
+    log(f"  (c) stitching components: main {len(main_c)} tiles, side {[sorted(c) for c in side_comps]}, isolated {sorted(masked)}")
+    # β per side component from arterial-inlet symmetry: inlet vessels (≤ 1 hop of a carve inlet) of the side component should carry
+    # the same H1 phase as those of the main component (both fed by the two aortic branches, recorded together in tile 14)
+    dIn = shortest_path(Ad, directed=False, indices=[int(i) for i in dom["inj"]]).min(0); eIn = np.array([min(dIn[nix_[u]], dIn[nix_[v]]) for u, v in Ef])
+    inl = F["elig"] & (F["rho"] >= 0.3) & (eIn <= 1); wt_ = F["tile"]; beta = {}; beta_sd = {}
+    rngb = np.random.default_rng(0)
+    selM = inl & np.isin(wt_, sorted(main_c)) & np.array([sd.get(int(t), np.inf) <= SD_MAX for t in wt_])
+    for k_, c_ in enumerate(side_comps):
+        selS = inl & np.isin(wt_, sorted(c_)) & np.array([sd.get(int(t), np.inf) <= SD_MAX for t in wt_])
+        zM, zS = np.exp(1j * phf[selM]), np.exp(1j * phf[selS])
+        b_ = np.angle(zM.sum() * np.conj(zS.sum())); bs_ = [np.angle(rngb.choice(zM, len(zM)).sum() * np.conj(rngb.choice(zS, len(zS)).sum())) for _ in range(500)]
+        sd_ = np.degrees(np.sqrt(-2 * np.log(abs(np.mean(np.exp(1j * (np.array(bs_) - b_)))))))
+        for t in c_:
+            beta[t] = b_
+        beta_sd[k_] = (np.degrees(b_), sd_, int(selM.sum()), int(selS.sum()))
+        log(f"  (c) side component {sorted(c_)}: β = {np.degrees(b_):+.1f}° ± {sd_:.1f}° (inlet vessels main {selM.sum()}, side {selS.sum()})")
     tdel, tR, nflip, ntot, tvec = {}, {}, {}, {}, {}; eixf = {e: i for i, e in enumerate(Ef)}; Hm_ = mos.shape[0]
     def mid(e):
         pth = G.edges[e].get("path")
@@ -265,7 +290,7 @@ def main():
         for t, y in x.items():
             if t not in shown_t or not np.isfinite(y["rho"]) or y["rho"] < 0.1 or abs(y["H"][0]) == 0 or np.sign(y["a0"]) != np.sign(F["Qp"][i_]):
                 continue                                      # (a measurement against the reconciled flow direction is not used, as in the field)
-            dl = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(np.sign(F["Qp"][i_]) * y["H"][0] * np.exp(-1j * psi[t]))))
+            dl = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(np.sign(F["Qp"][i_]) * y["H"][0] * np.exp(-1j * psi[t]) * np.exp(1j * beta.get(t, 0.0)))))
             V.append((pts(e), (dl + 30) % 360 - 30, y["rho"], t))
             dr = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(np.sign(F["Qp"][i_]) * y["H"][0])))   # as recorded (no ψ_t)
             Vraw.append((V[-1][0], (dr + 30) % 360 - 30, y["rho"], t))
@@ -333,7 +358,7 @@ def main():
     log(f"  (b) tile pair {ta}/{tb} ({npair_} shared coherent vessels)")
     label(GB, "b")
 
-    # ---- c: organ-scale smoothed delay field with isochrones; the weakly linked block hatched
+    # ---- c: organ-scale smoothed delay field with isochrones; the second stitching component dashed, offset β from inlet symmetry
     axC = fig.add_subplot(GC); organ(axC)
     big = ((XL[0], XL[1]), (YL[1], YL[0]))
     fo, fb, ext = smooth_field(V, 150.0, 6.0, big)
@@ -343,8 +368,11 @@ def main():
     axC.clabel(cs, levels=[v for v in LEV if v in (40, 80, 160)], fmt="%d°", fontsize=6, inline_spacing=1)
     plt.rcParams["hatch.linewidth"] = 0.3; plt.rcParams["hatch.color"] = "0.5"
     fbf = np.ma.filled(fb, 0)
-    axC.contourf(gx, gy, fbf, levels=[0.5, 1.01], colors="none", hatches=["///"], zorder=4)
-    axC.contour(gx, gy, fbf, levels=[0.5], colors="0.3", linewidths=0.7, linestyles="--", zorder=4)
+    axC.contour(gx, gy, fbf, levels=[0.5], colors="0.15", linewidths=0.9, linestyles="--", zorder=4)
+    if beta_sd:
+        bdeg, bsd, _, _ = beta_sd[0]; ys_, xs_ = np.nonzero(fbf > 0.5)
+        axC.text(gx[int(np.median(xs_))], gy[ys_.max()] + 0.03 * (YL[0] - YL[1]), f"separately stitched;\noffset from inlet symmetry\nβ = {bdeg:+.0f}° ± {bsd:.0f}°",
+                 ha="center", va="top", fontsize=6, color="0.15", zorder=7, bbox=dict(fc="white", ec="none", alpha=0.75, pad=1.0))
     for t in band:
         if t not in shown_t:
             axC.plot(*cen[t], "o", ms=3.5, mfc="white", mec="0.55", mew=0.7, zorder=5)
@@ -358,7 +386,7 @@ def main():
                                         arrowprops=dict(arrowstyle="-", lw=0.5, color="0.3"), zorder=7)
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
-    axC.legend(handles=[Patch(fc="none", ec="0.4", hatch="///", ls="--", label="phase relative to DA/V undetermined"),
+    axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="second stitching component"),
                         Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile phase undetermined")],
                loc="upper left", bbox_to_anchor=(-0.04, 1.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
     axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.8, ls="--", zorder=5))
