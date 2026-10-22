@@ -210,7 +210,7 @@ def main():
     EXe = EXV if EXV in mall else EXV[::-1]
     axX.axhline(0, color="0.3", lw=0.5); axX.set_xlim(0, 1.5); axX.set_xticks([0, 0.5, 1, 1.5])
     axX.set_xlabel("time (s)"); axX.set_ylabel("flow (nL/s)", labelpad=1); axX.spines[["top", "right"]].set_visible(False)
-    axX.legend(title=f"early-tile vessel 1:  D = {_D(mall[EXe][EXA], mall[EXe][EXB]):.2f}", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
+    axX.legend(title=f"vessel 1: 2 early-tile recordings\n(D = {_D(mall[EXe][EXA], mall[EXe][EXB]):.2f})", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
                handlelength=1.0, borderaxespad=0, labelspacing=0.15, ncol=2, columnspacing=0.8, alignment="left")
     label(GE, "b")
 
@@ -225,7 +225,8 @@ def main():
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]
     axW.axhline(1, color="0.75", lw=0.5, ls=":"); axW.set_xlim(0, 1); axW.set_xticks([0, 0.5, 1])
     axW.set_xlabel("cardiac phase $t/T$ (H1-aligned)"); axW.set_ylabel(r"$Q\,/\,\bar Q$", labelpad=1); axW.spines[["top", "right"]].set_visible(False)
-    axW.legend(title=f"band vessel 2, {len(rv_t)} tiles\nD = {min(dRV):.2f}–{max(dRV):.2f}", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
+    axW.text(0.98, 0.04, "shape\nis stable", transform=axW.transAxes, ha="right", va="bottom", fontsize=7, color="#2b5c8a", fontweight="bold")
+    axW.legend(title=f"vessel 2: {len(rv_t)} retained-band recordings\n(D = {min(dRV):.2f}–{max(dRV):.2f})", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
                handlelength=1.0, borderaxespad=0, labelspacing=0.15, ncol=2, columnspacing=0.8, alignment="left")
     log(f"  (d) band vessel {RV}: tiles {rv_t}, pairwise D " + ", ".join(f"{v:.2f}" for v in dRV))
     label(GS, "d")
@@ -242,8 +243,40 @@ def main():
                handlelength=1.0, borderaxespad=0, labelspacing=0.15, alignment="left")
     label(GT, "e")
 
-    # ---- c: where — the organ, the early tiles vs the band, every sampled vessel, repeat vessels coloured by D, the two examples
+    # ---- c: where — locator: the early tiles vs the retained tiles, the two example vessels and the tiles each was recorded in
     axM = fig.add_subplot(GM); allq = np.vstack(list(polys.values())); padm = 20
+    axM.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.45, zorder=0)
+    axM.set_xlim(allq[:, 0].min() - padm, allq[:, 0].max() + padm); axM.set_ylim(allq[:, 1].max() + padm, allq[:, 1].min() - padm)
+    axM.set_aspect("equal"); axM.set_xticks([]); axM.set_yticks([]); [s_.set_visible(False) for s_ in axM.spines.values()]
+    def _path(e_):
+        pth = G.edges[e_].get("path")
+        q_ = np.asarray(pth, float) if pth is not None and len(pth) >= 2 else np.array([[G.nodes[n]["x"], G.nodes[n]["y"]] for n in e_], float)
+        return q_[:, 0], Hm - q_[:, 1]
+    for t in band:
+        axM.add_patch(Polygon(polys[t], closed=True, fc="none", ec="0.55", lw=0.35, zorder=1))
+    for t in early:
+        axM.add_patch(Polygon(polys[t], closed=True, fc="#b23a48", ec="none", alpha=0.10, zorder=1))
+        axM.add_patch(Polygon(polys[t], closed=True, fc="none", ec="#b23a48", lw=0.6, ls="--", zorder=2))
+    for (E_, tag_, ts_, col_) in ((EXV, "1", (EXA, EXB), "#b23a48"), (RV, "2", rv_t, "#2b5c8a")):
+        for t in ts_:
+            axM.add_patch(Polygon(polys[t], closed=True, fc="none", ec=col_, lw=1.1, zorder=3))
+        e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_)
+        axM.plot(xx_, yy_, color=col_, lw=2.5, zorder=4, solid_capstyle="round")
+        axM.plot(cx_ + 150, cy_ - 150, "o", ms=10, mfc=col_, mec="white", mew=0.8, zorder=6)
+        axM.text(cx_ + 150, cy_ - 150, tag_, fontsize=7.5, ha="center", va="center", zorder=7, fontweight="bold", color="white")
+    cE = np.vstack([polys[t] for t in early])
+    axM.text(cE[:, 0].mean(), cE[:, 1].min() - 40, f"early tiles {min(early)}–{max(early)} (first {max(xs_a[ts.index(t)] for t in early) + 5:.0f} min)",
+             ha="center", va="bottom", fontsize=7, color="#b23a48", zorder=6)
+    from matplotlib.lines import Line2D as _L2
+    axM.legend(handles=[matplotlib.patches.Patch(fc="#f3dfe2", ec="#b23a48", ls="--", lw=0.6, label="early tiles (not stitched)"),
+                        matplotlib.patches.Patch(fc="none", ec="0.55", lw=0.5, label="retained tiles (stitched)"),
+                        _L2([], [], color="#b23a48", lw=1.1, label="tiles recording vessel 1"),
+                        _L2([], [], color="#2b5c8a", lw=1.1, label="tiles recording vessel 2")],
+               loc="upper center", bbox_to_anchor=(0.5, -0.02), fontsize=6.5, frameon=False, handlelength=1.4, borderaxespad=0, ncol=2, columnspacing=1.0)
+    label(GM, "c")
+    # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
+    figSM = plt.figure(figsize=(4.0, 4.6), facecolor="white"); _fig_main = fig; fig = figSM
+    axM = figSM.add_axes([0.03, 0.17, 0.94, 0.8]); allq = np.vstack(list(polys.values())); padm = 20
     axM.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.35, zorder=0)
     axM.set_xlim(allq[:, 0].min() - padm, allq[:, 0].max() + padm); axM.set_ylim(allq[:, 1].max() + padm, allq[:, 1].min() - padm)
     axM.set_aspect("equal"); axM.set_xticks([]); axM.set_yticks([]); [s_.set_visible(False) for s_ in axM.spines.values()]
@@ -281,7 +314,7 @@ def main():
                                                                         ticks=[0, 0.4, 0.8], extend="max")
     cbM.ax.tick_params(labelsize=6.5, pad=1); cbM.outline.set_linewidth(0.4); cbM.ax.xaxis.set_label_position("top")
     cbM.set_label("repeat vessel: shape difference $D$", fontsize=7, labelpad=2)
-    label(GM, "c")
+    fig = _fig_main
 
     # ---- b: held-out overlap prediction — drop all links between a and b, refit ψ from the rest, predict ψa − ψb
     from plexusflow.ac.field import _sync
@@ -463,7 +496,7 @@ def main():
     side = lambda p_: np.dot(p_.mean(0) - mid_s, nrm_s)
     cmc = plt.cm.twilight_shifted; ncy = mcolors.Normalize(-180, 180)
     gBs = GB.subgridspec(3, 1, height_ratios=[1, 1, 0.36], hspace=0.16)
-    for j_, (VV, ttl) in enumerate(((Vraw, "as recorded"), (V, "one phase offset per tile"))):
+    for j_, (VV, ttl) in enumerate(((Vraw, "before alignment"), (V, "after alignment: one offset per tile"))):
         ax = fig.add_subplot(gBs[j_, 0])
         ax.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.3, zorder=0)
         for p_, dl, w, t in VV:
@@ -503,14 +536,18 @@ def main():
     gx = np.linspace(big[0][0], big[0][1], fo.shape[1]); gy = np.linspace(big[1][0], big[1][1], fo.shape[0])
     axC.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.9, zorder=1, interpolation="bilinear")
     cs = axC.contour(gx, gy, fo, levels=LEV, colors="0.1", linewidths=0.45, zorder=3)
-    axC.clabel(cs, levels=[v for v in LEV if v in (40, 80, 160)], fmt="%d°", fontsize=6, inline_spacing=1)
+    _cl = axC.clabel(cs, levels=[v for v in LEV if v in (40, 80, 160)], fmt="%d°", fontsize=6.5, inline_spacing=1); _seen = set()
+    for t_ in _cl:                                        # one label per level
+        if t_.get_text() in _seen:
+            t_.set_visible(False)
+        _seen.add(t_.get_text())
     plt.rcParams["hatch.linewidth"] = 0.3; plt.rcParams["hatch.color"] = "0.5"
     fbf = np.ma.filled(fb, 0)
     axC.contour(gx, gy, fbf, levels=[0.5], colors="0.15", linewidths=0.9, linestyles="--", zorder=4)
     if beta_sd:
         bdeg, bsd, _, _ = beta_sd[0]; ys_, xs_ = np.nonzero(fbf > 0.5)
-        axC.text(gx[int(np.median(xs_))], gy[ys_.max()] + 0.03 * (YL[0] - YL[1]), f"separately stitched;\noffset from inlet symmetry\nβ = {bdeg:+.0f}° ± {bsd:.0f}°",
-                 ha="center", va="top", fontsize=6, color="0.15", zorder=7, bbox=dict(fc="white", ec="none", alpha=0.75, pad=1.0))
+        axC.text(gx[int(np.median(xs_))], gy[ys_.max()] + 0.03 * (YL[0] - YL[1]), "second stitching\ncomponent",
+                 ha="center", va="top", fontsize=7, color="0.15", zorder=7, bbox=dict(fc="white", ec="none", alpha=0.75, pad=1.0))
     for t in band:
         if t not in shown_t:
             axC.plot(*cen[t], "o", ms=3.5, mfc="white", mec="0.55", mew=0.7, zorder=5)
@@ -520,8 +557,8 @@ def main():
     for i in [int(i) for i in dom["out"]]:
         n_ = nds[i]; axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
     rp = np.array(refpts); axC.annotate("simultaneous DA/V\nreference, 0°", xy=(rp[:, 0].mean(), rp[:, 1].min() - 20),
-                                        xytext=(rp[:, 0].mean() + 0.30 * (XL[1] - XL[0]), YL[1] + 0.02 * (YL[0] - YL[1])), ha="center", va="top", fontsize=6.5,
-                                        arrowprops=dict(arrowstyle="-", lw=0.5, color="0.3"), zorder=7)
+                                        xytext=(rp[:, 0].mean() + 0.30 * (XL[1] - XL[0]), YL[1] + 0.02 * (YL[0] - YL[1])), ha="center", va="top", fontsize=8,
+                                        arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"), zorder=7)
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="second stitching component"),
@@ -562,6 +599,7 @@ def main():
     axP.text(0.03, 0.97, f"{len(obs)} tile pairs\nmedian error {np.median(res):.0f}°", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
     fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.png", dpi=300, facecolor="white"); fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.pdf", facecolor="white")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.png", dpi=300, facecolor="white"); figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.pdf", facecolor="white")
     for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync")):
         f_.savefig(OUT_DIR / f"{nm_}{args.tag}.png", dpi=300, facecolor="white"); f_.savefig(OUT_DIR / f"{nm_}{args.tag}.pdf", facecolor="white")
         f_.savefig(OUT_DIR / f"{nm_}{args.tag}.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
