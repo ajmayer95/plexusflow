@@ -128,9 +128,9 @@ def main():
     figR = plt.figure(figsize=(7.5, 5.0), facecolor="white")
     gR = figR.add_gridspec(2, 3, width_ratios=[1, 1.75, 1], wspace=0.3, hspace=0.62, left=0.075, right=0.975, top=0.9, bottom=0.1)
     GA, GE, GM, GS, GT = gR[0, 0], gR[1, 0], gR[:, 1], gR[0, 2], gR[1, 2]   # a heart rate · b early vessel · c organ · d band vessel · e D
-    figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
+    figS = plt.figure(figsize=(7.5, 6.6), facecolor="white")
     gS2 = figS.add_gridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06, left=0.08, right=0.97, top=0.93, bottom=0.1)
-    gL = gS2[0].subgridspec(2, 1, height_ratios=[3.0, 0.85], hspace=0.2); GB, GD, GC = gL[0], gL[1], gS2[1]
+    gL = gS2[0].subgridspec(3, 1, height_ratios=[3.0, 0.85, 1.2], hspace=0.62); GB, GD, GK, GC = gL[0], gL[1], gL[2], gS2[1]
     fig = figR
 
     def label(cell, letter):
@@ -548,8 +548,15 @@ def main():
         bdeg, bsd, _, _ = beta_sd[0]; ys_, xs_ = np.nonzero(fbf > 0.5)
         axC.text(gx[int(np.median(xs_))], gy[ys_.max()] + 0.03 * (YL[0] - YL[1]), "second stitching\ncomponent",
                  ha="center", va="top", fontsize=7, color="0.15", zorder=7, bbox=dict(fc="white", ec="none", alpha=0.75, pad=1.0))
+    Lt = {t: 0.0 for t in band}
+    for (a_, b_), w_ in link.items():
+        Lt[a_] += w_; Lt[b_] += w_
+    L_thr = 0.05 * np.median(list(Lt.values())); weak_t = {t for t in band if Lt[t] < L_thr}
+    log(f"  (c) weakly constrained tiles (link < 5 % of median, {L_thr:.2f}): {sorted(weak_t)}")
+    for t in sorted(weak_t):
+        axC.add_patch(Polygon(polys[t], closed=True, fc="white", ec="0.45", lw=0.5, hatch="//////", alpha=0.55, zorder=4.5))
     for t in band:
-        if t not in shown_t:
+        if t not in shown_t and t not in weak_t:
             axC.plot(*cen[t], "o", ms=3.5, mfc="white", mec="0.55", mew=0.7, zorder=5)
     refpts = [(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"]) for n_ in list(dom["DA"]) + [nds[int(i)] for i in dom["out"]]]
     for n_ in dom["DA"]:
@@ -562,6 +569,7 @@ def main():
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="second stitching component"),
+                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="tile offset weakly constrained (see d)"),
                         Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile phase undetermined")],
                loc="upper left", bbox_to_anchor=(-0.04, 1.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
     axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.8, ls="--", zorder=5))
@@ -586,6 +594,24 @@ def main():
     fig.text(GD.get_position(fig).x0 + 0.5 * GD.get_position(fig).width, GD.get_position(fig).y0 - 0.045,
              "repeat-vessel phase difference, aligned (deg)", ha="center", va="top", fontsize=7.5)
     label(GD, "b")
+
+    # ---- d: why stitching fails where it does — a tile's link to the rest (Σ ρ_a ρ_b over shared vessels) against the size of its
+    #      pulsation (median |H1| of its measured vessels); weakly constrained tiles are those hatched in c
+    from scipy.stats import spearmanr as _spr
+    h1t = {t: np.median([abs(x[t]["H"][0]) for x in meas.values() if t in x and np.isfinite(x[t]["rho"])]) for t in band}
+    tl_k = sorted(band); hx = np.array([h1t[t] for t in tl_k]); ly = np.array([max(Lt[t], 0.05) for t in tl_k]); wk = np.array([t in weak_t for t in tl_k])
+    axK = fig.add_subplot(GK)
+    axK.scatter(hx[~wk], ly[~wk], s=14, color="0.25", lw=0, zorder=3, label="constrained")
+    axK.scatter(hx[wk], ly[wk], s=14, facecolor="white", edgecolor="0.25", lw=0.7, hatch="/////", zorder=3, label="weakly constrained")
+    axK.axhline(L_thr, color="0.6", lw=0.6, ls=":"); axK.set_xscale("log"); axK.set_yscale("log")
+    axK.set_xlabel("pulsatile amplitude of the tile's vessels,\nmedian $|H_1|$ (nL/s)", fontsize=7.5, labelpad=1)
+    axK.set_ylabel("link to other tiles\n" + r"$\Sigma\,\rho_a\rho_b$", fontsize=7.5, labelpad=1)
+    axK.tick_params(labelsize=7); axK.spines[["top", "right"]].set_visible(False)
+    rs_ = _spr(hx, ly)[0]
+    axK.text(0.03, 0.97, f"Spearman {rs_:+.2f}", transform=axK.transAxes, fontsize=7, va="top", color="0.3")
+    axK.legend(loc="lower right", fontsize=6.5, frameon=False, handletextpad=0.2, borderaxespad=0.1)
+    log(f"  (d) tile link vs median |H1|: Spearman {rs_:+.2f}; weak tiles median |H1| {np.median(hx[wk]):.4f} vs {np.median(hx[~wk]):.4f} nL/s")
+    label(GK, "d")
 
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
