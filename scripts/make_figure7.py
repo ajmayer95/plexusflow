@@ -122,12 +122,16 @@ def main():
         ax.set_xlim(*XL); ax.set_ylim(*YL); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
         [s_.set_visible(False) for s_ in ax.spines.values()]
 
-    fig = plt.figure(figsize=(7.5, 8.4), facecolor="white")
-    gs = fig.add_gridspec(2, 1, height_ratios=[1, 2.25], hspace=0.27, left=0.08, right=0.97, top=0.935, bottom=0.075)
-    gTop = gs[0].subgridspec(1, 3, width_ratios=[1.2, 1, 1], wspace=0.45); gBot = gs[1].subgridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06)
-    gL = gBot[0].subgridspec(2, 1, height_ratios=[3.0, 0.85], hspace=0.2)
-    # a heart rate · b same vessel twice · c shape stationarity · d seam · e validation · f organ field
-    GA, GS, GT, GB, GD, GC = gTop[0], gTop[1], gTop[2], gL[0], gL[1], gBot[1]
+    # two figures: Fig 7 = choosing a stitchable regime (a heart rate / reversal, b early-tile vessel, c band vessel, d repeat-vessel
+    # population); Fig 8 = synchronization (a seam before/after, b H1/H2 validation, c organ phase field).  Panels draw on `fig`,
+    # which is switched from figR to figS before the synchronization panels.
+    figR = plt.figure(figsize=(7.5, 5.6), facecolor="white")
+    gR = figR.add_gridspec(2, 2, width_ratios=[1, 1.1], wspace=0.3, hspace=0.62, left=0.08, right=0.97, top=0.9, bottom=0.1)
+    GA, GE, GS, GT = gR[0, 0], gR[0, 1], gR[1, 0], gR[1, 1]
+    figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
+    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06, left=0.08, right=0.97, top=0.93, bottom=0.1)
+    gL = gS2[0].subgridspec(2, 1, height_ratios=[3.0, 0.85], hspace=0.2); GB, GD, GC = gL[0], gL[1], gS2[1]
+    fig = figR
 
     def label(cell, letter):
         b_ = cell.get_position(fig); fig.text(b_.x0 - 0.045, b_.y1 + 0.03, letter, fontsize=10, fontweight="bold", va="bottom", ha="left")
@@ -170,7 +174,21 @@ def main():
     axA.set_xlabel(xlab); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
     label(GA, "a")
 
-    # ---- b: the state changes — one vessel recorded twice (reversing early, not later) and the repeat-vessel population
+    # ---- b: early tiles — one vessel recorded twice, 12 min apart (tiles 3 → 5): reversing early, not later; 3-harmonic fits
+    from plexusflow.reconcile.harmonics import phasors as _phz
+    EXV, EXA, EXB = (1206, 1267), 3, 5
+    _e = EXV if G.has_edge(*EXV) else EXV[::-1]; axX = fig.add_subplot(GE); _tt = np.linspace(0, 1.5, 400)
+    for t_, col_ in ((EXA, "#b23a48"), (EXB, "#e08a96")):
+        _m = next(m for m in G.edges[_e]["measurements_piv"] if int(m["tile_id"]) == t_); _q = np.asarray(_m["Q_t"], float); _q = -_q if np.mean(_q) < 0 else _q
+        _a0, _H = _phz(_q, tf0[t_]); _fit = _a0 + sum((_H[n - 1] * np.exp(2j * np.pi * n * tf0[t_] * _tt)).real for n in (1, 2, 3))
+        axX.plot(_tt, _fit, color=col_, lw=1.4, label=f"tile {t_}: {(xs_a[ts.index(t_)]):.0f} min, {tf0[t_]:.1f} Hz")
+    axX.axhline(0, color="0.3", lw=0.5); axX.set_xlim(0, 1.5); axX.set_xticks([0, 0.5, 1, 1.5])
+    axX.set_xlabel("time (s)"); axX.set_ylabel("flow (nL/s)", labelpad=1); axX.spines[["top", "right"]].set_visible(False)
+    axX.legend(title="early tiles: same vessel, recorded at", title_fontsize=7, fontsize=7, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
+               handlelength=1.2, borderaxespad=0, labelspacing=0.2, alignment="left")
+    label(GE, "b")
+
+    # ---- c: retained band — one vessel recorded in four tiles (see below)
     # one vessel recorded in four retained tiles (best-measured repeat vessel, ρ ≥ 0.5 in all): waveform shape (Q − Q̄)/|H1| over one beat,
     # each recording shifted to its own H1 phase (shape only); right, its (|H2|/|H1|, Θ21) beside an early-tile vessel (tiles 3, 5)
     gSs = GS.subgridspec(1, 2, width_ratios=[1.55, 1], wspace=0.55)
@@ -183,7 +201,7 @@ def main():
         axW.plot(tau_w, w_, color=c_, lw=1.2, label=f"{xs_a[ts.index(t_)]:.0f} min")
     axW.axhline(0, color="0.6", lw=0.5); axW.set_xlim(0, 1); axW.set_xticks([0, 0.5, 1])
     axW.set_xlabel("cardiac phase $t/T$"); axW.set_ylabel(r"$(Q-\bar Q)\,/\,|H_1|$", labelpad=1); axW.spines[["top", "right"]].set_visible(False)
-    axW.legend(title="same vessel, 4 tiles", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
+    axW.legend(title="retained band: same vessel, 4 tiles", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
                handlelength=1.0, borderaxespad=0, labelspacing=0.15, ncol=2, columnspacing=0.8, alignment="left")
     axH = fig.add_subplot(gSs[1])
     def _sh(y_):
@@ -230,7 +248,7 @@ def main():
         PS.append((lab_, np.exp(np.median(M_)), *np.exp(np.percentile(bs_, [2.5, 97.5])), len(M_), sum(len(v_) for v_ in per_.values())))
         log(f"  (b) earlier recording {lab_}: pulsatility later/earlier {PS[-1][1]:.2f}× [{PS[-1][2]:.2f}–{PS[-1][3]:.2f}] ({PS[-1][4]} tile pairs, {PS[-1][5]} vessels)")
     log(f"  (b) reversal lost in {nlost} repeat pairs, gained in {ngain} (ρ ≥ 0.2)")
-    label(GS, "b")
+    label(GS, "c")
 
     # ---- c: waveform shape is reproducible inside the band — repeat vessels (ρ ≥ 0.2, same mean-flow sign), both recordings in the
     #      early tiles vs both in the retained band; clock-free shape measures Θ21 = φ2 − 2φ1 and pulsatility |H1|/|Q̄|
@@ -252,9 +270,9 @@ def main():
     for g_ in ("E", "B"):
         log(f"  (c) repeat vessels, both in {SLAB[g_]}: n={len(SP[g_])}, median |ΔΘ21| {np.median(SP[g_][:, 0]):.0f}°, pulsatility ratio "
             f"{np.exp(np.median(SP[g_][:, 1])):.2f}×, |H2|/|H1| ratio {np.exp(np.median(SP[g_][:, 2])):.2f}×")
-    gTs = GT.subgridspec(2, 1, hspace=0.9)
-    for k_, (col_, xl_, conv, xlim_) in enumerate(((0, r"change in $\Theta_{21}$ between recordings (deg)", lambda v: v, (0, 180)),
-                                                   (2, r"ratio of $|H_2|/|H_1|$ between recordings", np.exp, (1, 3)))):
+    gTs = GT.subgridspec(1, 2, wspace=0.18)
+    for k_, (col_, xl_, conv, xlim_) in enumerate(((0, "change in $\\Theta_{21}$\nbetween recordings (deg)", lambda v: v, (0, 180)),
+                                                   (2, "ratio of $|H_2|/|H_1|$\nbetween recordings", np.exp, (1, 3)))):
         ax = fig.add_subplot(gTs[k_])
         for g_ in ("E", "B"):
             v_ = np.sort(conv(SP[g_][:, col_])); ax.step(v_, np.arange(1, len(v_) + 1) / len(v_), where="post", color=SCOL[g_], lw=1.3,
@@ -262,7 +280,9 @@ def main():
             m_ = np.median(v_); ax.plot([m_], [0.5], "o", ms=3, color=SCOL[g_], zorder=4)
             ax.text(m_, 0.5, (f"  {m_:.0f}°" if k_ == 0 else f"  {m_:.2f}×"), color=SCOL[g_], fontsize=7, ha="left",
                     va="top" if g_ == "E" else "bottom", fontweight="bold")
-        ax.set_xlim(*xlim_); ax.set_ylim(0, 1.02); ax.set_yticks([0, 1]); ax.spines[["top", "right"]].set_visible(False)
+        ax.set_xlim(*xlim_); ax.set_ylim(0, 1.02); ax.set_yticks([0, 0.5, 1]); ax.spines[["top", "right"]].set_visible(False)
+        if k_ == 1:
+            ax.set_yticklabels([])
         ax.set_xlabel(xl_, fontsize=7.5, labelpad=1); ax.tick_params(labelsize=7)
         if k_ == 0:
             ax.set_xticks([0, 90, 180])
@@ -271,9 +291,9 @@ def main():
         else:
             ax.set_xscale("log"); ax.set_xticks([1, 1.5, 2, 3]); ax.set_xticklabels(["1×", "1.5×", "2×", "3×"])
             ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
-    fig.text(GT.get_position(fig).x0 - 0.04, GT.get_position(fig).y0 + 0.5 * GT.get_position(fig).height, "cumulative fraction",
+    fig.text(GT.get_position(fig).x0 - 0.045, GT.get_position(fig).y0 + 0.5 * GT.get_position(fig).height, "cumulative fraction",
              rotation=90, ha="center", va="center", fontsize=8)
-    label(GT, "c")
+    label(GT, "d")
 
     # ---- b: held-out overlap prediction — drop all links between a and b, refit ψ from the rest, predict ψa − ψb
     from plexusflow.ac.field import _sync
@@ -441,6 +461,7 @@ def main():
         dd = (np.degrees(np.angle(Zs)) + 30) % 360 - 30
         return np.ma.masked_where(~ok, dd), np.ma.masked_where(~ok, Wbs / np.maximum(Ws, 1e-12)), (x0, x1, y1, y0)
 
+    fig = figS
     # ---- b: one overlapping tile pair of the core — measured vessel delays and the smoothed isochrones across the seam
     cnt = {}
     for e, a, b in pairs:
@@ -485,7 +506,7 @@ def main():
     fig.text(bb.x0 + 0.5 * bb.width, bb.y0 + 0.105 * bb.height, r"$\phi^{\rm aligned}_{e,t} = \phi^{\rm obs}_{e,t} - \psi_t$", ha="center", fontsize=8.5)
 
     log(f"  (b) tile pair {ta}/{tb} ({npair_} shared coherent vessels)")
-    label(GB, "d")
+    label(GB, "a")
 
     # ---- c: organ-scale smoothed delay field with isochrones; the second stitching component dashed, offset β from inlet symmetry
     axC = fig.add_subplot(GC); organ(axC)
@@ -523,7 +544,7 @@ def main():
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
     cax = axC.inset_axes([0.2, -0.05, 0.6, 0.028]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=LEV[::3], extend="min")
     cb.set_label("H1 phase lag behind simultaneous DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
-    _pC = axC.get_position(); fig.text(_pC.x0 - 0.01, _pC.y1 + 0.03, "f", fontsize=10, fontweight="bold", va="bottom", ha="left")
+    _pC = axC.get_position(); fig.text(_pC.x0 - 0.01, _pC.y1 + 0.03, "c", fontsize=10, fontweight="bold", va="bottom", ha="left")
 
     # ---- e: repeat-vessel agreement after alignment; H2 is an independent check (not used in the synchronization)
     gDs = GD.subgridspec(1, 2, wspace=0.3); bins = np.linspace(-60, 60, 25)
@@ -537,9 +558,9 @@ def main():
         if k == 2:
             ax.text(0.5, 0.82, "not used in\nsynchronization", transform=ax.transAxes, fontsize=6.5, ha="center", va="top", color="#6a4c93", fontweight="bold",
                     bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.5))
-    fig.text(GD.get_position(fig).x0 + 0.5 * GD.get_position(fig).width, GD.get_position(fig).y0 - 0.028,
+    fig.text(GD.get_position(fig).x0 + 0.5 * GD.get_position(fig).width, GD.get_position(fig).y0 - 0.045,
              "repeat-vessel phase difference, aligned (deg)", ha="center", va="top", fontsize=7.5)
-    label(GD, "e")
+    label(GD, "b")
 
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -553,9 +574,10 @@ def main():
     axP.text(0.03, 0.97, f"{len(obs)} tile pairs\nmedian error {np.median(res):.0f}°", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
     fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.png", dpi=300, facecolor="white"); fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.pdf", facecolor="white")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT_DIR / f"fig7{args.tag}.png", dpi=300, facecolor="white"); fig.savefig(OUT_DIR / f"fig7{args.tag}.pdf", facecolor="white")
-    fig.savefig(OUT_DIR / f"fig7{args.tag}.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
-    log(f"wrote {OUT_DIR / f'fig7{args.tag}.png'}")
+    for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync")):
+        f_.savefig(OUT_DIR / f"{nm_}{args.tag}.png", dpi=300, facecolor="white"); f_.savefig(OUT_DIR / f"{nm_}{args.tag}.pdf", facecolor="white")
+        f_.savefig(OUT_DIR / f"{nm_}{args.tag}.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
+        log(f"wrote {OUT_DIR / f'{nm_}{args.tag}.png'}")
 
 
 if __name__ == "__main__":
