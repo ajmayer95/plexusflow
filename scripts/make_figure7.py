@@ -125,9 +125,9 @@ def main():
     # two figures: Fig 7 = choosing a stitchable regime (a heart rate / reversal, b early-tile vessel, c band vessel, d repeat-vessel
     # population); Fig 8 = synchronization (a seam before/after, b H1/H2 validation, c organ phase field).  Panels draw on `fig`,
     # which is switched from figR to figS before the synchronization panels.
-    figR = plt.figure(figsize=(7.5, 5.0), facecolor="white")
-    gR = figR.add_gridspec(2, 3, width_ratios=[1, 1.75, 1], wspace=0.3, hspace=0.62, left=0.075, right=0.975, top=0.9, bottom=0.1)
-    GA, GE, GM, GS, GT = gR[0, 0], gR[1, 0], gR[:, 1], gR[0, 2], gR[1, 2]   # a heart rate · b early vessel · c organ · d band vessel · e D
+    figR = plt.figure(figsize=(7.5, 5.6), facecolor="white")
+    gR = figR.add_gridspec(2, 2, width_ratios=[1, 1], wspace=0.3, hspace=0.72, left=0.085, right=0.975, top=0.86, bottom=0.085)
+    GA, GE, GS, GT = gR[0, 0], gR[0, 1], gR[1, 0], gR[1, 1]   # a heart rate (+ organ inset) · b early vessel · c band vessel · d D
     figS = plt.figure(figsize=(7.5, 6.6), facecolor="white")
     gS2 = figS.add_gridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06, left=0.08, right=0.97, top=0.93, bottom=0.1)
     gL = gS2[0].subgridspec(3, 1, height_ratios=[3.0, 0.85, 1.2], hspace=0.62); GB, GD, GK, GC = gL[0], gL[1], gL[2], gS2[1]
@@ -238,7 +238,7 @@ def main():
     axW.legend(title=f"vessel 2: {len(rv_t)} retained-band recordings\n(D = {min(dRV):.2f}–{max(dRV):.2f})", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
                handlelength=1.0, borderaxespad=0, labelspacing=0.15, ncol=2, columnspacing=0.8, alignment="left")
     log(f"  (d) band vessel {RV}: tiles {rv_t}, pairwise D " + ", ".join(f"{v:.2f}" for v in dRV))
-    label(GS, "d")
+    label(GS, "c")
 
     # ---- e: across all repeat vessels — D, both recordings early vs both in the band
     axD = fig.add_subplot(GT)
@@ -250,39 +250,38 @@ def main():
     axD.set_xlabel("waveform-shape difference $D$\nbetween recordings of a vessel", fontsize=7.5, labelpad=1); axD.set_ylabel("cumulative fraction")
     axD.legend(title="both recordings in", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
                handlelength=1.0, borderaxespad=0, labelspacing=0.15, alignment="left")
-    label(GT, "e")
+    label(GT, "d")
 
-    # ---- c: where — locator: the early tiles vs the retained tiles, the two example vessels and the tiles each was recorded in
-    axM = fig.add_subplot(GM); allq = np.vstack(list(polys.values())); padm = 20
-    axM.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.45, zorder=0)
-    axM.set_xlim(allq[:, 0].min() - padm, allq[:, 0].max() + padm); axM.set_ylim(allq[:, 1].max() + padm, allq[:, 1].min() - padm)
-    axM.set_aspect("equal"); axM.set_xticks([]); axM.set_yticks([]); [s_.set_visible(False) for s_ in axM.spines.values()]
+    # ---- organ insets (where): a — the early tiles vs the retained tiles; b, c — each example vessel and the tiles that recorded it
+    mos_s = mos[::5, ::5]; allq = np.vstack(list(polys.values())); padm = 20
     def _path(e_):
         pth = G.edges[e_].get("path")
         q_ = np.asarray(pth, float) if pth is not None and len(pth) >= 2 else np.array([[G.nodes[n]["x"], G.nodes[n]["y"]] for n in e_], float)
         return q_[:, 0], Hm - q_[:, 1]
-    for t in band:
-        axM.add_patch(Polygon(polys[t], closed=True, fc="none", ec="0.55", lw=0.35, zorder=1))
-    for t in early:
-        axM.add_patch(Polygon(polys[t], closed=True, fc="#b23a48", ec="none", alpha=0.10, zorder=1))
-        axM.add_patch(Polygon(polys[t], closed=True, fc="none", ec="#b23a48", lw=0.6, ls="--", zorder=2))
-    for (E_, tag_, ts_, col_) in ((EXV, "1", (EXA, EXB), "#b23a48"), (RV, "2", rv_t, "#2b5c8a")):
-        for t in ts_:
-            axM.add_patch(Polygon(polys[t], closed=True, fc="none", ec=col_, lw=1.1, zorder=3))
-        e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_)
-        axM.plot(xx_, yy_, color=col_, lw=2.5, zorder=4, solid_capstyle="round")
-        axM.plot(cx_ + 150, cy_ - 150, "o", ms=10, mfc=col_, mec="white", mew=0.8, zorder=6)
-        axM.text(cx_ + 150, cy_ - 150, tag_, fontsize=7.5, ha="center", va="center", zorder=7, fontweight="bold", color="white")
-    cE = np.vstack([polys[t] for t in early])
-    axM.text(cE[:, 0].mean(), cE[:, 1].min() - 40, f"early tiles {min(early)}–{max(early)} (first {max(xs_a[ts.index(t)] for t in early) + 5:.0f} min)",
-             ha="center", va="bottom", fontsize=7, color="#b23a48", zorder=6)
-    from matplotlib.lines import Line2D as _L2
-    axM.legend(handles=[matplotlib.patches.Patch(fc="#f3dfe2", ec="#b23a48", ls="--", lw=0.6, label="early tiles (not stitched)"),
-                        matplotlib.patches.Patch(fc="none", ec="0.55", lw=0.5, label="retained tiles (stitched)"),
-                        _L2([], [], color="#b23a48", lw=1.1, label="tiles recording vessel 1"),
-                        _L2([], [], color="#2b5c8a", lw=1.1, label="tiles recording vessel 2")],
-               loc="upper center", bbox_to_anchor=(0.5, -0.02), fontsize=6.5, frameon=False, handlelength=1.4, borderaxespad=0, ncol=2, columnspacing=1.0)
-    label(GM, "c")
+    def _thumb(ax_, rect, tiles_hl=(), col="k", vessel=None, early_shade=False, band_lines=False):
+        axT = ax_.inset_axes(rect); axT.imshow(mos_s, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.5,
+                                              extent=(0, Wm, Hm, 0), zorder=0)
+        axT.set_xlim(allq[:, 0].min() - padm, allq[:, 0].max() + padm); axT.set_ylim(allq[:, 1].max() + padm, allq[:, 1].min() - padm)
+        axT.set_aspect("equal"); axT.set_xticks([]); axT.set_yticks([]); [s_.set_visible(False) for s_ in axT.spines.values()]
+        if band_lines:
+            for t in band:
+                axT.add_patch(Polygon(polys[t], closed=True, fc="none", ec="0.6", lw=0.25, zorder=1))
+        if early_shade:
+            for t in early:
+                axT.add_patch(Polygon(polys[t], closed=True, fc="#b23a48", ec="#b23a48", alpha=0.35, lw=0.4, zorder=2))
+        for t in tiles_hl:
+            axT.add_patch(Polygon(polys[t], closed=True, fc="none", ec=col, lw=0.8, zorder=3))
+        if vessel is not None:
+            e_ = vessel if G.has_edge(*vessel) else vessel[::-1]; xx_, yy_ = _path(e_)
+            axT.plot(xx_, yy_, color=col, lw=2.0, zorder=4, solid_capstyle="round")
+            axT.add_patch(matplotlib.patches.Circle((np.mean(xx_), np.mean(yy_)), 150, fc="none", ec=col, lw=0.9, zorder=4))
+        return axT
+    aT = _thumb(axA, [0.64, 0.03, 0.34, 0.44], early_shade=True)
+    aT.text(-0.04, 0.82, f"early\ntiles\n{min(early)}–{max(early)}", transform=aT.transAxes, ha="right", va="center", fontsize=6.5, color="#b23a48",
+            linespacing=1.0)
+    _thumb(axX, [0.77, 1.03, 0.23, 0.42], tiles_hl=(EXA, EXB), col="#b23a48", vessel=EXV, early_shade=True)
+    _thumb(axW, [0.77, 1.03, 0.23, 0.42], tiles_hl=rv_t, col="#2b5c8a", vessel=RV)
+
     # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
     figSM = plt.figure(figsize=(4.0, 4.6), facecolor="white"); _fig_main = fig; fig = figSM
     axM = figSM.add_axes([0.03, 0.17, 0.94, 0.8]); allq = np.vstack(list(polys.values())); padm = 20
