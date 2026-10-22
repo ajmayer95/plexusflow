@@ -7,7 +7,7 @@ in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
   a  heart rate f0 of every tile vs acquisition time (first-frame time stamp of the analysed recording); tiles within the band
      (canonical ±21 % of the reference tile) are retained (shaded).  Colour = fraction of the tile's coherent vessels (ρ ≥ 0.1) whose
      flow reverses within the beat (|H1| > |Q̄|): the earliest, slow-beating tiles are a distinct, mostly oscillatory flow state.
-     Inset: most coherent waveform of the first tile vs the reference tile, each scaled to its maximum.  (Same-vessel overlap
+     Inset: one vessel recorded in tile 3 (9 min) and tile 5 (21 min): its flow reverses every beat early, not later.  (Same-vessel overlap
      check of the early pulsatility decrease: supplement, sandbox/pulsatility_vs_time_overlap.py.)
   b  one overlapping tile pair of the core (most shared coherent vessels), split at a seam (dotted) through the overlap: each side
      shows its own tile's vessels coloured by H1 phase (cyclic).  As recorded the colours jump at the seam (arbitrary clock of each
@@ -162,14 +162,18 @@ def main():
     cbA.ax.tick_params(labelsize=6, pad=1); cbA.outline.set_linewidth(0.4); cbA.ax.xaxis.set_label_position("top")
     cbA.set_label("vessels with reversing flow", fontsize=6.5, labelpad=2)
     cbA.ax.set_xticklabels(["0", "50%", "100%"])
-    axW = axA.inset_axes([0.56, 0.10, 0.40, 0.30]); tau_ = np.linspace(0, 2, 300)
-    for t_, col_, lab_ in ((ts[0], "#b23a48", f"tile {ts[0]}"), (ref, "#2b5c8a", f"tile {ref}")):
-        _, a0_, H_ = best[t_]; sg_ = np.sign(a0_)
-        q_ = sg_ * (a0_ + sum((H_[n - 1] * np.exp(2j * np.pi * n * tau_)).real for n in (1, 2, 3)))
-        axW.plot(tau_, q_ / np.max(np.abs(q_)), color=col_, lw=1.0, label=lab_)
-    axW.axhline(0, color="0.4", lw=0.5); axW.set_xticks([0, 1, 2]); axW.set_yticks([0]); axW.tick_params(labelsize=5.5, length=1.5, pad=1)
-    axW.set_xlabel("beats", fontsize=5.5, labelpad=0); axW.set_title("flow (scaled)", fontsize=6, pad=1.5)
-    axW.legend(fontsize=5.5, frameon=False, loc="lower left", handlelength=1.0, borderaxespad=0.1, labelspacing=0.2)
+    # inset: one vessel recorded twice, reversing early and not later (tiles 3 → 5, 12 min apart); 3-harmonic fits, same scale
+    from plexusflow.reconcile.harmonics import phasors as _phz
+    EXV, EXA, EXB = (1206, 1267), 3, 5
+    _e = EXV if G.has_edge(*EXV) else EXV[::-1]; axW = axA.inset_axes([0.56, 0.10, 0.40, 0.30]); _tt = np.linspace(0, 1.5, 400)
+    for t_, col_ in ((EXA, "#b23a48"), (EXB, "#2b5c8a")):
+        _m = next(m for m in G.edges[_e]["measurements_piv"] if int(m["tile_id"]) == t_); _q = np.asarray(_m["Q_t"], float); _q = -_q if np.mean(_q) < 0 else _q
+        _a0, _H = _phz(_q, tf0[t_]); _fit = _a0 + sum((_H[n - 1] * np.exp(2j * np.pi * n * tf0[t_] * _tt)).real for n in (1, 2, 3))
+        axW.plot(_tt, _fit, color=col_, lw=1.1, label=f"{(xs_a[ts.index(t_)]):.0f} min")
+    axW.axhline(0, color="0.3", lw=0.5); axW.set_xlim(0, 1.5); axW.tick_params(labelsize=5.5, length=1.5, pad=1)
+    axW.set_xlabel("time (s)", fontsize=5.5, labelpad=0); axW.set_ylabel("nL/s", fontsize=5.5, labelpad=1)
+    axW.legend(title="same vessel, recorded at", title_fontsize=6, fontsize=5.5, frameon=False, loc="lower center", bbox_to_anchor=(0.5, 0.98),
+               handlelength=1.0, borderaxespad=0, labelspacing=0.2, ncol=2, columnspacing=0.8)
     for sp_ in axW.spines.values():
         sp_.set_linewidth(0.4)
     axA.text(0.97, f_ref * (1 - BAND) + 0.04, "retained for phase reconstruction", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=7, color="0.4")
