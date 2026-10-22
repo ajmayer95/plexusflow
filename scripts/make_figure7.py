@@ -123,7 +123,7 @@ def main():
         [s_.set_visible(False) for s_ in ax.spines.values()]
 
     fig = plt.figure(figsize=(7.5, 8.4), facecolor="white")
-    gs = fig.add_gridspec(2, 1, height_ratios=[1, 2.25], hspace=0.2, left=0.08, right=0.97, top=0.935, bottom=0.075)
+    gs = fig.add_gridspec(2, 1, height_ratios=[1, 2.25], hspace=0.27, left=0.08, right=0.97, top=0.935, bottom=0.075)
     gTop = gs[0].subgridspec(1, 3, width_ratios=[1.2, 1, 1], wspace=0.45); gBot = gs[1].subgridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06)
     gL = gBot[0].subgridspec(2, 1, height_ratios=[3.0, 0.85], hspace=0.2)
     # a heart rate · b same vessel twice · c shape stationarity · d seam · e validation · f organ field
@@ -171,17 +171,39 @@ def main():
     label(GA, "a")
 
     # ---- b: the state changes — one vessel recorded twice (reversing early, not later) and the repeat-vessel population
-    from plexusflow.reconcile.harmonics import phasors as _phz
-    EXV, EXA, EXB = (1206, 1267), 3, 5                     # tiles 3 → 5, 12 min apart; 3-harmonic fits, same flow scale
-    _e = EXV if G.has_edge(*EXV) else EXV[::-1]; axW = fig.add_subplot(GS); _tt = np.linspace(0, 1.5, 400)
-    for t_, col_ in ((EXA, "#b23a48"), (EXB, "#2b5c8a")):
-        _m = next(m for m in G.edges[_e]["measurements_piv"] if int(m["tile_id"]) == t_); _q = np.asarray(_m["Q_t"], float); _q = -_q if np.mean(_q) < 0 else _q
-        _a0, _H = _phz(_q, tf0[t_]); _fit = _a0 + sum((_H[n - 1] * np.exp(2j * np.pi * n * tf0[t_] * _tt)).real for n in (1, 2, 3))
-        axW.plot(_tt, _fit, color=col_, lw=1.4, label=f"{(xs_a[ts.index(t_)]):.0f} min, {tf0[t_]:.1f} Hz")
-    axW.axhline(0, color="0.3", lw=0.5); axW.set_xlim(0, 1.5); axW.set_xticks([0, 0.5, 1, 1.5])
-    axW.set_xlabel("time (s)"); axW.set_ylabel("flow (nL/s)", labelpad=1); axW.spines[["top", "right"]].set_visible(False)
-    axW.legend(title="same vessel, recorded at", title_fontsize=7, fontsize=7, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
-               handlelength=1.2, borderaxespad=0, labelspacing=0.2, alignment="left")
+    # one vessel recorded in four retained tiles (best-measured repeat vessel, ρ ≥ 0.5 in all): waveform shape (Q − Q̄)/|H1| over one beat,
+    # each recording shifted to its own H1 phase (shape only); right, its (|H2|/|H1|, Θ21) beside an early-tile vessel (tiles 3, 5)
+    gSs = GS.subgridspec(1, 2, width_ratios=[1.55, 1], wspace=0.55)
+    RV = (49550, 49649); RVe = RV if RV in mall else RV[::-1]; xr_ = mall[RVe]
+    rv_t = sorted([t_ for t_, y_ in xr_.items() if t_ in band and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
+    axW = fig.add_subplot(gSs[0]); tau_w = np.linspace(0, 1, 300); cRV = plt.cm.viridis(np.linspace(0.05, 0.8, len(rv_t)))
+    for t_, c_ in zip(rv_t, cRV):
+        H_ = xr_[t_]["H"] * np.sign(xr_[t_]["a0"]); u_ = np.exp(-1j * np.angle(H_[0]))
+        w_ = sum((H_[n - 1] * u_ ** n * np.exp(2j * np.pi * n * tau_w)).real for n in (1, 2, 3)) / abs(H_[0])
+        axW.plot(tau_w, w_, color=c_, lw=1.2, label=f"{xs_a[ts.index(t_)]:.0f} min")
+    axW.axhline(0, color="0.6", lw=0.5); axW.set_xlim(0, 1); axW.set_xticks([0, 0.5, 1])
+    axW.set_xlabel("cardiac phase $t/T$"); axW.set_ylabel(r"$(Q-\bar Q)\,/\,|H_1|$", labelpad=1); axW.spines[["top", "right"]].set_visible(False)
+    axW.legend(title="same vessel, 4 tiles", title_fontsize=7, fontsize=6.5, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0),
+               handlelength=1.0, borderaxespad=0, labelspacing=0.15, ncol=2, columnspacing=0.8, alignment="left")
+    axH = fig.add_subplot(gSs[1])
+    def _sh(y_):
+        H_ = y_["H"]; return abs(H_[1]) / abs(H_[0]), np.degrees(np.angle(H_[1] * np.conj(H_[0]) ** 2 * np.sign(y_["a0"])))   # Θ21 in the flow-direction frame (Q → −Q shifts it by π)
+    def _dev(pts_):                       # each recording relative to its own vessel's mean: ratio of |H2|/|H1|, Θ21 difference
+        r_ = np.array([q[0] for q in pts_]); z_ = np.exp(1j * np.radians([q[1] for q in pts_]))
+        return r_ / np.exp(np.mean(np.log(r_))), np.degrees(np.angle(z_ * np.conj(z_.sum())))
+    dr_, dt_ = _dev([_sh(xr_[t_]) for t_ in rv_t])
+    axH.scatter(dr_, dt_, s=22, c=cRV, edgecolors="0.2", linewidths=0.4, zorder=3)
+    EV = (1206, 1267); EVe = EV if EV in mall else EV[::-1]; er_, et_ = _dev([_sh(mall[EVe][t_]) for t_ in (3, 5)])
+    axH.plot(er_, et_, "o", ms=4.5, mfc="white", mec="#b23a48", mew=1.0, zorder=3); axH.plot(er_, et_, color="#b23a48", lw=0.5, ls=":", zorder=2)
+    axH.text(0.03, 0.98, "early-tile vessel\n(tiles 3, 5)", transform=axH.transAxes, ha="left", va="top", fontsize=6.3, color="#b23a48", linespacing=1.0)
+    axH.axhline(0, color="0.8", lw=0.5, zorder=0); axH.axvline(1, color="0.8", lw=0.5, zorder=0)
+    axH.set_xscale("log"); axH.set_xlim(0.75, 1.33); axH.set_xticks([0.8, 1, 1.25]); axH.set_xticklabels(["0.8", "1", "1.25"])
+    axH.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter()); axH.set_ylim(-50, 50); axH.set_yticks([-45, 0, 45])
+    axH.set_xlabel(r"$|H_2|/|H_1|$" + "\n÷ vessel mean", fontsize=7.5, labelpad=1)
+    axH.set_ylabel(r"$\Theta_{21}$ − vessel mean (deg)", labelpad=0, fontsize=7.5)
+    axH.tick_params(labelsize=7); axH.spines[["top", "right"]].set_visible(False)
+    log(f"  (b) repeat vessel {RV}: tiles {rv_t}, |H2|/|H1| " + ", ".join(f"{_sh(xr_[t_])[0]:.2f}" for t_ in rv_t)
+        + "; Θ21 " + ", ".join(f"{_sh(xr_[t_])[1]:.0f}°" for t_ in rv_t))
     # population: every vessel recorded twice in the same flow direction — pulsatility later / earlier, by when the earlier
     # recording was made (tile-pair medians, 95 % tile-pair bootstrap); and the reversal asymmetry (ρ ≥ 0.2)
     tmin_ = {t: (tacq[t] - min(tacq.values())) / 60 for t in tacq}; RP = []; nlost = ngain = 0; tau_ = np.linspace(0, 1, 200)
@@ -231,11 +253,11 @@ def main():
         log(f"  (c) repeat vessels, both in {SLAB[g_]}: n={len(SP[g_])}, median |ΔΘ21| {np.median(SP[g_][:, 0]):.0f}°, pulsatility ratio "
             f"{np.exp(np.median(SP[g_][:, 1])):.2f}×, |H2|/|H1| ratio {np.exp(np.median(SP[g_][:, 2])):.2f}×")
     gTs = GT.subgridspec(2, 1, hspace=0.9)
-    for k_, (xl_, conv, xlim_) in enumerate(((r"waveform-shape change $|\Delta\Theta_{21}|$ (deg)", lambda v: v, (0, 180)),
-                                             ("pulsatility ratio between recordings", np.exp, (1, 5)))):
+    for k_, (col_, xl_, conv, xlim_) in enumerate(((0, r"change in $\Theta_{21}$ between recordings (deg)", lambda v: v, (0, 180)),
+                                                   (2, r"ratio of $|H_2|/|H_1|$ between recordings", np.exp, (1, 3)))):
         ax = fig.add_subplot(gTs[k_])
         for g_ in ("E", "B"):
-            v_ = np.sort(conv(SP[g_][:, k_])); ax.step(v_, np.arange(1, len(v_) + 1) / len(v_), where="post", color=SCOL[g_], lw=1.3,
+            v_ = np.sort(conv(SP[g_][:, col_])); ax.step(v_, np.arange(1, len(v_) + 1) / len(v_), where="post", color=SCOL[g_], lw=1.3,
                                                      label=f"{SLAB[g_]} ({len(v_)})")
             m_ = np.median(v_); ax.plot([m_], [0.5], "o", ms=3, color=SCOL[g_], zorder=4)
             ax.text(m_, 0.5, (f"  {m_:.0f}°" if k_ == 0 else f"  {m_:.2f}×"), color=SCOL[g_], fontsize=7, ha="left",
@@ -247,7 +269,7 @@ def main():
             ax.legend(title="repeat vessel, both recordings in", title_fontsize=7, fontsize=7, frameon=False, loc="lower left",
                       bbox_to_anchor=(-0.02, 1.0), handlelength=1.2, borderaxespad=0, alignment="left")
         else:
-            ax.set_xscale("log"); ax.set_xticks([1, 2, 5]); ax.set_xticklabels(["1×", "2×", "5×"])
+            ax.set_xscale("log"); ax.set_xticks([1, 1.5, 2, 3]); ax.set_xticklabels(["1×", "1.5×", "2×", "3×"])
             ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
     fig.text(GT.get_position(fig).x0 - 0.04, GT.get_position(fig).y0 + 0.5 * GT.get_position(fig).height, "cumulative fraction",
              rotation=90, ha="center", va="center", fontsize=8)
