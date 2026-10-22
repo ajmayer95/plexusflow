@@ -70,7 +70,7 @@ def tile_polygons(stage):
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(); ap.add_argument("--f0-band", type=float, default=F0_BAND, help="heart-rate band (fraction of the reference tile's)")
+    ap = argparse.ArgumentParser(); ap.add_argument("--f0-band", type=float, default=0.21, help="heart-rate band (fraction of the reference tile's); canonical 0.21 (tiles 7-9 included)")
     ap.add_argument("--tag", default="", help="output name suffix, e.g. _band21"); args = ap.parse_args(); BAND = args.f0_band
     plt.rcParams.update({"font.family": "Arial", "mathtext.fontset": "custom", "mathtext.rm": "Arial", "mathtext.it": "Arial:italic",
                          "mathtext.bf": "Arial:bold", "font.size": 8, "axes.labelsize": 9, "xtick.labelsize": 8, "ytick.labelsize": 8,
