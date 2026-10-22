@@ -346,7 +346,7 @@ def main():
                     lab_[blob_] = np.bincount(lab_[ring_], minlength=3).argmax() if ring_.any() else -1
     mT, mL, mS = [_gf((lab_ == k).astype(float), 1.0) for k in range(3)]
     axMp = fig.add_subplot(GMAP)
-    axMp.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.45, zorder=0)
+    axMp.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.25, zorder=0)
     plt.rcParams["hatch.linewidth"] = 0.5; plt.rcParams["hatch.color"] = "0.45"
     axMp.contourf(gxs, gys, mS, levels=[0.5, 2], colors=[RCOL["S"]], alpha=0.22, zorder=1)
     axMp.contourf(gxs, gys, mL, levels=[0.5, 2], colors=[RCOL["L"]], alpha=0.18, zorder=1)
@@ -652,9 +652,10 @@ def main():
     log(f"  (c) weakly constrained tiles (link < 5 % of median, {L_thr:.2f}): {sorted(weak_t)}")
     # low-pulsatility region from Fig 7 (smoothed union of the weakly linked tiles ∩ organ, minus stitchable coverage)
     plt.rcParams["hatch.color"] = "0.45"; plt.rcParams["hatch.linewidth"] = 0.5
-    axC.contourf(gxs, gys, mL, levels=[0.5, 2], colors=["white"], alpha=0.6, zorder=4.4)
-    axC.contourf(gxs, gys, mL, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=4.5)
-    axC.contour(gxs, gys, mL, levels=[0.5], colors=["0.45"], linewidths=0.7, zorder=4.6)
+    mX = _gf(((lab_ == 0) | (lab_ == 1)).astype(float), 1.0)           # everything Fig 7 excludes (transient + low pulsatility), one mask
+    axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["white"], alpha=0.6, zorder=4.4)
+    axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=4.5)
+    axC.contour(gxs, gys, mX, levels=[0.5], colors=["0.5"], linewidths=0.6, zorder=4.6)
     for t in band:
         if t not in shown_t and t not in weak_t:
             axC.plot(*cen[t], "o", ms=3.5, mfc="white", mec="0.55", mew=0.7, zorder=5)
@@ -669,11 +670,11 @@ def main():
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="second stitching component"),
-                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="low pulsatility (Fig. 7): offset not constrained"),
-                        Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile phase undetermined")],
+                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="excluded from reconstruction (Fig. 7)"),
+                        Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile offset undetermined")],
                loc="upper left", bbox_to_anchor=(-0.04, 1.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
-    axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.8, ls="--", zorder=5))
-    axC.add_patch(Polygon(polys[tb], closed=True, fc="none", ec="#D55E00", lw=0.8, ls="--", zorder=5))
+    axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.6, ls="--", alpha=0.45, zorder=5))   # location of a
+    axC.add_patch(Polygon(polys[tb], closed=True, fc="none", ec="#D55E00", lw=0.6, ls="--", alpha=0.45, zorder=5))
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
     cax = axC.inset_axes([0.2, -0.05, 0.6, 0.028]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=LEV[::3], extend="min")
     cb.set_label("phase lag of the fundamental behind DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
