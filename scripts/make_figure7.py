@@ -166,18 +166,18 @@ def main():
     else:
         xs_a = np.array(ts, float); xlab = "acquisition order (tile)"
     xref = xs_a[ts.index(ref)]
-    # regimes per tile: transient = heart rate below the band (the first recordings); low pulsatility = band tiles linked to the
-    # rest by < 5 % of the median link weight (Σ ρ_a ρ_b over shared vessels); stitchable = the other band tiles
-    early = {t for t in ts if t not in band and tf0[t] < f_ref * (1 - BAND)}
-    Lt7 = {t: 0.0 for t in band}
-    for (a_, b_), w_ in link.items():
-        Lt7[a_] += w_; Lt7[b_] += w_
-    L_thr7 = 0.05 * np.median(list(Lt7.values())); lowp = {t for t in band if Lt7[t] < L_thr7}; stitch = set(band) - lowp
-    RCOL = {"T": "#b23a48", "L": "#8a8a8a", "S": "#2b5c8a"}
-    RLAB = {"T": "transient (early)", "L": "low pulsatility", "S": "stitchable"}
-    reg = lambda t: "T" if t in early else ("L" if t in lowp else ("S" if t in stitch else None))
-    log(f"  regimes: transient {sorted(early)}; low pulsatility {sorted(lowp)}; stitchable {len(stitch)} tiles")
+    # regimes per tile, from measurement properties only (no stitching yet): transient = heart rate below the band (the first
+    # recordings); low pulsatility = band tiles with fewer than N_MEAS vessels whose H1 phase is measurable (coherence ρ ≥ 0.2);
+    # retained = the other band tiles.  (Identical split to the synchronization link weight < 5 % of median: low tiles have ≤ 11
+    # phase-measurable vessels, all others ≥ 17.)
     Fall = build_ac_field(G, dc, n_boot=0, f0_band=10.0); mall = Fall["_meas"]
+    early = {t for t in ts if t not in band and tf0[t] < f_ref * (1 - BAND)}; N_MEAS = 15
+    nmeas = {t: sum(1 for x in mall.values() if t in x and np.isfinite(x[t]["rho"]) and x[t]["rho"] >= 0.2) for t in ts}
+    lowp = {t for t in band if nmeas[t] < N_MEAS}; stitch = set(band) - lowp
+    RCOL = {"T": "#b23a48", "L": "#8a8a8a", "S": "#2b5c8a"}
+    RLAB = {"T": "transient (early)", "L": "low pulsatility", "S": "retained"}
+    reg = lambda t: "T" if t in early else ("L" if t in lowp else ("S" if t in stitch else None))
+    log(f"  regimes: transient {sorted(early)}; low pulsatility {sorted(lowp)}; retained {len(stitch)} tiles")
 
     # ---- b: heart rate over the acquisition, coloured by regime
     axA.axhspan(f_ref * (1 - BAND), f_ref * (1 + BAND), color="#eef1f5", zorder=0, lw=0)
@@ -193,21 +193,22 @@ def main():
     axA.legend(loc="lower right", fontsize=6.5, frameon=False, handletextpad=0.1, borderaxespad=0.1, markerscale=1.1)
     label(GA, "b")
 
-    # ---- c: why the low-pulsatility tiles cannot be stitched — link to the other tiles vs pulsatile amplitude
+    # ---- c: where the pulsation is too weak to measure a phase — per tile, vessels with measurable H1 phase vs pulsatile amplitude
     from scipy.stats import spearmanr as _spr
-    h1t7 = {t: np.median([abs(x[t]["H"][0]) for x in meas.values() if t in x and np.isfinite(x[t]["rho"])]) for t in band}
-    axK = fig.add_subplot(GK7); tl_k = sorted(band)
-    for k_ in ("S", "L"):
+    h1t7 = {t: np.median([abs(x[t]["H"][0]) for x in mall.values() if t in x and np.isfinite(x[t]["rho"])]) for t in ts}
+    axK = fig.add_subplot(GK7); tl_k = [t for t in ts if reg(t) is not None]
+    for k_ in ("S", "L", "T"):
         m_ = [t for t in tl_k if reg(t) == k_]
-        axK.scatter([h1t7[t] for t in m_], [max(Lt7[t], 0.05) for t in m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3)
-    axK.axhline(L_thr7, color="0.6", lw=0.6, ls=":"); axK.set_xscale("log"); axK.set_yscale("log")
-    axK.text(0.99, L_thr7 * 1.3, "stitching limit", transform=axK.get_yaxis_transform(), ha="right", va="bottom", fontsize=6.5, color="0.45")
+        axK.scatter([h1t7[t] for t in m_], [max(nmeas[t], 0.6) for t in m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3)
+    axK.axhline(N_MEAS, color="0.6", lw=0.6, ls=":"); axK.set_xscale("log"); axK.set_yscale("log"); axK.set_ylim(0.45, 400)
+    axK.set_yticks([0.6, 1, 10, 100]); axK.set_yticklabels(["0", "1", "10", "100"])
+    axK.text(0.99, N_MEAS * 1.15, f"{N_MEAS} vessels", transform=axK.get_yaxis_transform(), ha="right", va="bottom", fontsize=6.5, color="0.45")
     axK.set_xlabel("tile pulsatile amplitude, median $|H_1|$ (nL/s)", fontsize=8, labelpad=1)
-    axK.set_ylabel("link to other tiles\n" + r"$\Sigma\,\rho_a\rho_b$", fontsize=8, labelpad=1); axK.tick_params(labelsize=7)
+    axK.set_ylabel("vessels with measurable\nH1 phase (ρ ≥ 0.2)", fontsize=8, labelpad=1); axK.tick_params(labelsize=7)
     axK.spines[["top", "right"]].set_visible(False)
-    rs7 = _spr([h1t7[t] for t in tl_k], [Lt7[t] for t in tl_k])[0]
+    rs7 = _spr([h1t7[t] for t in tl_k], [nmeas[t] for t in tl_k])[0]
     axK.text(0.02, 0.97, f"Spearman {rs7:+.2f}", transform=axK.transAxes, fontsize=6.5, va="top", color="0.3")
-    log(f"  (c) link vs median |H1|: Spearman {rs7:+.2f}")
+    log(f"  (c) phase-measurable vessels vs median |H1| (all tiles): Spearman {rs7:+.2f}")
     label(GK7, "c")
 
     # waveform-shape spectrum of one recording, mean-normalised and clock-free: s_n = H_n e^{−inφ1} / Q̄ (n = 1..3, flow-direction frame).
@@ -229,7 +230,7 @@ def main():
                     continue
                 d_ = _D(ya, yb); SP[g_].append(d_); vD[g_].setdefault(e_, []).append(d_)
     SP = {k: np.array(v) for k, v in SP.items()}; SCOL = {"E": RCOL["T"], "B": RCOL["S"]}
-    SLAB = {"E": "transient", "B": "stitchable"}
+    SLAB = {"E": "transient", "B": "retained"}
     for g_ in ("E", "B"):
         log(f"  (e) repeat-vessel shape difference D, both {SLAB[g_]}: {len(SP[g_])} pairs / {len(vD[g_])} vessels, median {np.median(SP[g_]):.2f}, "
             f"90th {np.percentile(SP[g_], 90):.2f}")
@@ -261,7 +262,7 @@ def main():
     LPe = LPV if LPV in mall else LPV[::-1]; yL_ = mall[LPe][LPT]
     ttl_ = [f"1  transient: same vessel 12 min apart\nD = {dEX:.2f}",
             f"2  low pulsatility: small $|H_1|$,\nphase poorly constrained (ρ = {yL_['rho']:.2f})",
-            f"3  stitchable: same vessel, {len(rv_t)} tiles\nD = {min(dRV):.2f}–{max(dRV):.2f}"]
+            f"3  retained: same vessel, {len(rv_t)} tiles\nD = {min(dRV):.2f}–{max(dRV):.2f}"]
     for k_, (ax_, cl_) in enumerate(zip(axs_d, ("T", "L", "S"))):
         ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2])
         ax_.set_ylim(-1.0, 2.6); ax_.set_xlabel("beats (H1-aligned)", fontsize=7.5, labelpad=1); ax_.tick_params(labelsize=7)
@@ -351,8 +352,8 @@ def main():
     axMp.set_xlim(allq[:, 0].min() - padm, allq[:, 0].max() + padm); axMp.set_ylim(allq[:, 1].max() + padm, allq[:, 1].min() - padm)
     axMp.set_aspect("equal"); axMp.set_xticks([]); axMp.set_yticks([]); [s_.set_visible(False) for s_ in axMp.spines.values()]
     axMp.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.35), ec=RCOL["T"], label=f"transient early recordings (tiles {min(early)}–{max(early)}, first {max(xs_a[ts.index(t)] for t in early) + 4:.0f} min)"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["L"], 0.18), ec=RCOL["L"], hatch="/////", label="low-pulsatility tiles (phase not constrained)"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.22), ec=RCOL["S"], label="stitchable regime")],
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["L"], 0.18), ec=RCOL["L"], hatch="/////", label="low pulsatility (too few vessels with measurable phase)"),
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.22), ec=RCOL["S"], label="retained (steady state, phase measurable)")],
                 loc="upper center", bbox_to_anchor=(0.5, -0.0), fontsize=6.8, frameon=False, handlelength=1.6, borderaxespad=0, ncol=1)
     label(GMAP, "a")
 
@@ -654,7 +655,7 @@ def main():
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="second stitching component"),
-                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="offset not constrained"),
+                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="low pulsatility (Fig. 7): offset not constrained"),
                         Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile phase undetermined")],
                loc="upper left", bbox_to_anchor=(-0.04, 1.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
     axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.8, ls="--", zorder=5))
