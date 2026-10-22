@@ -131,8 +131,8 @@ def main():
     figR = plt.figure(figsize=(7.5, 6.4), facecolor="white")
     gR = figR.add_gridspec(2, 1, height_ratios=[1.45, 1], hspace=0.36, left=0.075, right=0.975, top=0.94, bottom=0.08)
     gRt = gR[0].subgridspec(1, 2, width_ratios=[1, 1.08], wspace=0.22); gRr = gRt[1].subgridspec(2, 1, hspace=0.62)
-    gRb = gR[1].subgridspec(1, 4, width_ratios=[1, 1, 1, 1.2], wspace=0.42)
-    GMAP, GA, GK7, GX, GT = gRt[0], gRr[0], gRr[1], [gRb[0], gRb[1], gRb[2]], gRb[3]
+    gRb = gR[1].subgridspec(1, 2, width_ratios=[3, 1.35], wspace=0.2); gRd = gRb[0].subgridspec(1, 3, wspace=0.1)
+    GMAP, GA, GK7, GX, GT = gRt[0], gRr[0], gRr[1], [gRd[0], gRd[1], gRd[2]], gRb[1]
     figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
     gS2 = figS.add_gridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06, left=0.08, right=0.97, top=0.93, bottom=0.1)
     gL = gS2[0].subgridspec(2, 1, height_ratios=[3.0, 0.85], hspace=0.2); GB, GD, GC = gL[0], gL[1], gS2[1]
@@ -175,7 +175,7 @@ def main():
     nmeas = {t: sum(1 for x in mall.values() if t in x and np.isfinite(x[t]["rho"]) and x[t]["rho"] >= 0.2) for t in ts}
     lowp = {t for t in band if nmeas[t] < N_MEAS}; stitch = set(band) - lowp
     RCOL = {"T": "#b23a48", "L": "#8a8a8a", "S": "#2b5c8a"}
-    RLAB = {"T": "transient (early)", "L": "low pulsatility", "S": "retained"}
+    RLAB = {"T": "transient", "L": "low pulsatility", "S": "retained"}
     reg = lambda t: "T" if t in early else ("L" if t in lowp else ("S" if t in stitch else None))
     log(f"  regimes: transient {sorted(early)}; low pulsatility {sorted(lowp)}; retained {len(stitch)} tiles")
 
@@ -185,12 +185,13 @@ def main():
         m_ = np.array([reg(t) == k_ for t in ts])
         axA.scatter(xs_a[m_], f[m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3, label=RLAB[k_])
     axA.plot(xref, f_ref, "s", ms=6, mfc="none", mec="black", mew=0.9, zorder=4)
-    axA.annotate("reference tile", xy=(xref, f_ref), xytext=(xref + 0.08 * xs_a.max(), f_ref - 0.45), fontsize=6.5, color="0.3", ha="left",
+    axA.annotate("reference tile", xy=(xref, f_ref), xytext=(xref + 0.08 * xs_a.max(), f_ref - 0.45), fontsize=6, color="0.5", ha="left",
                  arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
     axA.text(0.99, f_ref * (1 - BAND) + 0.03, "heart-rate band", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=6.5, color="0.45")
-    axA.set_xlabel(xlab, fontsize=8, labelpad=1); axA.set_ylabel("heart rate $f_0$ (Hz)", fontsize=8); axA.tick_params(labelsize=7)
+    axA.set_xlabel(xlab, fontsize=7.5, labelpad=1); axA.set_ylabel("heart rate $f_0$ (Hz)", fontsize=7.5); axA.tick_params(labelsize=7)
     axA.spines[["top", "right"]].set_visible(False)
-    axA.legend(loc="lower right", fontsize=6.5, frameon=False, handletextpad=0.1, borderaxespad=0.1, markerscale=1.1)
+    axA.legend(loc="upper left", bbox_to_anchor=(0.0, 1.02), fontsize=6.5, frameon=False, handletextpad=0.1, borderaxespad=0.1, markerscale=1.1,
+               labelspacing=0.2)
     label(GA, "b")
 
     # ---- c: where the pulsation is too weak to measure a phase — per tile, vessels with measurable H1 phase vs pulsatile amplitude
@@ -200,14 +201,14 @@ def main():
     for k_ in ("S", "L", "T"):
         m_ = [t for t in tl_k if reg(t) == k_]
         axK.scatter([h1t7[t] for t in m_], [max(nmeas[t], 0.6) for t in m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3)
-    axK.axhline(N_MEAS, color="0.6", lw=0.6, ls=":"); axK.set_xscale("log"); axK.set_yscale("log"); axK.set_ylim(0.45, 400)
+    axK.axhline(N_MEAS, color="0.6", lw=0.6, ls=":"); axK.set_xscale("log"); axK.set_yscale("log"); axK.set_ylim(0.45, 320)
     axK.set_yticks([0.6, 1, 10, 100]); axK.set_yticklabels(["0", "1", "10", "100"])
-    axK.text(0.99, N_MEAS * 1.15, f"{N_MEAS} vessels", transform=axK.get_yaxis_transform(), ha="right", va="bottom", fontsize=6.5, color="0.45")
-    axK.set_xlabel("tile pulsatile amplitude, median $|H_1|$ (nL/s)", fontsize=8, labelpad=1)
-    axK.set_ylabel("vessels with measurable\nH1 phase (ρ ≥ 0.2)", fontsize=8, labelpad=1); axK.tick_params(labelsize=7)
+    axK.text(0.99, N_MEAS * 1.15, "threshold", transform=axK.get_yaxis_transform(), ha="right", va="bottom", fontsize=6.5, color="0.45")
+    axK.set_xlabel("tile pulsatile amplitude, median $|H_1|$ (nL/s)", fontsize=7.5, labelpad=1)
+    axK.set_ylabel("vessels with\nmeasurable H1 phase", fontsize=7.5, labelpad=1); axK.tick_params(labelsize=7)
     axK.spines[["top", "right"]].set_visible(False)
     rs7 = _spr([h1t7[t] for t in tl_k], [nmeas[t] for t in tl_k])[0]
-    axK.text(0.02, 0.97, f"Spearman {rs7:+.2f}", transform=axK.transAxes, fontsize=6.5, va="top", color="0.3")
+    axK.text(0.02, 0.97, f"Spearman $r_s$ = {rs7:.2f}", transform=axK.transAxes, fontsize=6.5, va="top", color="0.3")
     log(f"  (c) phase-measurable vessels vs median |H1| (all tiles): Spearman {rs7:+.2f}")
     label(GK7, "c")
 
@@ -248,7 +249,7 @@ def main():
         a0_, H_ = _phz(q_, tf0[t_]); tt_ = np.arange(len(q_)) / 250.0; tau_ = tf0[t_] * tt_ + np.angle(H_[0]) / (2 * np.pi)
         tau_ = tau_ - np.floor(tau_[0]); sel_ = (tau_ >= 0) & (tau_ <= 2); tg_ = np.linspace(0, 2, 300)
         fit_ = a0_ + sum((abs(H_[n - 1]) * np.exp(1j * (np.angle(H_[n - 1]) - n * np.angle(H_[0]))) * np.exp(2j * np.pi * n * tg_)).real for n in (1, 2, 3))
-        ax_.plot(tau_[sel_], q_[sel_] / a0_, color=col_, lw=0.3, alpha=0.18, zorder=2)
+        ax_.plot(tau_[sel_], q_[sel_] / a0_, color=col_, lw=0.3, alpha=0.1, zorder=2)
         ax_.plot(tg_, fit_ / a0_, color=col_, lw=1.3, zorder=3, label=lab_)
         return a0_, H_
     axs_d = [fig.add_subplot(g_) for g_ in GX]
@@ -260,14 +261,15 @@ def main():
         _trace(axs_d[2], RV, t_, c_, f"{xs_a[ts.index(t_)]:.0f} min")
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]; dEX = _D(mall[EXe][EXA], mall[EXe][EXB])
     LPe = LPV if LPV in mall else LPV[::-1]; yL_ = mall[LPe][LPT]
-    ttl_ = [f"1  transient: same vessel 12 min apart\nD = {dEX:.2f}",
-            f"2  low pulsatility: small $|H_1|$,\nphase poorly constrained (ρ = {yL_['rho']:.2f})",
-            f"3  retained: same vessel, {len(rv_t)} tiles\nD = {min(dRV):.2f}–{max(dRV):.2f}"]
+    ttl_ = [("1  transient", f"12 min apart · D = {dEX:.2f}"),
+            ("2  low pulsatility", f"small $|H_1|$ · ρ = {yL_['rho']:.2f}"),
+            ("3  retained", f"{len(rv_t)} recordings · D = {min(dRV):.2f}–{max(dRV):.2f}")]
     for k_, (ax_, cl_) in enumerate(zip(axs_d, ("T", "L", "S"))):
-        ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2])
-        ax_.set_ylim(-1.0, 2.6); ax_.set_xlabel("beats (H1-aligned)", fontsize=7.5, labelpad=1); ax_.tick_params(labelsize=7)
+        ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2] if k_ == 2 else [0, 1])
+        ax_.set_ylim(-1.0, 2.6); ax_.set_xlabel("beats (H1-aligned)" if k_ == 1 else "", fontsize=7.5, labelpad=1); ax_.tick_params(labelsize=7)
         ax_.spines[["top", "right"]].set_visible(False)
-        ax_.set_title(ttl_[k_], fontsize=6.8, loc="left", color=RCOL[cl_], pad=3, linespacing=1.15)
+        ax_.text(0.0, 1.13, ttl_[k_][0], transform=ax_.transAxes, fontsize=7.5, fontweight="bold", color=RCOL[cl_], va="bottom")
+        ax_.text(0.0, 1.02, ttl_[k_][1], transform=ax_.transAxes, fontsize=6.2, color="0.35", va="bottom")
         if k_ == 0:
             ax_.set_ylabel(r"$Q\,/\,\bar Q$", fontsize=8, labelpad=1)
         else:
@@ -283,6 +285,7 @@ def main():
         v_ = np.sort(SP[g_]); ecdf_[g_] = v_
         axD.step(v_, np.arange(1, len(v_) + 1) / len(v_), where="post", color=SCOL[g_], lw=1.3, label=f"{SLAB[g_]} ({len(v_)})")
         m_ = np.median(v_); axD.plot([m_], [0.5], "o", ms=3, color=SCOL[g_], zorder=4)
+        axD.plot([m_, m_], [0, 0.5], color=SCOL[g_], lw=0.6, ls=":", zorder=2)
         axD.text(m_, 0.5, f"  {m_:.2f}", color=SCOL[g_], fontsize=7, ha="left", va="top" if g_ == "E" else "bottom", fontweight="bold")
     _on = lambda g_, x_: np.searchsorted(ecdf_[g_], x_, side="right") / len(ecdf_[g_])
     for g_, xs_, tag_ in (("E", [dEX], "1"), ("B", dRV, "3")):
@@ -290,8 +293,8 @@ def main():
             axD.plot(x_, _on(g_, x_), "o", ms=3.5, mfc="white", mec=SCOL[g_], mew=0.9, zorder=5)
         xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + (0.08 if g_ == "E" else -0.08), _on(g_, xm_) + 0.1),
                                            fontsize=7, fontweight="bold", color=SCOL[g_], ha="center", arrowprops=dict(arrowstyle="-", lw=0.5, color=SCOL[g_]))
-    axD.set_xlim(0, 1.2); axD.set_ylim(0, 1.02); axD.set_yticks([0, 0.5, 1]); axD.spines[["top", "right"]].set_visible(False)
-    axD.set_xlabel("waveform-shape difference $D$\nbetween recordings of a vessel", fontsize=7.5, labelpad=1)
+    axD.set_xlim(0, 1.1); axD.set_ylim(0, 1.02); axD.set_yticks([0, 0.5, 1]); axD.spines[["top", "right"]].set_visible(False)
+    axD.set_xlabel("waveform-shape difference $D$", fontsize=7.5, labelpad=1)
     axD.set_ylabel("cumulative fraction", fontsize=8, labelpad=1); axD.tick_params(labelsize=7)
     axD.legend(title="repeat vessel,\nboth recordings", title_fontsize=6.3, fontsize=6.3, frameon=False, loc="lower right", handlelength=1.0,
                borderaxespad=0.0, labelspacing=0.15, alignment="left", bbox_to_anchor=(1.02, 0.0))
@@ -340,21 +343,23 @@ def main():
     axMp.contourf(gxs, gys, mL, levels=[0.5, 2], colors=[RCOL["L"]], alpha=0.18, zorder=1)
     axMp.contourf(gxs, gys, mL, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=1)
     axMp.contourf(gxs, gys, mT, levels=[0.5, 2], colors=[RCOL["T"]], alpha=0.3, zorder=1)
-    axMp.contour(gxs, gys, _gf((lab_ >= 0).astype(float), 1.0), levels=[0.5], colors=["0.35"], linewidths=0.8, zorder=2)   # organ outline
+    axMp.contour(gxs, gys, _gf((lab_ >= 0).astype(float), 1.0), levels=[0.5], colors=["0.3"], linewidths=1.0, zorder=2)   # organ outline
     for m_ in (mT, mL):                                                                                    # shared internal boundaries
-        axMp.contour(gxs, gys, m_, levels=[0.5], colors=["0.2"], linewidths=0.7, zorder=2)
+        axMp.contour(gxs, gys, m_, levels=[0.5], colors=["0.15"], linewidths=1.0, zorder=2)
     for E_, tag_, k_, off_ in ((EXV, "1", "T", (-330, -260)), (LPV, "2", "L", (330, 120)), (RV, "3", "S", (330, -260))):
         e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_)
         axMp.plot(xx_, yy_, color="black", lw=2.2, zorder=5, solid_capstyle="round")
         axMp.annotate("", xy=(cx_, cy_), xytext=(cx_ + off_[0], cy_ + off_[1]), arrowprops=dict(arrowstyle="-", lw=0.7, color="black"), zorder=6)
-        axMp.plot(cx_ + off_[0], cy_ + off_[1], "o", ms=10, mfc=RCOL[k_], mec="white", mew=0.8, zorder=7)
-        axMp.text(cx_ + off_[0], cy_ + off_[1], tag_, fontsize=7.5, ha="center", va="center", zorder=8, fontweight="bold", color="white")
-    axMp.set_xlim(allq[:, 0].min() - padm, allq[:, 0].max() + padm); axMp.set_ylim(allq[:, 1].max() + padm, allq[:, 1].min() - padm)
+        axMp.plot(cx_ + off_[0], cy_ + off_[1], "o", ms=8, mfc=RCOL[k_], mec="white", mew=0.7, zorder=7)
+        axMp.text(cx_ + off_[0], cy_ + off_[1], tag_, fontsize=6.5, ha="center", va="center", zorder=8, fontweight="bold", color="white")
+    oy_, ox_ = np.nonzero(lab_ >= 0); pad2 = 60
+    axMp.set_xlim(gxs[ox_.min()] - pad2, gxs[ox_.max()] + pad2); axMp.set_ylim(gys[oy_.max()] + pad2, gys[oy_.min()] - pad2)
     axMp.set_aspect("equal"); axMp.set_xticks([]); axMp.set_yticks([]); [s_.set_visible(False) for s_ in axMp.spines.values()]
-    axMp.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.35), ec=RCOL["T"], label=f"transient early recordings (tiles {min(early)}–{max(early)}, first {max(xs_a[ts.index(t)] for t in early) + 4:.0f} min)"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["L"], 0.18), ec=RCOL["L"], hatch="/////", label="low pulsatility (too few vessels with measurable phase)"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.22), ec=RCOL["S"], label="retained (steady state, phase measurable)")],
-                loc="upper center", bbox_to_anchor=(0.5, -0.0), fontsize=6.8, frameon=False, handlelength=1.6, borderaxespad=0, ncol=1)
+    axMp.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.35), ec=RCOL["T"], label="transient early recordings"),
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["L"], 0.18), ec=RCOL["L"], hatch="/////", label="low pulsatility"),
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.22), ec=RCOL["S"], label="retained")],
+                loc="upper center", bbox_to_anchor=(0.5, 0.0), fontsize=6.5, frameon=False, handlelength=1.4, borderaxespad=0, ncol=3,
+                columnspacing=1.0, handletextpad=0.4)
     label(GMAP, "a")
 
     # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
