@@ -260,7 +260,7 @@ def main():
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]; dEX = _D(mall[EXe][EXA], mall[EXe][EXB])
     LPe = LPV if LPV in mall else LPV[::-1]; yL_ = mall[LPe][LPT]
     ttl_ = [f"1  transient: same vessel 12 min apart\nD = {dEX:.2f}",
-            f"2  low pulsatility: $\\bar Q$ = {abs(aL_):.2f} nL/s,\n$|H_1|/\\bar Q$ = {abs(HL_[0]) / abs(aL_):.2f}, ρ = {yL_['rho']:.2f}",
+            f"2  low pulsatility: small $|H_1|$,\nphase poorly constrained (ρ = {yL_['rho']:.2f})",
             f"3  stitchable: same vessel, {len(rv_t)} tiles\nD = {min(dRV):.2f}–{max(dRV):.2f}"]
     for k_, (ax_, cl_) in enumerate(zip(axs_d, ("T", "L", "S"))):
         ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2])
@@ -314,17 +314,34 @@ def main():
             m_ |= _MPath(polys[t]).contains_points(P2)
         return m_.reshape(GX_.shape)
     cS, cL, cT = _cover(stitch), _cover(lowp), _cover(early)
-    mS = _gf((cS & organ_m).astype(float), 40 / stp); mL = _gf((cL & ~cS & organ_m).astype(float), 40 / stp); mT = _gf((cT & organ_m).astype(float), 40 / stp)
+    # one partition of the organ: each point takes one regime (priority stitchable > low pulsatility > transient, i.e. transient =
+    # imaged only in the early recordings); each indicator is smoothed and every point takes the strongest, so neighbouring regions
+    # share one boundary; islands smaller than ~2 % of the organ are absorbed by their surroundings
+    from scipy.ndimage import label as _lab, binary_fill_holes as _fill
+    raw_ = np.full(GX_.shape, -1); raw_[organ_m & cT] = 0; raw_[organ_m & cL] = 1; raw_[organ_m & cS] = 2
+    organ_f = _fill(_gf(organ_m.astype(float), 30 / stp) > 0.5)
+    sm_ = np.stack([_gf((raw_ == k).astype(float), 45 / stp) for k in range(3)]); lab_ = np.where(organ_f, sm_.argmax(0), -1)
+    lab_[organ_f & (sm_.max(0) < 1e-3)] = 2
+    amin_ = 0.02 * organ_f.sum()
+    for _ in range(2):
+        for k in range(3):
+            cc_, n_ = _lab(lab_ == k)
+            for i_ in range(1, n_ + 1):
+                blob_ = cc_ == i_
+                if blob_.sum() < amin_:
+                    ring_ = (_gf(blob_.astype(float), 2) > 0.01) & ~blob_ & (lab_ >= 0)
+                    lab_[blob_] = np.bincount(lab_[ring_], minlength=3).argmax() if ring_.any() else -1
+    mT, mL, mS = [_gf((lab_ == k).astype(float), 1.0) for k in range(3)]
     axMp = fig.add_subplot(GMAP)
     axMp.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.45, zorder=0)
     plt.rcParams["hatch.linewidth"] = 0.5; plt.rcParams["hatch.color"] = "0.45"
     axMp.contourf(gxs, gys, mS, levels=[0.5, 2], colors=[RCOL["S"]], alpha=0.22, zorder=1)
-    axMp.contour(gxs, gys, mS, levels=[0.5], colors=[RCOL["S"]], linewidths=0.8, zorder=2)
-    axMp.contourf(gxs, gys, mL, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=1)
     axMp.contourf(gxs, gys, mL, levels=[0.5, 2], colors=[RCOL["L"]], alpha=0.18, zorder=1)
-    axMp.contour(gxs, gys, mL, levels=[0.5], colors=[RCOL["L"]], linewidths=0.8, zorder=2)
-    axMp.contourf(gxs, gys, mT, levels=[0.5, 2], colors=[RCOL["T"]], alpha=0.35, zorder=3)
-    axMp.contour(gxs, gys, mT, levels=[0.5], colors=[RCOL["T"]], linewidths=1.0, zorder=4)
+    axMp.contourf(gxs, gys, mL, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=1)
+    axMp.contourf(gxs, gys, mT, levels=[0.5, 2], colors=[RCOL["T"]], alpha=0.3, zorder=1)
+    axMp.contour(gxs, gys, _gf((lab_ >= 0).astype(float), 1.0), levels=[0.5], colors=["0.35"], linewidths=0.8, zorder=2)   # organ outline
+    for m_ in (mT, mL):                                                                                    # shared internal boundaries
+        axMp.contour(gxs, gys, m_, levels=[0.5], colors=["0.2"], linewidths=0.7, zorder=2)
     for E_, tag_, k_, off_ in ((EXV, "1", "T", (-330, -260)), (LPV, "2", "L", (330, 120)), (RV, "3", "S", (330, -260))):
         e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_)
         axMp.plot(xx_, yy_, color="black", lw=2.2, zorder=5, solid_capstyle="round")
@@ -333,9 +350,9 @@ def main():
         axMp.text(cx_ + off_[0], cy_ + off_[1], tag_, fontsize=7.5, ha="center", va="center", zorder=8, fontweight="bold", color="white")
     axMp.set_xlim(allq[:, 0].min() - padm, allq[:, 0].max() + padm); axMp.set_ylim(allq[:, 1].max() + padm, allq[:, 1].min() - padm)
     axMp.set_aspect("equal"); axMp.set_xticks([]); axMp.set_yticks([]); [s_.set_visible(False) for s_ in axMp.spines.values()]
-    axMp.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.35), ec=RCOL["T"], label=f"transient: first {max(xs_a[ts.index(t)] for t in early) + 4:.0f} min, tiles {min(early)}–{max(early)}"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["L"], 0.18), ec=RCOL["L"], hatch="/////", label="low pulsatility: tiles not linked"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.22), ec=RCOL["S"], label="stitchable")],
+    axMp.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.35), ec=RCOL["T"], label=f"transient early recordings (tiles {min(early)}–{max(early)}, first {max(xs_a[ts.index(t)] for t in early) + 4:.0f} min)"),
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["L"], 0.18), ec=RCOL["L"], hatch="/////", label="low-pulsatility tiles (phase not constrained)"),
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.22), ec=RCOL["S"], label="stitchable regime")],
                 loc="upper center", bbox_to_anchor=(0.5, -0.0), fontsize=6.8, frameon=False, handlelength=1.6, borderaxespad=0, ncol=1)
     label(GMAP, "a")
 
@@ -637,7 +654,7 @@ def main():
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="second stitching component"),
-                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="low-pulsatility tiles: offset not constrained (Fig. 7)"),
+                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="offset not constrained"),
                         Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile phase undetermined")],
                loc="upper left", bbox_to_anchor=(-0.04, 1.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
     axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.8, ls="--", zorder=5))
@@ -655,7 +672,7 @@ def main():
         ax.set_xlim(-60, 60); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-60, 0, 60])
         ax.axvline(0, color="0.3", lw=0.6, zorder=3); ax.tick_params(axis="x", labelsize=7)
         ax.text(0.0, 1.0, f"H{k}", transform=ax.transAxes, fontsize=8, fontweight="bold", va="bottom")
-        ax.text(1.0, 1.0, f"median {np.median(np.abs(v)):.0f}°", transform=ax.transAxes, fontsize=7, va="bottom", ha="right", color="0.2")
+        ax.text(1.0, 1.0, f"median $|\\Delta\\phi|$ = {np.median(np.abs(v)):.0f}°", transform=ax.transAxes, fontsize=7, va="bottom", ha="right", color="0.2")
         if k == 2:
             ax.text(0.5, 0.82, "not used in\nsynchronization", transform=ax.transAxes, fontsize=6.5, ha="center", va="top", color="#6a4c93", fontweight="bold",
                     bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.5))
