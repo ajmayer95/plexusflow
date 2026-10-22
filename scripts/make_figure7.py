@@ -4,7 +4,11 @@ Every tile is a separate recording with its own (arbitrary) time origin, so a ve
 comparable within a tile.  The AC field (plexusflow.ac.field) fixes one time gauge ψ_t per tile from the vessels imaged
 in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
 
-  a  heart rate f0 of every tile vs tile number; tiles within ±15 % of the reference tile are retained (shaded band)
+  a  heart rate f0 of every tile vs acquisition time (first-frame time stamp of the analysed recording); tiles within the band
+     (canonical ±21 % of the reference tile) are retained (shaded).  Colour = fraction of the tile's coherent vessels (ρ ≥ 0.1) whose
+     flow reverses within the beat (|H1| > |Q̄|): the earliest, slow-beating tiles are a distinct, mostly oscillatory flow state.
+     Inset: most coherent waveform of the first tile vs the reference tile, each scaled to its maximum.  (Same-vessel overlap
+     check of the early pulsatility decrease: supplement, sandbox/pulsatility_vs_time_overlap.py.)
   b  one overlapping tile pair of the core (most shared coherent vessels), split at a seam (dotted) through the overlap: each side
      shows its own tile's vessels coloured by H1 phase (cyclic).  As recorded the colours jump at the seam (arbitrary clock of each
      tile); after one phase offset per tile, φ_aligned = φ_obs − ψ_t, they run continuously.  No spatial gradient is imposed.
@@ -142,11 +146,34 @@ def main():
         xs_a = np.array(ts, float); xlab = "acquisition order (tile)"
     xref = xs_a[ts.index(ref)]
     axA.axhspan(f_ref * (1 - BAND), f_ref * (1 + BAND), color="#e9eef4", zorder=0, lw=0)
-    axA.plot(xs_a[inb], f[inb], "o", ms=2.8, color="0.15", zorder=3)
-    axA.plot(xs_a[~inb], f[~inb], "o", ms=2.8, color="0.72", zorder=3)
-    axA.plot(xref, f_ref, "s", ms=5, mfc="white", mec="black", mew=0.9, zorder=4)
+    # every tile (all heart rates): fraction of coherent vessels whose flow reverses within the beat (|H1| > |Q̄|), and example waveforms
+    Fall = build_ac_field(G, dc, n_boot=0, f0_band=10.0); mall = Fall["_meas"]; rev = {}; best = {}
+    for e_, x_ in mall.items():
+        for t_, y_ in x_.items():
+            if np.isfinite(y_["rho"]) and y_["rho"] >= 0.1 and abs(y_["a0"]) > 0:
+                rev.setdefault(t_, []).append(abs(y_["H"][0]) > abs(y_["a0"]))
+                if t_ in (ts[0], ref) and (t_ not in best or y_["rho"] > best[t_][0]):
+                    best[t_] = (y_["rho"], y_["a0"], y_["H"])
+    rf = np.array([np.mean(rev[t]) if t in rev else np.nan for t in ts]); cmR = plt.cm.magma_r; nR = mcolors.Normalize(0, 1)
+    axA.scatter(xs_a[inb], f[inb], s=13, c=cmR(nR(rf[inb])), edgecolors="0.15", linewidths=0.5, zorder=3)
+    axA.scatter(xs_a[~inb], f[~inb], s=13, c=cmR(nR(rf[~inb])), edgecolors="0.6", linewidths=0.5, zorder=3)
+    axA.plot(xref, f_ref, "s", ms=6, mfc="none", mec="black", mew=0.9, zorder=4)
+    caxA = axA.inset_axes([0.05, 0.93, 0.30, 0.03]); cbA = fig.colorbar(plt.cm.ScalarMappable(norm=nR, cmap=cmR), cax=caxA, orientation="horizontal", ticks=[0, 0.5, 1])
+    cbA.ax.tick_params(labelsize=6, pad=1); cbA.outline.set_linewidth(0.4); cbA.ax.xaxis.set_label_position("top")
+    cbA.set_label("vessels with reversing flow", fontsize=6.5, labelpad=2)
+    cbA.ax.set_xticklabels(["0", "50%", "100%"])
+    axW = axA.inset_axes([0.56, 0.10, 0.40, 0.30]); tau_ = np.linspace(0, 2, 300)
+    for t_, col_, lab_ in ((ts[0], "#b23a48", f"tile {ts[0]}"), (ref, "#2b5c8a", f"tile {ref}")):
+        _, a0_, H_ = best[t_]; sg_ = np.sign(a0_)
+        q_ = sg_ * (a0_ + sum((H_[n - 1] * np.exp(2j * np.pi * n * tau_)).real for n in (1, 2, 3)))
+        axW.plot(tau_, q_ / np.max(np.abs(q_)), color=col_, lw=1.0, label=lab_)
+    axW.axhline(0, color="0.4", lw=0.5); axW.set_xticks([0, 1, 2]); axW.set_yticks([0]); axW.tick_params(labelsize=5.5, length=1.5, pad=1)
+    axW.set_xlabel("beats", fontsize=5.5, labelpad=0); axW.set_title("flow (scaled)", fontsize=6, pad=1.5)
+    axW.legend(fontsize=5.5, frameon=False, loc="lower left", handlelength=1.0, borderaxespad=0.1, labelspacing=0.2)
+    for sp_ in axW.spines.values():
+        sp_.set_linewidth(0.4)
     axA.text(0.97, f_ref * (1 - BAND) + 0.04, "retained for phase reconstruction", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=7, color="0.4")
-    axA.annotate("reference tile", xy=(xref, f_ref), xytext=(xref - 0.06 * xs_a.max(), f_ref + 0.22), fontsize=7, color="0.3", ha="right", arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
+    axA.annotate("reference tile", xy=(xref, f_ref), xytext=(xref + 0.10 * xs_a.max(), f_ref - 0.28), fontsize=7, color="0.3", ha="left", arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
     axA.set_xlabel(xlab); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
     label(GA, "a")
 
