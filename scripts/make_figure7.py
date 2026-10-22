@@ -69,6 +69,9 @@ def tile_polygons(stage):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser(); ap.add_argument("--f0-band", type=float, default=F0_BAND, help="heart-rate band (fraction of the reference tile's)")
+    ap.add_argument("--tag", default="", help="output name suffix, e.g. _band21"); args = ap.parse_args(); BAND = args.f0_band
     plt.rcParams.update({"font.family": "Arial", "mathtext.fontset": "custom", "mathtext.rm": "Arial", "mathtext.it": "Arial:italic",
                          "mathtext.bf": "Arial:bold", "font.size": 8, "axes.labelsize": 9, "xtick.labelsize": 8, "ytick.labelsize": 8,
                          "axes.linewidth": 0.6, "xtick.major.width": 0.6, "ytick.major.width": 0.6, "xtick.major.size": 2.5, "ytick.major.size": 2.5})
@@ -80,7 +83,7 @@ def main():
     _dom0 = _cd(G); _carved = set(_dom0["edges"])
     da_edges = [e if G.has_edge(*e) else e[::-1] for n in _dom0["DA"] for e in G.edges(n)]
     da_edges = [e for e in da_edges if e not in _carved and e[::-1] not in _carved]
-    F = build_ac_field(G, dc, sync_extra_edges=da_edges, sync_extra_min_rho=0.5, sync_extra_weight=100.0)
+    F = build_ac_field(G, dc, sync_extra_edges=da_edges, sync_extra_min_rho=0.5, sync_extra_weight=100.0, f0_band=BAND)
     meas, psi, pairs, sd = F["_meas"], F["psi"], F["_pairs"], F["gauge_sd_deg"]
     pairs = [(e, a, b) for e, a, b in pairs if e not in set(da_edges)]          # validation on carved vessels only
     tf0, ref, f_ref, band = G.graph["tile_f0_piv"], F["ref_tile"], F["f_ref"], set(F["band"])
@@ -138,11 +141,11 @@ def main():
     else:
         xs_a = np.array(ts, float); xlab = "acquisition order (tile)"
     xref = xs_a[ts.index(ref)]
-    axA.axhspan(f_ref * (1 - F0_BAND), f_ref * (1 + F0_BAND), color="#e9eef4", zorder=0, lw=0)
+    axA.axhspan(f_ref * (1 - BAND), f_ref * (1 + BAND), color="#e9eef4", zorder=0, lw=0)
     axA.plot(xs_a[inb], f[inb], "o", ms=2.8, color="0.15", zorder=3)
     axA.plot(xs_a[~inb], f[~inb], "o", ms=2.8, color="0.72", zorder=3)
     axA.plot(xref, f_ref, "s", ms=5, mfc="white", mec="black", mew=0.9, zorder=4)
-    axA.text(0.97, f_ref * (1 - F0_BAND) + 0.04, "retained for phase reconstruction", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=7, color="0.4")
+    axA.text(0.97, f_ref * (1 - BAND) + 0.04, "retained for phase reconstruction", transform=axA.get_yaxis_transform(), ha="right", va="bottom", fontsize=7, color="0.4")
     axA.annotate("reference tile", xy=(xref, f_ref), xytext=(xref - 0.06 * xs_a.max(), f_ref + 0.22), fontsize=7, color="0.3", ha="right", arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
     axA.set_xlabel(xlab); axA.set_ylabel("heart rate $f_0$ (Hz)"); axA.spines[["top", "right"]].set_visible(False)
     label(GA, "a")
@@ -422,11 +425,11 @@ def main():
     axP.set_xlabel("tile-pair offset measured\nfrom shared vessels (deg)"); axP.set_ylabel("predicted with pair held out (deg)", labelpad=0)
     axP.spines[["top", "right"]].set_visible(False)
     axP.text(0.03, 0.97, f"{len(obs)} tile pairs\nmedian error {np.median(res):.0f}°", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
-    fs.savefig(OUT_DIR / "fig7_supp_heldout.png", dpi=300, facecolor="white"); fs.savefig(OUT_DIR / "fig7_supp_heldout.pdf", facecolor="white")
+    fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.png", dpi=300, facecolor="white"); fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.pdf", facecolor="white")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT_DIR / "fig7.png", dpi=300, facecolor="white"); fig.savefig(OUT_DIR / "fig7.pdf", facecolor="white")
-    fig.savefig(OUT_DIR / "fig7.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
-    log(f"wrote {OUT_DIR / 'fig7.png'}")
+    fig.savefig(OUT_DIR / f"fig7{args.tag}.png", dpi=300, facecolor="white"); fig.savefig(OUT_DIR / f"fig7{args.tag}.pdf", facecolor="white")
+    fig.savefig(OUT_DIR / f"fig7{args.tag}.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
+    log(f"wrote {OUT_DIR / f'fig7{args.tag}.png'}")
 
 
 if __name__ == "__main__":
