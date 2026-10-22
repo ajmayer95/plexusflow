@@ -689,23 +689,39 @@ def main():
     log(f"  (c) coherent-overlap graph on retained tiles: components {[sorted(c_) for c_ in comps_]}")
     cmain_ = next(c_ for c_ in comps_ if ref in c_); cother_ = [c_ for c_ in comps_ if c_ is not cmain_]
     GCOL = {"main": "#2b5c8a", "side": "#E69F00"}
-    axG = axC.inset_axes([-0.03, 0.71, 0.27, 0.29], zorder=8); axG.set_aspect("equal"); axG.set_xticks([]); axG.set_yticks([])
+    axG = axC.inset_axes([-0.03, 0.63, 0.31, 0.37], zorder=8); axG.set_aspect("equal"); axG.set_xticks([]); axG.set_yticks([])
     axG.set_facecolor("white"); [sp_.set_color("0.7") for sp_ in axG.spines.values()]; [sp_.set_linewidth(0.5) for sp_ in axG.spines.values()]
     for a_, b_ in Tg.edges():
         axG.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="0.65", lw=0.35, zorder=1)
+    # overlaps across the gap: tile pairs (main × side) that share vessels, none coherent (ρ ≥ 0.1) in both recordings
+    if cother_:
+        side_ = max(cother_, key=len); near_ = set()
+        for e_, x_ in meas.items():
+            if e_ in _da_set:
+                continue
+            ts_ = [t_ for t_ in x_ if np.isfinite(x_[t_]["rho"])]
+            near_ |= {(a_, b_) for a_ in ts_ if a_ in cmain_ for b_ in ts_ if b_ in side_}
+        for a_, b_ in near_:
+            axG.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="#b23a48", lw=0.6, ls=(0, (1, 1.2)), zorder=1.5)
+        # β bridge: between the tiles holding the arterial-inlet vessels that β compares (most inlet vessels on each side)
+        from collections import Counter as _Ctr
+        tM_ = _Ctr(wt_[selM].astype(int)).most_common(1)[0][0]
+        tS_ = _Ctr(wt_[inl & np.isin(wt_, sorted(side_))].astype(int)).most_common(1)[0][0]
+        axG.annotate("", xy=cen[tM_], xytext=cen[tS_], arrowprops=dict(arrowstyle="-", ls=(0, (3, 1.5)), lw=1.0, color="black",
+                                                                   connectionstyle="arc3,rad=0.5"), zorder=2)
+        log(f"  (c) inset: cross-gap overlaps (no coherent vessel) {sorted(near_)}; β bridge between inlet tiles {tS_} (side) and {tM_} (main)")
     for t_ in Tg.nodes():
         c_ = GCOL["main"] if t_ in cmain_ else GCOL["side"]
-        axG.plot(*cen[t_], "s" if t_ == ref else "o", ms=3.6 if t_ == ref else 2.8, mfc=c_, mec="white" if t_ != ref else "black", mew=0.5, zorder=3)
-    if cother_:
-        side_ = max(cother_, key=len); xda_ = np.mean([G.nodes[n_]["x"] for n_ in dom["DA"]])
-        tl_ = min(side_, key=lambda t_: abs(cen[t_][0] - xda_) + 0.3 * abs(cen[t_][1] - cen[ref][1]))
-        tr_ = min(cmain_, key=lambda t_: abs(cen[t_][0] - xda_) + 0.3 * abs(cen[t_][1] - cen[tl_][1]) + (1e9 if cen[t_][0] < xda_ else 0))
-        axG.annotate("", xy=cen[tr_], xytext=cen[tl_], arrowprops=dict(arrowstyle="-", ls=(0, (2, 1.5)), lw=1.0, color="black",
-                                                                   connectionstyle="arc3,rad=-0.45"), zorder=2)
-        axG.text(0.03, 0.04, "-- β: inlet symmetry", transform=axG.transAxes, ha="left", va="bottom", fontsize=5.6)
-    allc_ = np.array([cen[t_] for t_ in Tg.nodes()]); pg_ = 120
-    axG.set_xlim(allc_[:, 0].min() - pg_, allc_[:, 0].max() + pg_); axG.set_ylim(allc_[:, 1].max() + 2.2 * pg_, allc_[:, 1].min() - 2.6 * pg_)
-    axG.text(0.5, 0.98, "tiles linked by shared\ncoherent vessels", transform=axG.transAxes, ha="center", va="top", fontsize=5.8, color="0.25", linespacing=0.95)
+        axG.plot(*cen[t_], "s" if t_ == ref else "o", ms=7.2 if t_ == ref else 6.6, mfc=c_, mec="black" if t_ == ref else "white", mew=0.5, zorder=3)
+        axG.text(*cen[t_], str(t_), fontsize=3.7, ha="center", va="center", color="white", fontweight="bold", zorder=4)
+    from matplotlib.lines import Line2D as _L2g
+    axG.legend(handles=[_L2g([], [], color="0.65", lw=0.6, label="coherent shared vessel"),
+                        _L2g([], [], color="#b23a48", lw=0.8, ls=(0, (1, 1.2)), label="overlap, not coherent in both"),
+                        _L2g([], [], color="black", lw=1.0, ls=(0, (3, 1.5)), label="β: inlet symmetry")],
+               loc="lower left", fontsize=5, frameon=False, handlelength=1.8, borderaxespad=0.15, labelspacing=0.15)
+    allc_ = np.array([cen[t_] for t_ in Tg.nodes()]); pg_ = 140
+    axG.set_xlim(allc_[:, 0].min() - pg_, allc_[:, 0].max() + pg_); axG.set_ylim(allc_[:, 1].max() + 5.4 * pg_, allc_[:, 1].min() - 3.2 * pg_)
+    axG.text(0.5, 0.985, "tiles linked by shared\ncoherent vessels", transform=axG.transAxes, ha="center", va="top", fontsize=5.8, color="0.25", linespacing=0.95)
     axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.6, ls="--", alpha=0.45, zorder=5))   # location of a
     axC.add_patch(Polygon(polys[tb], closed=True, fc="none", ec="#D55E00", lw=0.6, ls="--", alpha=0.45, zorder=5))
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
