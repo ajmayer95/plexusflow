@@ -147,10 +147,10 @@ def main():
     figD = plt.figure(figsize=(7.5, 3.6), facecolor="white")
     gDd = figD.add_gridspec(1, 2, width_ratios=[1, 1.15], wspace=0.25, left=0.06, right=0.975, top=0.9, bottom=0.14)
     GMAP, GK7 = gDd[0], gDd[1]
-    figS = plt.figure(figsize=(7.5, 6.4), facecolor="white")
+    figS = plt.figure(figsize=(7.5, 5.4), facecolor="white")
     # a one overlap → relative clock constraint · b overlap network → tile clocks · c validation · d organ phase field
-    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.52, 1], wspace=0.1, left=0.07, right=0.98, top=0.95, bottom=0.07)
-    gL = gS2[0].subgridspec(3, 1, height_ratios=[2.1, 1.35, 0.7], hspace=0.55); GB, GN, GD, GC = gL[0], gL[1], gL[2], gS2[1]
+    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.52, 1], wspace=0.1, left=0.07, right=0.98, top=0.95, bottom=0.1)
+    gL = gS2[0].subgridspec(2, 1, height_ratios=[2.4, 0.8], hspace=0.45); GB, GD, GC = gL[0], gL[1], gS2[1]
     fig = figR
 
     def label(cell, letter):
@@ -687,7 +687,7 @@ def main():
     ca, cb_ = cen[ta], cen[tb]; nrm_s = (cb_ - ca) / np.linalg.norm(cb_ - ca); mid_s = (ca + cb_) / 2
     side = lambda p_: np.dot(p_.mean(0) - mid_s, nrm_s)
     cmc = plt.cm.twilight_shifted; ncy = mcolors.Normalize(-180, 180)
-    gBs = GB.subgridspec(3, 1, height_ratios=[1, 1, 0.36], hspace=0.16)
+    gBs = GB.subgridspec(3, 1, height_ratios=[1, 1, 0.22], hspace=0.16)
     for j_, (VV, ttl) in enumerate(((Vraw, "before alignment"), (V, "after alignment: one rigid offset per tile"))):
         ax = fig.add_subplot(gBs[j_, 0])
         ax.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.3, zorder=0)
@@ -712,11 +712,9 @@ def main():
     fig.patches.append(matplotlib.patches.FancyArrowPatch((xm_, p0_.y0 + 0.002), (xm_, p1_.y1 - 0.002),
                        transform=fig.transFigure, arrowstyle="-|>", mutation_scale=9, lw=1.0, color="black", zorder=10))
     fig.text(xm_ + 0.012, (p0_.y0 + p1_.y1) / 2, r"$-\psi_t$", ha="left", va="center", fontsize=8, zorder=10)
-    caxb = fig.add_subplot(gBs[2, 0]); caxb.axis("off")
-    cbi = caxb.inset_axes([0.15, 0.12, 0.7, 0.12]); cbb = fig.colorbar(plt.cm.ScalarMappable(norm=ncy, cmap=cmc), cax=cbi, orientation="horizontal", ticks=[-180, 0, 180])
-    cbb.ax.tick_params(labelsize=6.5); cbb.outline.set_linewidth(0.4); cbb.set_label("phase of the fundamental (deg)", fontsize=7, labelpad=1)
+
     bb = GB.get_position(fig)
-    fig.text(bb.x0 + 0.5 * bb.width, bb.y0 + 0.105 * bb.height, r"$\phi^{\rm aligned}_{e,t} = \phi^{\rm obs}_{e,t} - \psi_t$", ha="center", fontsize=8.5)
+    fig.text(bb.x0 + 0.3 * bb.width, bb.y0 + 0.03 * bb.height, r"$\phi^{\rm aligned}_{e,t} = \phi^{\rm obs}_{e,t} - \psi_t$", ha="center", fontsize=8.5)
 
     log(f"  (b) tile pair {ta}/{tb} ({npair_} shared coherent vessels)")
     label(GB, "a")
@@ -752,7 +750,8 @@ def main():
     axC.contour(gx, gy, fbf, levels=[0.5], colors="0.15", linewidths=0.9, linestyles="--", zorder=4)
     if beta_sd:
         bdeg, bsd, _, _ = beta_sd[0]; ys_, xs_ = np.nonzero(fbf > 0.5)
-        pass                                                       # block is keyed in the legend (dashed outline)
+        axC.text(gx[int(np.percentile(xs_, 50))], gy[int(np.percentile(ys_, 100))] + 80, "separately oriented", ha="center", va="top", fontsize=8,
+                 color="0.2", zorder=7, linespacing=0.95)
     Lt = {t: 0.0 for t in band}
     for (a_, b_), w_ in link.items():
         Lt[a_] += w_; Lt[b_] += w_
@@ -766,8 +765,8 @@ def main():
     # retained (Fig 7: physiologically usable) but absolute phase not identifiable — area covered only by tiles with offset SD > SD_MAX
     if undet_t:
         axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["white"], alpha=0.75, zorder=4.4)
-        axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["none"], hatches=["...."], zorder=4.5)
-        axC.contour(gxs, gys, mU, levels=[0.5], colors=["0.5"], linewidths=0.6, linestyles=":", zorder=4.6)
+        axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=4.5)
+        axC.contour(gxs, gys, mU, levels=[0.5], colors=["0.5"], linewidths=0.6, zorder=4.6)
     refpts = [(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"]) for n_ in list(dom["DA"]) + [nds[int(i)] for i in dom["out"]]]
     for n_ in dom["DA"]:
         axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="v", ms=5.5, color="white", mec="black", mew=0.6, zorder=6)
@@ -778,10 +777,7 @@ def main():
                                         arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"), zorder=7)
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
-    axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="separately oriented block"),
-                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="excluded from AC reconstruction (Fig. 7)"),
-                        Patch(fc="white", ec="0.5", hatch="....", ls=":", lw=0.5, label="tile phase offset undetermined")],
-               loc="upper left", bbox_to_anchor=(0.0, -0.11), fontsize=8, frameon=False, handlelength=1.4, borderaxespad=0, ncol=2, columnspacing=1.0)
+    axC.text(0.02, 0.98, "hatched: not reconstructed", transform=axC.transAxes, fontsize=8, color="0.4", va="top")
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
     # tile centres; its connected components are the synchronization blocks; the dashed bridge = the inlet-symmetry constraint (β)
     import networkx as _nx
@@ -799,26 +795,22 @@ def main():
     cmain_ = next(c_ for c_ in comps_ if ref in c_); cother_ = [c_ for c_ in comps_ if c_ is not cmain_]
     GCOL = {"main": "#2b5c8a", "side": "#E69F00"}
     # ---- b (Fig 8): the overlap network that turns pairwise clock differences into one clock per tile (nodes at tile centres)
-    axN = figS.add_subplot(GN); axN.set_aspect("equal"); axN.set_xticks([]); axN.set_yticks([]); [sp_.set_visible(False) for sp_ in axN.spines.values()]
-    axN.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.18, zorder=0)
+    _pa = figS.axes[0].get_position() if False else None
+    axN = axb1.inset_axes([0.62, -0.72, 0.42, 0.55]); axN.set_aspect("equal"); axN.set_xticks([]); axN.set_yticks([]); [sp_.set_visible(False) for sp_ in axN.spines.values()]
+
     for a_, b_ in Tg.edges():
-        axN.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="0.55", lw=0.6, zorder=1)
+        axN.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="0.6", lw=0.4, zorder=1)
     for t_ in Tg.nodes():
-        und_ = sd.get(t_, np.inf) > SD_MAX; c_ = GCOL["main"] if t_ in cmain_ else GCOL["side"]
-        axN.plot(*cen[t_], "s" if t_ == ref else "o", ms=6.5 if t_ == ref else 5, mfc="white" if und_ else c_, mec="black" if t_ == ref else c_,
-                 mew=0.9 if und_ else 0.5, zorder=3)
+        und_ = sd.get(t_, np.inf) > SD_MAX
+        axN.plot(*cen[t_], "o", ms=3.2, mfc="white" if und_ else "0.2", mec="0.2", mew=0.6, zorder=3)
+    if cother_:
+        from scipy.spatial import ConvexHull as _CH
+        _sb = np.array([cen[t_] for t_ in max(cother_, key=len)]); _h = _CH(_sb); _v = _sb[_h.vertices]; _c = _v.mean(0); _v = _c + 1.25 * (_v - _c)
+        axN.add_patch(Polygon(_v, closed=True, fc="none", ec="0.2", lw=0.7, ls="--", zorder=2))
     allN_ = np.array([cen[t_] for t_ in Tg.nodes()]); pN_ = 160
     axN.set_xlim(allN_[:, 0].min() - pN_, allN_[:, 0].max() + pN_); axN.set_ylim(allN_[:, 1].max() + pN_, allN_[:, 1].min() - pN_)
-    from matplotlib.lines import Line2D as _L2n
-    axN.legend(handles=[_L2n([], [], ls="none", marker="o", ms=5, mfc=GCOL["main"], mec=GCOL["main"], label="tile clock set"),
-                        _L2n([], [], ls="none", marker="s", ms=6, mfc=GCOL["main"], mec="black", label="reference tile"),
-                        _L2n([], [], ls="none", marker="o", ms=5, mfc=GCOL["side"], mec=GCOL["side"], label="separate block"),
-                        _L2n([], [], ls="none", marker="o", ms=5, mfc="white", mec="0.3", label="clock undetermined"),
-                        _L2n([], [], color="0.55", lw=0.8, label="shared vessel")],
-              loc="upper center", bbox_to_anchor=(0.5, 0.0), fontsize=8, frameon=False, handletextpad=0.3, borderaxespad=0, labelspacing=0.2, ncol=2,
-              columnspacing=0.8)
-    axN.text(0.5, 1.02, r"$\{\Delta\phi_{ab}\}_{\rm overlaps} \rightarrow \{\psi_t\}_{\rm tiles}$", transform=axN.transAxes, ha="center", va="bottom", fontsize=9)
-    _pn = axN.get_position(); figS.text(_pn.x0 - 0.06, _pn.y1 + 0.03, "b", fontsize=10, fontweight="bold", va="bottom")
+
+    axN.text(0.5, -0.04, "tile overlap network", transform=axN.transAxes, ha="center", va="top", fontsize=8, color="0.3")
     # ---- SI figure fig8_supp_block: a overlap graph · b soft mode of the synchronization Laplacian · c estimates of the block offset β ·
     #      d sensitivity of the phase map to β
     figB = plt.figure(figsize=(7.5, 6.4), facecolor="white")
@@ -962,7 +954,7 @@ def main():
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
     cax = axC.inset_axes([0.2, -0.04, 0.6, 0.022]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=[0, 40, 80, 120, 160], extend="both")
     cb.set_label("phase lag of the fundamental behind DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
-    _pC = axC.get_position(); fig.text(_pC.x0 - 0.01, _pC.y1 + 0.03, "d", fontsize=10, fontweight="bold", va="bottom", ha="left")
+    _pC = axC.get_position(); fig.text(_pC.x0 - 0.01, _pC.y1 + 0.03, "c", fontsize=10, fontweight="bold", va="bottom", ha="left")
 
     # ---- e: repeat-vessel agreement after alignment; H2 is an independent check (not used in the synchronization)
     gDs = GD.subgridspec(1, 2, wspace=0.3); bins = np.linspace(-60, 60, 25)
@@ -972,13 +964,12 @@ def main():
         ax.set_xlim(-60, 60); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-60, 0, 60])
         ax.axvline(0, color="0.3", lw=0.6, zorder=3); ax.tick_params(axis="x", labelsize=7)
         ax.text(0.0, 1.13, "fundamental" if k == 1 else "2nd harmonic", transform=ax.transAxes, fontsize=8, fontweight="bold", va="bottom")
-        ax.text(0.0, 1.01, "used to synchronize" if k == 1 else "not used to synchronize", transform=ax.transAxes, fontsize=8, va="bottom",
-                color="0.3" if k == 1 else "#6a4c93")
+        ax.text(0.0, 1.01, "used to synchronize" if k == 1 else "not used", transform=ax.transAxes, fontsize=8, va="bottom", color="0.3")
         ax.text(0.0, 0.97, f"median $|\\Delta\\phi|$ = {np.median(np.abs(v)):.0f}°", transform=ax.transAxes, fontsize=6.5, va="top", ha="left", color="0.25", zorder=5,
                 bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.4))
     fig.text(GD.get_position(fig).x0 + 0.5 * GD.get_position(fig).width, GD.get_position(fig).y0 - 0.045,
-             "repeat-vessel phase difference, aligned (deg)", ha="center", va="top", fontsize=7.5)
-    label(GD, "c")
+             "repeat-vessel phase difference (deg)", ha="center", va="top", fontsize=8)
+    label(GD, "b")
 
 
 
