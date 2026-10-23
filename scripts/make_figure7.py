@@ -657,9 +657,14 @@ def main():
     axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["white"], alpha=0.6, zorder=4.4)
     axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=4.5)
     axC.contour(gxs, gys, mX, levels=[0.5], colors=["0.5"], linewidths=0.6, zorder=4.6)
-    for t in band:
-        if t not in shown_t and t not in weak_t:
-            axC.plot(*cen[t], "o", ms=3.5, mfc="white", mec="0.55", mew=0.7, zorder=5)
+    # retained (Fig 7: physiologically usable) but absolute phase not identifiable: tile offset SD > SD_MAX — left uncoloured, stippled
+    undet_t = sorted(t for t in stitch if sd.get(t, np.inf) > SD_MAX)
+    log(f"  (c) retained tiles with undetermined offset (SD > {SD_MAX:.0f}°): " + ", ".join(f"{t} ({sd.get(t, np.nan):.0f}°)" for t in undet_t))
+    if undet_t:
+        mU = _gf(((lab_ == 2) & _cover(set(undet_t))).astype(float), 1.0)
+        axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["white"], alpha=0.75, zorder=4.4)
+        axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["none"], hatches=["...."], zorder=4.5)
+        axC.contour(gxs, gys, mU, levels=[0.5], colors=["0.5"], linewidths=0.6, linestyles=":", zorder=4.6)
     refpts = [(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"]) for n_ in list(dom["DA"]) + [nds[int(i)] for i in dom["out"]]]
     for n_ in dom["DA"]:
         axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="v", ms=5.5, color="white", mec="black", mew=0.6, zorder=6)
@@ -672,7 +677,7 @@ def main():
     from matplotlib.lines import Line2D
     axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="separately oriented block"),
                         Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="excluded from reconstruction (Fig. 7)"),
-                        Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile offset undetermined")],
+                        Patch(fc="white", ec="0.5", hatch="....", ls=":", lw=0.5, label="tile phase offset undetermined")],
                loc="lower left", bbox_to_anchor=(-0.04, 0.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
     # tile centres; its connected components are the synchronization blocks; the dashed bridge = the inlet-symmetry constraint (β)
