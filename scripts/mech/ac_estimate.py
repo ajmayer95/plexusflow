@@ -37,9 +37,11 @@ def main():
     ap.add_argument("--gauge-passes", type=int, default=2)
     ap.add_argument("--n-jobs", type=int, default=8)
     ap.add_argument("--out", default="ac_estimate_v3")
+    ap.add_argument("--field", default="ac_field_v2", help="results/<field>.pkl (default ac_field_v2)")
+    ap.add_argument("--gauge-block", default=None, help="tiles sharing one extra gauge offset with a flat prior, e.g. 15,18,19,20,29,30,31,32,33,34")
     a = ap.parse_args()
     G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
-    A = pickle.loads((paths.RESULTS / "ac_field_v2.pkl").read_bytes())
+    A = pickle.loads((paths.RESULTS / f"{a.field}.pkl").read_bytes())
     if "var_phi" not in A:
         sys.exit("results/ac_field_v2.pkl predates the per-beat uncertainties — rerun scripts/ac_field.py")
     model = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text()); model["c_T"] = {int(k): v for k, v in model["c_T"].items()}
@@ -56,10 +58,12 @@ def main():
             log(f"  pass {p + 1}: {len(info['stubbed'])} of {len(dom['out'])} vein nodes have a stub;  shared waveform "
                 + ", ".join(f"H{k} {abs(info['mean'][k]):.3f}∠{np.degrees(np.angle(info['mean'][k])):+.0f}°" for k in (1, 2)))
         R = fit_profile(C, c, A, d_grid=d_grid, eta_grid=a.eta, weights=a.weights, gauge=not a.no_gauge, pin_veins=not a.fit_veins,
-                        n_jobs=a.n_jobs, progress=lambda m: log("  " + m))
+                        n_jobs=a.n_jobs, progress=lambda m: log("  " + m),
+                        gauge_block=[int(t) for t in a.gauge_block.split(",")] if a.gauge_block else None)
         gauge_rad = {t: np.radians(v) for t, v in R["delta_deg"].items()}
         prof = np.nanmin(R["S"], axis=0) - np.nanmin(R["S"])
-        log(f"  pass {p + 1}: best D {R['D']:.3e} (parabola {quadratic_min(d_grid, prof):.3e}), η {R['eta']:.2f}, NLL {R['nll']:.1f}")
+        log(f"  pass {p + 1}: best D {R['D']:.3e} (parabola {quadratic_min(d_grid, prof):.3e}), η {R['eta']:.2f}, NLL {R['nll']:.1f}"
+            + (f";  block gauge β {R['block_beta_deg']:+.1f}°" if R["gauge_block"] else ""))
     eta_prof = np.nanmin(R["S"], axis=1) - np.nanmin(R["S"])
     if len(a.eta) > 1:
         log("  η profile ΔNLL: " + "  ".join(f"{e:.2f}:{v:.1f}" for e, v in zip(a.eta, eta_prof)))
@@ -75,7 +79,7 @@ def main():
                nodes=[int(dom["nodes"][b]) for b in bnd], f1=[[float(z.real), float(z.imag)] for z in f[1]],
                f2=[[float(z.real), float(z.imag)] for z in f[2]], x=[float(v) for v in R["x"]],
                gauge_correction_deg={str(t): v for t, v in R["delta_deg"].items()}, groups=group_table(C, R["x"]),
-               n_supported=int(sup.sum()))
+               n_supported=int(sup.sum()), gauge_block=R["gauge_block"], block_beta_deg=R["block_beta_deg"])
     (paths.RESULTS / f"{a.out}.json").write_text(json.dumps(out, indent=1))
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(7, 4.5))

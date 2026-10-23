@@ -61,12 +61,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--picks', default=None, help='six edges "u,v;u,v;…" for panel C (default: automatic)')
     ap.add_argument('--bc-json', default=None, help='profiled fit (D, η, boundary forcing per node), e.g. results/ac_profiled_bc_local_ratio.json')
+    ap.add_argument('--field', default='ac_field_v2', help='results/<field>.pkl (default ac_field_v2)')
     ap.add_argument('--tag', default=None, help='output name suffix: fig9alt_v3_<tag>')
     args = ap.parse_args()
 
     G = _paths.load_graph()
     D = pickle.loads((_paths.RESULTS / 'dc_reconciled_v2.pkl').read_bytes())
-    A = pickle.loads((_paths.RESULTS / 'ac_field_v2.pkl').read_bytes())
+    A = pickle.loads((_paths.RESULTS / f'{args.field}.pkl').read_bytes())
     dom = carved_domain(G); assert dom['edges'] == D['edges'] == A['edges']
     J = json.loads(Path(args.bc_json).read_text()) if args.bc_json else None
     gcorr = (J or {}).get('gauge_correction_deg')
