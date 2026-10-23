@@ -149,8 +149,8 @@ def main():
     GMAP, GK7 = gDd[0], gDd[1]
     # left column: a tile overlap network (left) with one highlighted pair, before/after alignment of that pair (right) ·
     # b validation histograms · right: c organ phase field
-    figS = plt.figure(figsize=(7.5, 5.6), facecolor="white")
-    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.62, 1], wspace=0.1, left=0.05, right=0.98, top=0.95, bottom=0.1)
+    figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
+    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.62, 1], wspace=0.1, left=0.05, right=0.98, top=0.95, bottom=0.14)
     gL = gS2[0].subgridspec(2, 1, height_ratios=[2.0, 0.95], hspace=0.38); GD, GC = gL[1], gS2[1]
     gA = gL[0].subgridspec(1, 2, width_ratios=[1, 0.85], wspace=0.15); GNET, GB = gA[0], gA[1]
     fig = figR
@@ -752,23 +752,23 @@ def main():
     axC.contour(gx, gy, fbf, levels=[0.5], colors="0.15", linewidths=0.9, linestyles="--", zorder=4)
     if beta_sd:
         bdeg, bsd, _, _ = beta_sd[0]; ys_, xs_ = np.nonzero(fbf > 0.5)
-        axC.text(gx[int(np.percentile(xs_, 50))], gy[int(np.percentile(ys_, 100))] + 80, "separately oriented", ha="center", va="top", fontsize=8,
-                 color="0.2", zorder=7, linespacing=0.95)
+        pass
     Lt = {t: 0.0 for t in band}
     for (a_, b_), w_ in link.items():
         Lt[a_] += w_; Lt[b_] += w_
     L_thr = 0.05 * np.median(list(Lt.values())); weak_t = {t for t in band if Lt[t] < L_thr}
     log(f"  (c) weakly constrained tiles (link < 5 % of median, {L_thr:.2f}): {sorted(weak_t)}")
     # transient region from Fig 7 (excluded from AC reconstruction)
-    plt.rcParams["hatch.color"] = "0.45"; plt.rcParams["hatch.linewidth"] = 0.5
-    axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["white"], alpha=0.6, zorder=4.4)
-    axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=4.5)
-    axC.contour(gxs, gys, mX, levels=[0.5], colors=["0.5"], linewidths=0.6, zorder=4.6)
+    plt.rcParams["hatch.color"] = "0.6"; plt.rcParams["hatch.linewidth"] = 0.4
+    axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["white"], alpha=0.5, zorder=4.4)
+    axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["none"], hatches=["//"], zorder=4.5)
+    axC.contour(gxs, gys, mX, levels=[0.5], colors=["0.6"], linewidths=0.5, zorder=4.6)
     # retained (Fig 7: physiologically usable) but absolute phase not identifiable — area covered only by tiles with offset SD > SD_MAX
     if undet_t:
-        axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["white"], alpha=0.75, zorder=4.4)
-        axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=4.5)
-        axC.contour(gxs, gys, mU, levels=[0.5], colors=["0.5"], linewidths=0.6, zorder=4.6)
+        axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["white"], alpha=0.7, zorder=4.4)
+        plt.rcParams["hatch.color"] = "0.2"
+        axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["none"], hatches=["..."], zorder=4.5)
+        axC.contour(gxs, gys, mU, levels=[0.5], colors=["0.3"], linewidths=0.6, linestyles=":", zorder=4.6)
     refpts = [(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"]) for n_ in list(dom["DA"]) + [nds[int(i)] for i in dom["out"]]]
     for n_ in dom["DA"]:
         axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="v", ms=5.5, color="white", mec="black", mew=0.6, zorder=6)
@@ -779,7 +779,13 @@ def main():
                                         arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"), zorder=7)
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
-    axC.text(0.02, 0.98, "hatched: not reconstructed", transform=axC.transAxes, fontsize=8, color="0.4", va="top")
+    from matplotlib.patches import Patch as _Pt
+    axC.legend(handles=[_Pt(fc="white", ec="0.6", hatch="//", lw=0.5, label="transient — excluded (Fig. 7)"),
+                        _Pt(fc="white", ec="0.3", hatch="...", ls=":", lw=0.6, label="clock unresolved"),
+                        _Pt(fc="0.82", ec="none", label="no usable phase of the fundamental"),
+                        _Pt(fc="none", ec="0.15", ls="--", lw=0.9, label="separately oriented block")],
+               loc="upper center", bbox_to_anchor=(0.5, -0.1), fontsize=8, frameon=False, handlelength=1.6, borderaxespad=0, labelspacing=0.25,
+               ncol=2, columnspacing=1.0)
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
     # tile centres; its connected components are the synchronization blocks; the dashed bridge = the inlet-symmetry constraint (β)
     import networkx as _nx
