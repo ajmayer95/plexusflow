@@ -639,7 +639,16 @@ def main():
     # ---- vessel delays for the maps: every measurement of a carved vessel in a shown tile (core or the weakly linked block,
     #      offset determined), aligned (ψ_t), flow-direction frame (sgn Q′), delay = wrap(φ_zero − φ) in [−30°, 330°)
     from scipy.ndimage import gaussian_filter
-    shown_t = {t for t in band if t not in masked and sd.get(t, np.inf) <= SD_MAX}
+    # internally synchronized group whose common offset is only weakly constrained by cross-group overlaps (sandbox/group_beta_profile.py:
+    # β̂ = 0 vs canonical, vessel-bootstrap SD 48°): shown at the maximum-likelihood offset inside a dashed outline, not blanked
+    WEAKGRP = {16, 17, 18, 31} & set(band)
+    # its common offset set by plexus seam continuity (sandbox/group_beta_continuity.py: pairs of different detected plexus vessels within
+    # 150 µm across the group / left-block seam: −132° ± 3°, R 0.83; same statistic on a solved seam: +2°); agrees with the D-fit gauge
+    # (−136°) and the cross-links via tiles 19 / 32 (−114 … −129°).  Applied as a display offset only; the synchronization is unchanged.
+    BETA_GRP = np.radians(-132.0)
+    for t_ in WEAKGRP:
+        beta[t_] = beta.get(t_, 0.0) - BETA_GRP
+    shown_t = {t for t in band if t not in masked and (sd.get(t, np.inf) <= SD_MAX or t in WEAKGRP)}
     def pts(e, step=2.0):
         pth = G.edges[e].get("path")
         p_ = np.asarray(pth, float) if pth is not None and len(pth) >= 2 else np.array([[G.nodes[n]["x"], G.nodes[n]["y"]] for n in e], float)
@@ -728,7 +737,7 @@ def main():
     gx = np.linspace(big[0][0], big[0][1], fo.shape[1]); gy = np.linspace(big[1][0], big[1][1], fo.shape[0])
     # one exclusive partition of the organ: excluded (transient, Fig 7) · clock undetermined (covered ONLY by tiles whose offset SD >
     # SD_MAX) · reconstructed (field) · no measurable data (organ image only).  The field is masked to the reconstructed part.
-    undet_t = sorted(t for t in stitch if sd.get(t, np.inf) > SD_MAX); det_t = {t for t in stitch if sd.get(t, np.inf) <= SD_MAX}
+    undet_t = sorted(t for t in stitch if sd.get(t, np.inf) > SD_MAX and t not in WEAKGRP); det_t = {t for t in stitch if sd.get(t, np.inf) <= SD_MAX}
     log(f"  (c) retained tiles with undetermined offset (SD > {SD_MAX:.0f}°): " + ", ".join(f"{t} ({sd.get(t, np.nan):.0f}°)" for t in undet_t))
     mX = _gf((lab_ == 0).astype(float), 1.0)
     # clock unresolved = not reconstructed by the field AND recorded by an unresolved tile (even if a solved neighbour's edge also covers it)
@@ -736,6 +745,12 @@ def main():
     _ixf = np.clip(np.round((gxs - gx[0]) / (gx[1] - gx[0])).astype(int), 0, len(gx) - 1); _iyf = np.clip(np.round((gys - gy[0]) / (gy[1] - gy[0])).astype(int), 0, len(gy) - 1)
     _recon = ~np.ma.getmaskarray(fo)[np.ix_(_iyf, _ixf)]
     mU = _gf(((lab_ == 2) & _cover(set(undet_t)) & ~_recon).astype(float), 30 / stp) if undet_t else np.zeros_like(mX)
+    mG = _gf(((lab_ == 2) & _cover(WEAKGRP) & ~_cover(set(stitch) - WEAKGRP) & _recon).astype(float), 30 / stp)
+    _ccG, _nG = _lab(mG > 0.5)
+    for i_ in range(1, _nG + 1):
+        if (_ccG == i_).sum() < 0.01 * (lab_ >= 0).sum():
+            mG[_ccG == i_] = 0
+    axC.contour(gxs, gys, mG, levels=[0.5], colors=["0.15"], linewidths=1.0, linestyles=":", zorder=4.7)
     _ccU, _nU = _lab(mU > 0.5)                                         # drop slivers (< 1 % of the organ)
     for i_ in range(1, _nU + 1):
         if (_ccU == i_).sum() < 0.01 * (lab_ >= 0).sum():
@@ -787,7 +802,8 @@ def main():
     axC.legend(handles=[_Pt(fc="white", ec="0.6", hatch="//", lw=0.5, label="transient — excluded (Fig. 7)"),
                         _Pt(fc="white", ec="0.3", hatch="...", ls=":", lw=0.6, label="clock unresolved"),
                         _Pt(fc="0.82", ec="none", label="no usable phase of the fundamental"),
-                        _Pt(fc="none", ec="0.15", ls="--", lw=0.9, label="separately oriented block")],
+                        _Pt(fc="none", ec="0.15", ls="--", lw=0.9, label="separately oriented block"),
+                        _Pt(fc="none", ec="0.15", ls=":", lw=1.0, label="group offset from seam continuity")],
                loc="upper center", bbox_to_anchor=(0.5, -0.1), fontsize=8, frameon=False, handlelength=1.6, borderaxespad=0, labelspacing=0.25,
                ncol=2, columnspacing=1.0)
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
@@ -821,7 +837,7 @@ def main():
             axN.text(cen[t_][0] + _dx * 130, cen[t_][1] - 170, str(t_), fontsize=8, color=TCOL[t_], fontweight="bold", zorder=5,
                      ha="left" if _dx > 0 else "right")
         else:
-            axN.plot(*cen[t_], "o", ms=3.6, mfc="white" if und_ else "0.3", mec="0.3", mew=0.6, zorder=3)
+            axN.plot(*cen[t_], "o", ms=3.6, mfc=("0.72" if t_ in WEAKGRP else "white") if und_ else "0.3", mec="0.3", mew=0.6, zorder=3)
         if t_ == ref:
             axN.plot(*cen[t_], "s", ms=6.5, mfc="none", mec="black", mew=0.9, zorder=4)
     if cother_:
@@ -834,6 +850,7 @@ def main():
     axN.text(0.5, 1.0, "tile overlap network", transform=axN.transAxes, ha="center", va="bottom", fontsize=8, color="0.25")
     from matplotlib.lines import Line2D as _L2n
     axN.legend(handles=[_L2n([], [], ls="none", marker="o", ms=4, mfc="0.3", mec="0.3", label="clock solved"),
+                        _L2n([], [], ls="none", marker="o", ms=4, mfc="0.72", mec="0.3", label="from seam continuity"),
                         _L2n([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.3", label="unresolved"),
                         _L2n([], [], ls="none", marker="s", ms=5, mfc="none", mec="black", label="reference"),
                         _L2n([], [], color="0.2", lw=0.8, ls="--", label="separate block")],
