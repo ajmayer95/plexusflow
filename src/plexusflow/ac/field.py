@@ -14,11 +14,19 @@ import numpy as np
 from ..reconcile.harmonics import phasors, coherence, beat_scatter, beat_uncertainty
 
 REF_TILE, F0_BAND, RHO_MIN, Q_DET, RHO_SYNC = 21, 0.15, 0.02, 1e-4, 0.1
+P_DETECT, VAR_PHI_FLOOR = 0.01, np.radians(3.0) ** 2      # sync_weight="detect": F-test level; phase-variance floor (rad²)
+
+
+def detect_p(rho, n, K=3):
+    """p-value of the K-harmonic fit against broadband noise: ρ is the explained-variance fraction of n samples (2K regressors)."""
+    from scipy.stats import f as _F
+    r = min(max(float(rho), 1e-12), 1 - 1e-12)
+    return float(_F.sf((r / (2 * K)) / ((1 - r) / (n - 2 * K - 1)), 2 * K, n - 2 * K - 1)) if n > 2 * K + 1 else 1.0
 
 
 def _measure(q, f0):
     q = np.asarray(q, float); a0, H = phasors(q, f0)
-    return a0, H, beat_scatter(q, f0), coherence(q, f0), beat_uncertainty(q, f0)
+    return a0, H, beat_scatter(q, f0), coherence(q, f0), beat_uncertainty(q, f0), int(np.isfinite(q).sum())
 
 
 def _sync(pa, pb, pw, pz, nT, ref_i, start=None, n_iter=2000):
@@ -74,7 +82,7 @@ def sync_diagnostics(pa, pb, pw, pz, nT, ref_i, psi, n_starts=50, step_deg=5.0, 
 
 
 def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=50, sync_extra_edges=None, stitch_lambda=0.0,
-                   sync_extra_min_rho=0.0, sync_extra_weight=1.0):
+                   sync_extra_min_rho=0.0, sync_extra_weight=1.0, sync_weight="rho"):
     """dc: output of reconcile_dc (needs edges, Qp).  Returns the field dict (H is 3 × nE, u→v frame).
 
     sync_extra_edges: edges outside the carved domain whose repeated measurements also constrain the tile gauge (e.g. the
@@ -100,8 +108,20 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
                 items.append((e, m["tile_id"], m["Q_t"]))
     res = Parallel(n_jobs=n_jobs)(delayed(_measure)(q, tf0[t]) for e, t, q in items)
     meas = {}
-    for (e, t, _), (a0, H, sc, rho, bu) in zip(items, res):
-        meas.setdefault(e, {})[t] = dict(a0=a0, H=H, scatter=sc, rho=rho, var_phi=(bu["var_phi1"], bu["var_phi2"]), var_logpi=bu["var_logpi"])
+    for (e, t, _), (a0, H, sc, rho, bu, n) in zip(items, res):
+        meas.setdefault(e, {})[t] = dict(a0=a0, H=H, scatter=sc, rho=rho, var_phi=(bu["var_phi1"], bu["var_phi2"]), var_logpi=bu["var_logpi"],
+                                         n=n, p_det=detect_p(rho, n) if np.isfinite(rho) else 1.0)
+    # sync_weight: "rho" — w = ρ_a ρ_b over all pairs (canonical); "detect" — only pairs whose fundamental is detected above
+    # broadband noise in both recordings (F-test p < P_DETECT), w = 1 / (var_φa + var_φb) from the beat bootstrap (floored)
+    def _vphi(x):
+        v = x["var_phi"][0]
+        if v is None or not np.isfinite(v):                        # < 3 complete beats: white-noise phase variance ≈ 1 / (2 F)
+            r = min(max(x["rho"], 1e-12), 1 - 1e-12); v = 1.0 / (2.0 * max((r / 6) / ((1 - r) / max(x["n"] - 7, 1)), 1e-9))
+        return max(v, VAR_PHI_FLOOR)
+    def _w(xa, xb):
+        if sync_weight == "detect":
+            return 1.0 / (_vphi(xa) + _vphi(xb)) if xa["p_det"] < P_DETECT and xb["p_det"] < P_DETECT else 0.0
+        return max(xa["rho"], 0.0) * max(xb["rho"], 0.0)
 
     # Tile time gauge ψ (phase synchronisation over vessels seen in two tiles).  Every pair of valid measurements of the
     # same vessel contributes u_a·conj(u_b) (unit H1 phasors) weighted by ρ_a·ρ_b, so weakly pulsatile tiles still link
@@ -120,7 +140,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
                 a, b = ok[i], ok[j]; ua = d[a]["H"][0] / abs(d[a]["H"][0]); ub = d[b]["H"][0] / abs(d[b]["H"][0])
                 if e in xset and min(d[a]["rho"], d[b]["rho"]) < sync_extra_min_rho:
                     continue
-                pa.append(ti[a]); pb.append(ti[b]); pw.append(max(d[a]["rho"], 0.0) * max(d[b]["rho"], 0.0) * (sync_extra_weight if e in xset else 1.0))
+                pa.append(ti[a]); pb.append(ti[b]); pw.append(_w(d[a], d[b]) * (sync_extra_weight if e in xset else 1.0))
                 pz.append(ua * np.conj(ub)); pv.append(vi)
                 if d[a]["rho"] >= RHO_SYNC and d[b]["rho"] >= RHO_SYNC:
                     pairs.append((e, a, b))
@@ -181,7 +201,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
         sc_w[i] = x["scatter"]; rho_w[i] = x["rho"]; a0_w[i] = x["a0"]; vphi_w[:, i] = x["var_phi"]; vpi_w[i] = x["var_logpi"]
     return dict(edges=sub, H=Hf, elig=elig, tile=win_t, psi=psi, scatter=sc_w, rho=rho_w, a0=a0_w, var_phi=vphi_w,
                 var_logpi=vpi_w, f_ref=f_ref, band=sorted(band), ref_tile=ref_tile, Qp=Qp, gauge_sd_deg=gauge_sd_deg,
-                _meas=meas, _pairs=pairs, _sync_diag=diag, n_stitch=n_stitch, stitch_lambda=stitch_lambda)
+                _meas=meas, _pairs=pairs, _sync_diag=diag, n_stitch=n_stitch, stitch_lambda=stitch_lambda, sync_weight=sync_weight)
 
 
 def supported(field, ratio_max=5.0):
