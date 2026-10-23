@@ -135,10 +135,11 @@ def main():
     # col 2 = c the two examples' waveforms, stacked
     # three full-height columns: a heart rate (acquisition time running down) · b organ, transient vs retained shaded, four example
     # vessels · right: c two transient examples (top), d D distributions with the examples marked (middle), two retained examples (bottom)
-    figR = plt.figure(figsize=(7.5, 5.6), facecolor="white")
-    gR = figR.add_gridspec(1, 3, width_ratios=[0.62, 1.45, 1.2], wspace=0.28, left=0.07, right=0.975, top=0.95, bottom=0.08)
-    gRc = gR[2].subgridspec(5, 1, height_ratios=[1, 1, 1.45, 1, 1], hspace=1.0)
-    GA, GB7, GT = gR[0], gR[1], gRc[2]; GX = [gRc[0], gRc[1], gRc[3], gRc[4]]
+    figR = plt.figure(figsize=(7.5, 4.8), facecolor="white")
+    gR = figR.add_gridspec(1, 3, width_ratios=[0.55, 1.3, 1.5], wspace=0.25, left=0.085, right=0.985, top=0.88, bottom=0.1)
+    gRc = gR[2].subgridspec(3, 1, height_ratios=[1, 1.15, 1], hspace=1.05)
+    gR0 = gRc[0].subgridspec(1, 2, wspace=0.12); gR2 = gRc[2].subgridspec(1, 2, wspace=0.12)
+    GA, GB7, GT = gR[0], gR[1], gRc[1]; GX = [gR0[0], gR0[1], gR2[0], gR2[1]]
     figT = plt.figure(figsize=(3.6, 2.9), facecolor="white")       # SI: clock-free Θ21 check (fig7_supp_theta21)
     GTH = figT.add_gridspec(1, 1, left=0.17, right=0.97, top=0.95, bottom=0.17)[0]
     figD = plt.figure(figsize=(7.5, 3.6), facecolor="white")
@@ -220,7 +221,7 @@ def main():
     # the retained set is the heart-rate band (f0 within ±21 % of the reference recording); b–d show it is a reproducible regime
     _te = max(xs_a[ts.index(t)] for t in early); _tr = min(xs_a[ts.index(t)] for t in ts if reg(t) == "S")
     axA.axhline((_te + _tr) / 2, color="0.5", lw=0.7, ls=":")
-    axA.text(0.98, (_te + _tr) / 2 + 3, "end of transient", transform=axA.get_yaxis_transform(), fontsize=6.3, color="0.4", va="top", ha="right")
+    axA.text(0.03, (_te + _tr) / 2 + 4, "end of\ntransient", transform=axA.get_yaxis_transform(), fontsize=8, color="0.4", va="top", ha="left")
     axA.invert_yaxis(); axA.set_ylabel(xlab, fontsize=7.5, labelpad=1); axA.set_xlabel("heart rate $f_0$ (Hz)", fontsize=7.5, labelpad=1)
     axA.tick_params(labelsize=7); axA.spines[["top", "right"]].set_visible(False)
     axA.legend(loc="lower left", bbox_to_anchor=(0.0, 0.0), fontsize=6.5, frameon=False, handletextpad=0.1, borderaxespad=0.1, markerscale=1.1,
@@ -303,7 +304,7 @@ def main():
         ax_.plot(tau_[sel_], q_[sel_] / a0_, color=col_, lw=0.3, alpha=0.1, zorder=2)
         ax_.plot(tg_, fit_ / a0_, color=col_, lw=1.3, zorder=3, label=lab_)
         return a0_, H_
-    T2V, T2A, T2B = (346, 438), 3, 4                        # second transient vessel: tiles 3 → 4, both ρ ≥ 0.9 (sandbox/find_transient2.py)
+    T2V, T2A, T2B = (689, 857), 2, 3                        # second transient vessel: tiles 2 → 3, both ρ ≥ 0.94 (sandbox/find_transient2.py)
     T2e = T2V if T2V in mall else T2V[::-1]
     axs_d = [fig.add_subplot(g_) for g_ in GX]
     _trace(axs_d[0], EXV, EXA, "#b23a48", f"{xs_a[ts.index(EXA)]:.0f} min"); _trace(axs_d[0], EXV, EXB, "#e08a96", f"{xs_a[ts.index(EXB)]:.0f} min")
@@ -316,26 +317,25 @@ def main():
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]
     dRV3 = [_D(xr3_[a_], xr3_[b_]) for i_, a_ in enumerate(rv3_t) for b_ in rv3_t[i_ + 1:]]
     _sp = lambda tl_: xs_a[ts.index(tl_[-1])] - xs_a[ts.index(tl_[0])]
-    ttl_ = [("1", "T", f"transient · {_sp([EXA, EXB]):.0f} min apart · D = {dEX:.2f}"),
-            ("2", "T", f"transient · {_sp([T2A, T2B]):.0f} min apart · D = {dT2:.2f}"),
-            ("3", "S", f"retained · {len(rv_t)} rec. over {_sp(rv_t):.0f} min · D ≤ {max(dRV):.2f}"),
-            ("4", "S", f"retained · {len(rv3_t)} rec. over {_sp(rv3_t):.0f} min · D ≤ {max(dRV3):.2f}")]
+    ttl_ = [("1", "T", f"D = {dEX:.2f}"), ("2", "T", f"D = {dT2:.2f}"), ("3", "S", f"D ≤ {max(dRV):.2f}"), ("4", "S", f"D ≤ {max(dRV3):.2f}")]
     for k_, ax_ in enumerate(axs_d):
         tag_, cl_, sub_ = ttl_[k_]
         ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2])
-        ax_.set_ylim(-1.0, 2.6); ax_.set_yticks([0, 1, 2]); ax_.tick_params(labelsize=6.5)
-        if k_ in (0, 2):
-            ax_.set_xticklabels([])
+        ax_.set_ylim(-1.2, 2.6); ax_.set_yticks([0, 1, 2]); ax_.tick_params(labelsize=6, pad=1)
+        if k_ in (1, 3):
+            ax_.set_yticklabels([])
         else:
-            ax_.set_xlabel("beats (aligned on the fundamental)", fontsize=6.5, labelpad=0)
-        ax_.set_ylabel(r"$Q/\bar Q$", fontsize=7, labelpad=0)
+            ax_.set_ylabel(r"$Q/\bar Q$", fontsize=6.5, labelpad=0)
+        if k_ == 2:
+            ax_.set_xlabel("beats (aligned on fundamental)", fontsize=8, labelpad=0, x=1.06)
         ax_.spines[["top", "right"]].set_visible(False)
         ax_.text(-0.02, 1.06, tag_, transform=ax_.transAxes, fontsize=6.5, fontweight="bold", color="white", va="bottom", ha="right",
                  bbox=dict(boxstyle="circle,pad=0.15", fc=RCOL[cl_], ec="none"))
-        ax_.text(0.02, 1.05, sub_, transform=ax_.transAxes, fontsize=6, color=RCOL[cl_], va="bottom")
-        ax_.legend(loc="upper right", bbox_to_anchor=(1.02, 1.0), fontsize=5.3, frameon=False, handlelength=0.8, borderaxespad=0, labelspacing=0.05,
-                   ncol=2 if cl_ == "S" else 1, columnspacing=0.5, handletextpad=0.3, title="min" if cl_ == "S" else None, title_fontsize=5.3)
+        ax_.text(0.06, 1.05, sub_, transform=ax_.transAxes, fontsize=8, color=RCOL[cl_], va="bottom")
+        pass
     log(f"  (c) examples: transient D {dEX:.2f}, {dT2:.2f}; retained max D {max(dRV):.2f}, {max(dRV3):.2f}")
+    for k0_, nm_ in ((0, "transient: same vessel, 2 recordings"), (2, "retained: same vessel, 3–4 recordings")):
+        _q = axs_d[k0_].get_position(); fig.text(_q.x0 - 0.04, _q.y1 + 0.055, nm_, fontsize=8, color=RCOL["T" if k0_ == 0 else "S"], va="bottom", fontweight="bold")
     label(GX[0], "c")
 
     # ---- e: across all repeat vessels — D, both recordings transient vs both stitchable; examples 1 and 3 marked
@@ -350,14 +350,14 @@ def main():
     for g_, xs_, tag_ in (("E", [dEX], "1"), ("E", [dT2], "2"), ("B", dRV, "3"), ("B", dRV3, "4")):
         for x_ in xs_:
             axD.plot(x_, _on(g_, x_), "o", ms=3.5, mfc="white", mec=SCOL[g_], mew=0.9, zorder=5)
-        xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + {"1": -0.1, "2": -0.06, "3": -0.04, "4": 0.2}[tag_], _on(g_, xm_) + {"1": 0.05, "2": -0.14, "3": 0.34, "4": -0.06}[tag_]),
+        xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + {"1": -0.1, "2": 0.12, "3": -0.04, "4": 0.2}[tag_], _on(g_, xm_) + {"1": 0.05, "2": -0.2, "3": 0.34, "4": -0.06}[tag_]),
                                            fontsize=7, fontweight="bold", color=SCOL[g_], ha="center", arrowprops=dict(arrowstyle="-", lw=0.5, color=SCOL[g_]))
     axD.set_xlim(0, 1.1); axD.set_ylim(0, 1.02); axD.set_yticks([0, 0.5, 1]); axD.spines[["top", "right"]].set_visible(False)
-    axD.set_xlabel("shape difference $D$ (← more reproducible)", fontsize=7, labelpad=1)
+    axD.set_xlabel("shape difference $D$ (← more reproducible)", fontsize=8, labelpad=0)
     axD.set_ylabel("cumulative fraction", fontsize=7.5, labelpad=0); axD.tick_params(labelsize=7)
     axD.legend(title=None, fontsize=6, frameon=False, loc="lower right", handlelength=1.0,
                borderaxespad=0.0, labelspacing=0.15, alignment="left", bbox_to_anchor=(1.02, 0.0))
-    _pt = axD.get_position(); fig.text(_pt.x0 - 0.06, _pt.y1 + 0.01, "d", fontsize=10, fontweight="bold", va="bottom")
+    pass
 
     fig = figT
     # ---- d: clock-free check — the shape phase Θ21 = φ2 − 2φ1 is unchanged by any tile clock offset (φn → φn + nψ)
@@ -448,7 +448,7 @@ def main():
     oyB, oxB = np.nonzero(lab_ >= 0)
     axB7.set_xlim(gxs[oxB.min()] - 15, gxs[oxB.max()] + 15); axB7.set_ylim(gys[oyB.max()] + 15, gys[oyB.min()] - 15)
     axB7.set_aspect("equal"); axB7.set_xticks([]); axB7.set_yticks([]); [s_.set_visible(False) for s_ in axB7.spines.values()]
-    for E_, tag_, k_, off_ in ((EXV, "1", "T", (120, -330)), (T2V, "2", "T", (230, 280)), (RV, "3", "S", (300, 260)), (RV3, "4", "S", (-320, 300))):
+    for E_, tag_, k_, off_ in ((EXV, "1", "T", (-160, 260)), (T2V, "2", "T", (320, -200)), (RV, "3", "S", (300, 260)), (RV3, "4", "S", (-320, 300))):
         e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_)
         axB7.plot(xx_, yy_, color="black", lw=2.6, zorder=5, solid_capstyle="round")
         axB7.annotate("", xy=(cx_, cy_), xytext=(cx_ + off_[0], cy_ + off_[1]), arrowprops=dict(arrowstyle="-", lw=0.7, color="black"), zorder=5)
@@ -985,7 +985,13 @@ def main():
     figP.savefig(OUT_DIR / f"fig8_supp_phase_rho{args.tag}.png", dpi=300, facecolor="white"); figP.savefig(OUT_DIR / f"fig8_supp_phase_rho{args.tag}.pdf", facecolor="white")
     figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.png", dpi=300, facecolor="white"); figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.pdf", facecolor="white")
     figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.png", dpi=300, facecolor="white"); figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.pdf", facecolor="white")
+    def _plos_min_font(f_, lo=8.0):
+        """PLOS Comp Biol: figure text 8–12 pt — raise every smaller text element (labels, ticks, legends, annotations) to `lo`."""
+        for t_ in f_.findobj(matplotlib.text.Text):
+            if t_.get_text() and t_.get_fontsize() < lo:
+                t_.set_fontsize(lo)
     for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync"), (figD, "fig7_supp_detection"), (figT, "fig7_supp_theta21")):
+        _plos_min_font(f_)
         f_.savefig(OUT_DIR / f"{nm_}{args.tag}.png", dpi=300, facecolor="white"); f_.savefig(OUT_DIR / f"{nm_}{args.tag}.pdf", facecolor="white")
         f_.savefig(OUT_DIR / f"{nm_}{args.tag}.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
         log(f"wrote {OUT_DIR / f'{nm_}{args.tag}.png'}")
