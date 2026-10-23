@@ -659,7 +659,8 @@ def main():
         if i_ is None or F["Qp"][i_] == 0:
             continue
         for t, y in x.items():
-            if t not in shown_t or e in ezone_e or not np.isfinite(y["rho"]) or y["rho"] < 0.1 or abs(y["H"][0]) == 0 or np.sign(y["a0"]) != np.sign(F["Qp"][i_]):
+            # admitted to the map by detection of the fundamental above the recording's noise floor (F-test p < 0.01), not a coherence cut
+            if t not in shown_t or e in ezone_e or not np.isfinite(y["rho"]) or y.get("p_det", 1.0) >= 0.01 or abs(y["H"][0]) == 0 or np.sign(y["a0"]) != np.sign(F["Qp"][i_]):
                 continue                                      # (a measurement against the reconciled flow direction is not used, as in the field)
             dl = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(np.sign(F["Qp"][i_]) * y["H"][0] * np.exp(-1j * psi[t]) * np.exp(1j * beta.get(t, 0.0)))))
             V.append((pts(e), (dl + 30) % 360 - 30, y["rho"], t))
@@ -672,15 +673,16 @@ def main():
     def smooth_field(vs, sigma_um, step_px, box):
         """Circular kernel smoothing of vessel delays on a grid: Z = G_σ * Σ w e^{iδ}; masked where the kernel weight is small."""
         (x0, x1), (y0, y1) = box; nx, ny = int((x1 - x0) / step_px) + 1, int((y1 - y0) / step_px) + 1
-        Z = np.zeros((ny, nx), complex); Wg = np.zeros((ny, nx)); Wb = np.zeros((ny, nx))
+        Z = np.zeros((ny, nx), complex); Wg = np.zeros((ny, nx)); Wb = np.zeros((ny, nx)); Cg = np.zeros((ny, nx))
         for p_, dl, w, t in vs:
             ix_ = np.clip(((p_[:, 0] - x0) / step_px).astype(int), 0, nx - 1); iy_ = np.clip(((p_[:, 1] - y0) / step_px).astype(int), 0, ny - 1)
-            np.add.at(Z, (iy_, ix_), w * np.exp(1j * np.radians(dl))); np.add.at(Wg, (iy_, ix_), w)
+            np.add.at(Z, (iy_, ix_), w * np.exp(1j * np.radians(dl))); np.add.at(Wg, (iy_, ix_), w); np.add.at(Cg, (iy_, ix_), 1.0)
             if t in block_t:
                 np.add.at(Wb, (iy_, ix_), w)
         sg = sigma_um / FUSE_UM_PX / step_px
         Zs = gaussian_filter(Z.real, sg) + 1j * gaussian_filter(Z.imag, sg); Ws = gaussian_filter(Wg, sg); Wbs = gaussian_filter(Wb, sg)
-        ok = Ws > 0.15 * np.percentile(Ws[Ws > 0], 75)
+        # coverage from the DENSITY of detected vessels (not their summed ρ): low-coherence but detected recordings still count
+        Cs = gaussian_filter(Cg, sg); ok = Cs > 0.15 * np.percentile(Cs[Cs > 0], 75)
         dd = (np.degrees(np.angle(Zs)) + 30) % 360 - 30
         return np.ma.masked_where(~ok, dd), np.ma.masked_where(~ok, Wbs / np.maximum(Ws, 1e-12)), (x0, x1, y1, y0)
 
