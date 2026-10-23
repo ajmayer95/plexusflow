@@ -656,7 +656,7 @@ def main():
             Vraw.append((V[-1][0], (dr + 30) % 360 - 30, y["rho"], t))
     tdel = {t: (v + 30) % 360 - 30 for t, v in tdel.items()}
     dmax = max(v for t, v in tdel.items() if t in shown_t); vtop = 20 * np.ceil(np.percentile([v[1] for v in V], 98) / 20)
-    cmp = plt.cm.cividis_r; nph = mcolors.Normalize(0, vtop); LEV = np.arange(0, vtop + 1, 20)
+    cmp = plt.cm.plasma; nph = mcolors.Normalize(0, 160); LEV = np.arange(0, vtop + 1, 20)      # colour capped at 160° (rim saturates)
 
     def smooth_field(vs, sigma_um, step_px, box):
         """Circular kernel smoothing of vessel delays on a grid: Z = G_σ * Σ w e^{iδ}; masked where the kernel weight is small."""
@@ -938,7 +938,7 @@ def main():
     axS.set_title("isochrones (20° apart) under alternative β", fontsize=8); labB(axS, "d")
 
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
-    cax = axC.inset_axes([0.2, -0.05, 0.6, 0.028]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=LEV[::3], extend="min")
+    cax = axC.inset_axes([0.2, -0.05, 0.6, 0.028]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=[0, 40, 80, 120, 160], extend="both")
     cb.set_label("phase lag of the fundamental behind DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
     _pC = axC.get_position(); fig.text(_pC.x0 - 0.01, _pC.y1 + 0.03, "c", fontsize=10, fontweight="bold", va="bottom", ha="left")
 
