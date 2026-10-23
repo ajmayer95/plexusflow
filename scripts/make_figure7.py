@@ -643,7 +643,7 @@ def main():
     axC.contour(gx, gy, fbf, levels=[0.5], colors="0.15", linewidths=0.9, linestyles="--", zorder=4)
     if beta_sd:
         bdeg, bsd, _, _ = beta_sd[0]; ys_, xs_ = np.nonzero(fbf > 0.5)
-        axC.text(gx[int(np.median(xs_))], gy[int(np.percentile(ys_, 72))], "second stitching\ncomponent",
+        axC.text(gx[int(np.median(xs_))], gy[int(np.percentile(ys_, 72))], "separately\noriented block",
                  ha="center", va="center", fontsize=7, color="0.15", zorder=7, bbox=dict(fc="white", ec="none", alpha=0.75, pad=1.0))
     Lt = {t: 0.0 for t in band}
     for (a_, b_), w_ in link.items():
@@ -669,7 +669,7 @@ def main():
                                         arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"), zorder=7)
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
-    axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="second stitching component"),
+    axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="separately oriented block"),
                         Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="excluded from reconstruction (Fig. 7)"),
                         Line2D([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.55", label="tile offset undetermined")],
                loc="lower left", bbox_to_anchor=(-0.04, 0.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
@@ -689,8 +689,14 @@ def main():
     log(f"  (c) coherent-overlap graph on retained tiles: components {[sorted(c_) for c_ in comps_]}")
     cmain_ = next(c_ for c_ in comps_ if ref in c_); cother_ = [c_ for c_ in comps_ if c_ is not cmain_]
     GCOL = {"main": "#2b5c8a", "side": "#E69F00"}
-    axG = axC.inset_axes([-0.03, 0.63, 0.31, 0.37], zorder=8); axG.set_aspect("equal"); axG.set_xticks([]); axG.set_yticks([])
-    axG.set_facecolor("white"); [sp_.set_color("0.7") for sp_ in axG.spines.values()]; [sp_.set_linewidth(0.5) for sp_ in axG.spines.values()]
+    # ---- SI figure fig8_supp_block: a overlap graph · b soft mode of the synchronization Laplacian · c estimates of the block offset β ·
+    #      d sensitivity of the phase map to β
+    figB = plt.figure(figsize=(7.5, 6.4), facecolor="white")
+    gB = figB.add_gridspec(2, 2, wspace=0.18, hspace=0.25, left=0.04, right=0.98, top=0.95, bottom=0.06)
+    def labB(ax_, letter):
+        b_ = ax_.get_position(); figB.text(b_.x0 - 0.02, b_.y1 + 0.035, letter, fontsize=10, fontweight="bold", va="bottom")
+    axG = figB.add_subplot(gB[0, 0]); axG.set_aspect("equal"); axG.set_xticks([]); axG.set_yticks([])
+    [sp_.set_visible(False) for sp_ in axG.spines.values()]
     for a_, b_ in Tg.edges():
         axG.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="0.65", lw=0.35, zorder=1)
     # overlaps across the gap: tile pairs (main × side) that share vessels, none coherent (ρ ≥ 0.1) in both recordings
@@ -712,16 +718,116 @@ def main():
         log(f"  (c) inset: cross-gap overlaps (no coherent vessel) {sorted(near_)}; β bridge between inlet tiles {tS_} (side) and {tM_} (main)")
     for t_ in Tg.nodes():
         c_ = GCOL["main"] if t_ in cmain_ else GCOL["side"]
-        axG.plot(*cen[t_], "s" if t_ == ref else "o", ms=7.2 if t_ == ref else 6.6, mfc=c_, mec="black" if t_ == ref else "white", mew=0.5, zorder=3)
-        axG.text(*cen[t_], str(t_), fontsize=3.7, ha="center", va="center", color="white", fontweight="bold", zorder=4)
+        axG.plot(*cen[t_], "s" if t_ == ref else "o", ms=10 if t_ == ref else 9, mfc=c_, mec="black" if t_ == ref else "white", mew=0.5, zorder=3)
+        axG.text(*cen[t_], str(t_), fontsize=5.2, ha="center", va="center", color="white", fontweight="bold", zorder=4)
     from matplotlib.lines import Line2D as _L2g
     axG.legend(handles=[_L2g([], [], color="0.65", lw=0.6, label="coherent shared vessel"),
                         _L2g([], [], color="#b23a48", lw=0.8, ls=(0, (1, 1.2)), label="overlap, not coherent in both"),
                         _L2g([], [], color="black", lw=1.0, ls=(0, (3, 1.5)), label="β: inlet symmetry")],
-               loc="lower left", fontsize=5, frameon=False, handlelength=1.8, borderaxespad=0.15, labelspacing=0.15)
+               loc="lower left", fontsize=6.5, frameon=False, handlelength=1.8, borderaxespad=0.15, labelspacing=0.15)
     allc_ = np.array([cen[t_] for t_ in Tg.nodes()]); pg_ = 140
     axG.set_xlim(allc_[:, 0].min() - pg_, allc_[:, 0].max() + pg_); axG.set_ylim(allc_[:, 1].max() + 5.4 * pg_, allc_[:, 1].min() - 3.2 * pg_)
-    axG.text(0.5, 0.985, "tiles linked by shared\ncoherent vessels", transform=axG.transAxes, ha="center", va="top", fontsize=5.8, color="0.25", linespacing=0.95)
+    axG.set_title("tiles linked by a shared vessel coherent (ρ ≥ 0.1) in both", fontsize=8); labB(axG, "a")
+
+    # b: the synchronization Laplacian (weights Σ ρ_a ρ_b over all shared vessels, DA stubs excluded): soft mode = rotate the block
+    tlB = sorted(Tg.nodes()); ixB = {t_: i_ for i_, t_ in enumerate(tlB)}; WB = np.zeros((len(tlB), len(tlB)))
+    for e_, x_ in meas.items():
+        if e_ in _da_set:
+            continue
+        ok_ = [t_ for t_ in x_ if t_ in ixB and np.isfinite(x_[t_]["rho"])]
+        for i_ in range(len(ok_)):
+            for j_ in range(i_ + 1, len(ok_)):
+                w_ = max(x_[ok_[i_]]["rho"], 0) * max(x_[ok_[j_]]["rho"], 0); WB[ixB[ok_[i_]], ixB[ok_[j_]]] += w_; WB[ixB[ok_[j_]], ixB[ok_[i_]]] += w_
+    dgB = WB.sum(1); evB, VB = np.linalg.eigh(np.eye(len(tlB)) - WB / np.sqrt(np.outer(dgB, dgB))); f2 = VB[:, 1] / np.sqrt(dgB)
+    f2 = f2 / np.abs(f2).max() * (np.sign(f2[ixB[ref]]) * -1 if f2[ixB[ref]] != 0 else 1)
+    side_set_ = max(cother_, key=len) if cother_ else set()
+    cutB = sum(WB[ixB[a_], ixB[b_]] for a_ in side_set_ for b_ in tlB if b_ not in side_set_)
+    log(f"  (SI) Laplacian eigenvalues {', '.join(f'{v:.4f}' for v in evB[:4])}; cut weight {cutB:.3f} of {WB.sum() / 2:.1f}")
+    axL = figB.add_subplot(gB[0, 1]); axL.set_aspect("equal"); axL.set_xticks([]); axL.set_yticks([]); [sp_.set_visible(False) for sp_ in axL.spines.values()]
+    for a_, b_ in Tg.edges():
+        axL.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="0.8", lw=0.35, zorder=1)
+    scL = axL.scatter([cen[t_][0] for t_ in tlB], [cen[t_][1] for t_ in tlB], c=f2, cmap="PuOr", vmin=-1, vmax=1, s=70, edgecolors="0.3", linewidths=0.4, zorder=3)
+    axL.set_xlim(*axG.get_xlim()); axL.set_ylim(*axG.get_ylim())
+    cbL = figB.colorbar(scL, ax=axL, shrink=0.55, pad=0.01); cbL.set_label("soft-mode amplitude $v_2$", fontsize=7); cbL.ax.tick_params(labelsize=6)
+    axE = axL.inset_axes([0.02, 0.06, 0.32, 0.26]); axE.semilogy(np.arange(1, 9), np.maximum(evB[:8], 1e-5), "o-", color="0.25", ms=3, lw=0.8)
+    axE.set_xticks([1, 2, 3, 5, 8]); axE.tick_params(labelsize=5.5, length=1.5, pad=1); axE.set_xlabel("mode", fontsize=6, labelpad=0)
+    axE.set_ylabel("eigenvalue", fontsize=6, labelpad=0); axE.set_ylim(5e-6, 1)
+    axE.annotate(f"$\\lambda_2$ = {evB[1]:.4f}", xy=(2, max(evB[1], 1e-5)), xytext=(3.3, 3e-5), fontsize=5.5, arrowprops=dict(arrowstyle="-", lw=0.4))
+    axL.set_title(f"soft mode: rotate the block (cut {100 * cutB / (WB.sum() / 2):.2f} % of link weight)", fontsize=8); labB(axL, "b")
+
+    # c: estimates of β (main − block, deg) from independent routes
+    zB = {}
+    def _zz(y_, t_):
+        return np.exp(1j * (np.angle(np.sign(y_["a0"]) * y_["H"][0]) - psi[t_]))
+    wl_, zl_ = [], []                                      # every shared vessel across the gap, weight ρρ
+    for e_, x_ in meas.items():
+        if e_ in _da_set:
+            continue
+        for a_ in [t_ for t_ in x_ if t_ in side_set_ and np.isfinite(x_[t_]["rho"])]:
+            for b_ in [t_ for t_ in x_ if t_ in cmain_ and np.isfinite(x_[t_]["rho"])]:
+                # same vessel in both tiles: compare in the vessel's fixed orientation (no per-tile flow-sign flip, unreliable at low ρ)
+                wl_.append(max(x_[a_]["rho"], 0) * max(x_[b_]["rho"], 0))
+                zl_.append(x_[b_]["H"][0] * np.exp(-1j * psi[b_]) * np.conj(x_[a_]["H"][0] * np.exp(-1j * psi[a_])) / max(abs(x_[b_]["H"][0] * x_[a_]["H"][0]), 1e-30))
+    wl_, zl_ = np.array(wl_), np.array(zl_); rngB = np.random.default_rng(3)
+    def _cmean(w_, z_):
+        S_ = (w_ * z_).sum(); bs_ = [np.angle((w_[k_] * z_[k_]).sum() * np.conj(S_)) for k_ in (rngB.integers(0, len(w_), len(w_)) for _ in range(1000))]
+        return np.degrees(np.angle(S_)), np.degrees(np.sqrt(-2 * np.log(abs(np.mean(np.exp(1j * np.array(bs_)))))))
+    est_weak = _cmean(wl_, zl_)
+    from scipy.spatial import cKDTree as _KD                # nearby coherent vessels (different vessels), smoothness calibrated within tiles
+    recB = [(t_, e_, np.asarray(_mid(e_)), _zz(y_, t_)) for e_, x_ in meas.items() if G.has_edge(*e_) and e_ not in _da_set
+            for t_, y_ in x_.items() if t_ in ixB and np.isfinite(y_["rho"]) and y_["rho"] >= 0.12 and abs(y_["H"][0]) > 0]
+    xyB = np.array([r_[2] for r_ in recB]); tB_ = np.array([r_[0] for r_ in recB]); zB_ = np.array([r_[3] for r_ in recB]); eB_ = [r_[1] for r_ in recB]
+    kd_ = _KD(xyB); dmx_ = 250.0 / FUSE_UM_PX; xda_ = np.mean([G.nodes[n_]["x"] for n_ in dom["DA"]])
+    cal_ = [np.angle(zB_[i_] * np.conj(zB_[j_])) for i_, j_ in kd_.query_pairs(dmx_) if tB_[i_] == tB_[j_] and eB_[i_] != eB_[j_]
+            and np.linalg.norm(xyB[i_] - xyB[j_]) >= 150.0 / FUSE_UM_PX]
+    sd_cal = np.sqrt(-2 * np.log(abs(np.mean(np.exp(1j * np.array(cal_))))))
+    prx_, tpx_ = [], set()
+    for i_, j_ in kd_.query_pairs(dmx_):
+        a_, b_ = (i_, j_) if tB_[i_] in side_set_ else (j_, i_)
+        if tB_[a_] in side_set_ and tB_[b_] in cmain_ and eB_[a_] != eB_[b_] and xyB[a_][0] < xda_ and xyB[b_][0] < xda_:
+            prx_.append(zB_[b_] * np.conj(zB_[a_])); tpx_.add((int(tB_[a_]), int(tB_[b_])))
+    est_prox = (np.degrees(np.angle(np.sum(prx_))), np.degrees(sd_cal / np.sqrt(max(len(tpx_), 1)))) if prx_ else (np.nan, np.nan)
+    stub_ = {}
+    for n_ in dom["V"]:
+        for m_ in G.neighbors(n_):
+            f_ = (n_, m_) if (n_, m_) in meas else (m_, n_)
+            if f_ in meas and 14 in meas[f_] and np.isfinite(meas[f_][14]["rho"]):
+                y_ = meas[f_][14]; sd_k = "L" if _mid(f_)[0] < xda_ else "R"
+                if sd_k not in stub_ or y_["rho"] > stub_[sd_k][0]:
+                    stub_[sd_k] = (y_["rho"], np.angle(np.sign(y_["a0"]) * y_["H"][0]))
+    lr_ = np.degrees(np.angle(np.exp(1j * (stub_["L"][1] - stub_["R"][1])))) if len(stub_) == 2 else np.nan
+    bsym = beta_sd[0][:2] if beta_sd else (np.nan, np.nan)
+    log(f"  (SI) β: inlet symmetry {bsym[0]:+.1f} ± {bsym[1]:.1f}; nearby coherent vessels {est_prox[0]:+.0f} ± {est_prox[1]:.0f} "
+        f"({len(prx_)} pairs, tile pairs {sorted(tpx_)}); weak shared vessels {est_weak[0]:+.0f} ± {est_weak[1]:.0f} ({len(wl_)}); tile-14 V stubs L − R {lr_:+.0f}")
+    axF = figB.add_subplot(gB[1, 0]); rowsF = [("arterial-inlet symmetry (used)", *bsym, "black"),
+                                               (f"nearby coherent vessels ({len(prx_)} pairs, ≤ 250 µm)", *est_prox, "#2b5c8a"),
+                                               (f"all weak shared vessels ({len(wl_)})", *est_weak, "#2b5c8a"),
+                                               ("tile 14 vein stubs, left − right (symmetry check)", lr_, np.nan, "0.5")]
+    for k_, (lab_, m_, sdv_, c_) in enumerate(rowsF):
+        y_ = len(rowsF) - k_
+        if np.isfinite(sdv_):
+            axF.plot([m_ - 1.96 * sdv_, m_ + 1.96 * sdv_], [y_, y_], color=c_, lw=1.4, solid_capstyle="butt")
+        axF.plot(m_, y_, "o" if k_ < 3 else "D", color=c_, ms=4.5)
+        axF.text(-118, y_ + 0.22, lab_, fontsize=6.8, va="bottom", color=c_)
+    axF.annotate("DA stub via tile 20 (ρ 0.18): +145°,\nrejected — network model fit much worse", xy=(119, 0.2), xytext=(-118, 0.2), fontsize=6.2, color="#b23a48",
+                 va="center", ha="left", arrowprops=dict(arrowstyle="->", lw=0.6, color="#b23a48"))
+    axF.axvline(0, color="0.75", lw=0.6, ls=":"); axF.set_xlim(-120, 120); axF.set_ylim(-0.4, len(rowsF) + 0.9); axF.set_yticks([])
+    axF.set_xlabel("block offset β (deg; bars 95 %)", fontsize=8); axF.tick_params(labelsize=7); axF.spines[["top", "right", "left"]].set_visible(False)
+    axF.set_title("every route that can see β", fontsize=8); labB(axF, "c")
+
+    # d: sensitivity — isochrones of the composite with β from symmetry (used), from nearby vessels, and ± the weak-link 95 % range
+    axS = figB.add_subplot(gB[1, 1]); organ(axS)
+    axS.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.35, zorder=1, interpolation="bilinear")
+    for d_, col_, ls_, lab_ in ((0.0, "black", "-", f"β = {bsym[0]:+.0f}° (used)"), (est_prox[0] - bsym[0], "#2b5c8a", "--", f"β = {est_prox[0]:+.0f}° (nearby vessels)"),
+                                (1.96 * est_weak[1], "#D55E00", ":", f"β ± {1.96 * est_weak[1]:.0f}° (weak-link 95 %)"), (-1.96 * est_weak[1], "#D55E00", ":", None)):
+        Valt = [(p_, ((dl_ - d_ + 30) % 360) - 30 if t_ in block_t else dl_, w_, t_) for p_, dl_, w_, t_ in V]
+        fa_, _, _ = smooth_field(Valt, 150.0, 6.0, big)
+        axS.contour(gx, gy, fa_, levels=LEV[1:6], colors=[col_], linewidths=0.8 if d_ == 0 else 0.7, linestyles=ls_, zorder=3)
+        if lab_:
+            axS.plot([], [], color=col_, ls=ls_, lw=0.9, label=lab_)
+    axS.contour(gx, gy, np.ma.filled(fb, 0), levels=[0.5], colors="0.15", linewidths=0.9, linestyles="--", zorder=4)
+    axS.legend(loc="lower left", fontsize=6.3, frameon=False, borderaxespad=0.2, handlelength=2.0)
+    axS.set_title("isochrones (20° apart) under alternative β", fontsize=8); labB(axS, "d")
     axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.6, ls="--", alpha=0.45, zorder=5))   # location of a
     axC.add_patch(Polygon(polys[tb], closed=True, fc="none", ec="#D55E00", lw=0.6, ls="--", alpha=0.45, zorder=5))
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
@@ -759,6 +865,7 @@ def main():
     axP.text(0.03, 0.97, f"{len(obs)} tile pairs\nmedian error {np.median(res):.0f}°", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
     fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.png", dpi=300, facecolor="white"); fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.pdf", facecolor="white")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.png", dpi=300, facecolor="white"); figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.pdf", facecolor="white")
     figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.png", dpi=300, facecolor="white"); figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.pdf", facecolor="white")
     for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync")):
         f_.savefig(OUT_DIR / f"{nm_}{args.tag}.png", dpi=300, facecolor="white"); f_.savefig(OUT_DIR / f"{nm_}{args.tag}.pdf", facecolor="white")
