@@ -318,8 +318,8 @@ def main():
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]
     dRV3 = [_D(xr3_[a_], xr3_[b_]) for i_, a_ in enumerate(rv3_t) for b_ in rv3_t[i_ + 1:]]
     _sp = lambda tl_: xs_a[ts.index(tl_[-1])] - xs_a[ts.index(tl_[0])]
-    ttl_ = [("1", "T", f"transient\nD = {dEX:.2f}"), ("2", "T", f"transient\nD = {dT2:.2f}"),
-            ("3", "S", f"retained\nD ≤ {max(dRV):.2f}"), ("4", "S", f"retained\nD {'=' if len(dRV3) == 1 else '≤'} {max(dRV3):.2f}")]
+    ttl_ = [("1", "T", f"transient · D = {dEX:.2f}"), ("2", "T", f"transient · D = {dT2:.2f}"),
+            ("3", "S", f"retained · D ≤ {max(dRV):.2f}"), ("4", "S", f"retained · D {'=' if len(dRV3) == 1 else '≤'} {max(dRV3):.2f}")]
     for k_, ax_ in enumerate(axs_d):
         tag_, cl_, sub_ = ttl_[k_]
         ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2])
@@ -456,12 +456,12 @@ def main():
     axB7.set_aspect("equal"); axB7.set_xticks([]); axB7.set_yticks([]); [s_.set_visible(False) for s_ in axB7.spines.values()]
     for E_, tag_, k_, off_ in ((EXV, "1", "T", (-160, 260)), (T2V, "2", "T", (320, -200)), (RV, "3", "S", (300, 260)), (RV3, "4", "S", (-320, 300))):
         e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_)
-        axB7.plot(xx_, yy_, color="black", lw=3.4, zorder=5, solid_capstyle="round")
+        axB7.plot(xx_, yy_, color="white", lw=6.0, zorder=5, solid_capstyle="round"); axB7.plot(xx_, yy_, color="black", lw=4.0, zorder=5.1, solid_capstyle="round")
         axB7.annotate("", xy=(cx_, cy_), xytext=(cx_ + off_[0], cy_ + off_[1]), arrowprops=dict(arrowstyle="-", lw=0.7, color="black"), zorder=5)
         axB7.plot(cx_ + off_[0], cy_ + off_[1], "o", ms=10, mfc=RCOL[k_], mec="white", mew=0.8, zorder=6)
         axB7.text(cx_ + off_[0], cy_ + off_[1], tag_, fontsize=7, ha="center", va="center", fontweight="bold", color="white", zorder=7)
     axB7.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.28), ec=RCOL["T"], label="transient early recordings"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.16), ec="0.35", label="retained")],
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.16), ec="0.35", label="retained recordings")],
                 loc="upper center", bbox_to_anchor=(0.5, 0.0), fontsize=8, frameon=False, ncol=2, handlelength=1.2, borderaxespad=0, columnspacing=0.8)
     fig = figR; _pb = axB7.get_position(); fig.text(_pb.x0 - 0.02, _pb.y1 + 0.005, "c", fontsize=10, fontweight="bold", va="bottom")
 
