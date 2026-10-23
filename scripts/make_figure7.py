@@ -147,9 +147,10 @@ def main():
     figD = plt.figure(figsize=(7.5, 3.6), facecolor="white")
     gDd = figD.add_gridspec(1, 2, width_ratios=[1, 1.15], wspace=0.25, left=0.06, right=0.975, top=0.9, bottom=0.14)
     GMAP, GK7 = gDd[0], gDd[1]
-    figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
-    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.45, 1], wspace=0.06, left=0.08, right=0.98, top=0.93, bottom=0.1)
-    gL = gS2[0].subgridspec(2, 1, height_ratios=[3.0, 0.8], hspace=0.42); GB, GD, GC = gL[0], gL[1], gS2[1]
+    figS = plt.figure(figsize=(7.5, 6.4), facecolor="white")
+    # a one overlap → relative clock constraint · b overlap network → tile clocks · c validation · d organ phase field
+    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.52, 1], wspace=0.1, left=0.07, right=0.98, top=0.95, bottom=0.07)
+    gL = gS2[0].subgridspec(3, 1, height_ratios=[2.1, 1.35, 0.7], hspace=0.55); GB, GN, GD, GC = gL[0], gL[1], gL[2], gS2[1]
     fig = figR
 
     def label(cell, letter):
@@ -721,7 +722,7 @@ def main():
     label(GB, "a")
 
     # ---- c: organ-scale smoothed delay field with isochrones; the second stitching component dashed, offset β from inlet symmetry
-    axC = fig.add_subplot(GC); organ(axC)
+    axC = fig.add_subplot(GC); organ(axC); axC.set_anchor("C")
     big = ((XL[0], XL[1]), (YL[1], YL[0]))
     fo, fb, ext = smooth_field(V, 150.0, 6.0, big)
     gx = np.linspace(big[0][0], big[0][1], fo.shape[1]); gy = np.linspace(big[1][0], big[1][1], fo.shape[0])
@@ -780,7 +781,7 @@ def main():
     axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="separately oriented block"),
                         Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="excluded from AC reconstruction (Fig. 7)"),
                         Patch(fc="white", ec="0.5", hatch="....", ls=":", lw=0.5, label="tile phase offset undetermined")],
-               loc="lower left", bbox_to_anchor=(-0.04, 0.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
+               loc="upper left", bbox_to_anchor=(0.0, -0.11), fontsize=8, frameon=False, handlelength=1.4, borderaxespad=0, ncol=2, columnspacing=1.0)
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
     # tile centres; its connected components are the synchronization blocks; the dashed bridge = the inlet-symmetry constraint (β)
     import networkx as _nx
@@ -797,6 +798,27 @@ def main():
     log(f"  (c) coherent-overlap graph on retained tiles: components {[sorted(c_) for c_ in comps_]}")
     cmain_ = next(c_ for c_ in comps_ if ref in c_); cother_ = [c_ for c_ in comps_ if c_ is not cmain_]
     GCOL = {"main": "#2b5c8a", "side": "#E69F00"}
+    # ---- b (Fig 8): the overlap network that turns pairwise clock differences into one clock per tile (nodes at tile centres)
+    axN = figS.add_subplot(GN); axN.set_aspect("equal"); axN.set_xticks([]); axN.set_yticks([]); [sp_.set_visible(False) for sp_ in axN.spines.values()]
+    axN.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.18, zorder=0)
+    for a_, b_ in Tg.edges():
+        axN.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="0.55", lw=0.6, zorder=1)
+    for t_ in Tg.nodes():
+        und_ = sd.get(t_, np.inf) > SD_MAX; c_ = GCOL["main"] if t_ in cmain_ else GCOL["side"]
+        axN.plot(*cen[t_], "s" if t_ == ref else "o", ms=6.5 if t_ == ref else 5, mfc="white" if und_ else c_, mec="black" if t_ == ref else c_,
+                 mew=0.9 if und_ else 0.5, zorder=3)
+    allN_ = np.array([cen[t_] for t_ in Tg.nodes()]); pN_ = 160
+    axN.set_xlim(allN_[:, 0].min() - pN_, allN_[:, 0].max() + pN_); axN.set_ylim(allN_[:, 1].max() + pN_, allN_[:, 1].min() - pN_)
+    from matplotlib.lines import Line2D as _L2n
+    axN.legend(handles=[_L2n([], [], ls="none", marker="o", ms=5, mfc=GCOL["main"], mec=GCOL["main"], label="tile clock set"),
+                        _L2n([], [], ls="none", marker="s", ms=6, mfc=GCOL["main"], mec="black", label="reference tile"),
+                        _L2n([], [], ls="none", marker="o", ms=5, mfc=GCOL["side"], mec=GCOL["side"], label="separate block"),
+                        _L2n([], [], ls="none", marker="o", ms=5, mfc="white", mec="0.3", label="clock undetermined"),
+                        _L2n([], [], color="0.55", lw=0.8, label="shared vessel")],
+              loc="upper center", bbox_to_anchor=(0.5, 0.0), fontsize=8, frameon=False, handletextpad=0.3, borderaxespad=0, labelspacing=0.2, ncol=2,
+              columnspacing=0.8)
+    axN.text(0.5, 1.02, r"$\{\Delta\phi_{ab}\}_{\rm overlaps} \rightarrow \{\psi_t\}_{\rm tiles}$", transform=axN.transAxes, ha="center", va="bottom", fontsize=9)
+    _pn = axN.get_position(); figS.text(_pn.x0 - 0.06, _pn.y1 + 0.03, "b", fontsize=10, fontweight="bold", va="bottom")
     # ---- SI figure fig8_supp_block: a overlap graph · b soft mode of the synchronization Laplacian · c estimates of the block offset β ·
     #      d sensitivity of the phase map to β
     figB = plt.figure(figsize=(7.5, 6.4), facecolor="white")
@@ -938,9 +960,9 @@ def main():
     axS.set_title("isochrones (20° apart) under alternative β", fontsize=8); labB(axS, "d")
 
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
-    cax = axC.inset_axes([0.2, -0.05, 0.6, 0.028]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=[0, 40, 80, 120, 160], extend="both")
+    cax = axC.inset_axes([0.2, -0.04, 0.6, 0.022]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=[0, 40, 80, 120, 160], extend="both")
     cb.set_label("phase lag of the fundamental behind DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
-    _pC = axC.get_position(); fig.text(_pC.x0 - 0.01, _pC.y1 + 0.03, "c", fontsize=10, fontweight="bold", va="bottom", ha="left")
+    _pC = axC.get_position(); fig.text(_pC.x0 - 0.01, _pC.y1 + 0.03, "d", fontsize=10, fontweight="bold", va="bottom", ha="left")
 
     # ---- e: repeat-vessel agreement after alignment; H2 is an independent check (not used in the synchronization)
     gDs = GD.subgridspec(1, 2, wspace=0.3); bins = np.linspace(-60, 60, 25)
@@ -956,7 +978,7 @@ def main():
                 bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.4))
     fig.text(GD.get_position(fig).x0 + 0.5 * GD.get_position(fig).width, GD.get_position(fig).y0 - 0.045,
              "repeat-vessel phase difference, aligned (deg)", ha="center", va="top", fontsize=7.5)
-    label(GD, "b")
+    label(GD, "c")
 
 
 
