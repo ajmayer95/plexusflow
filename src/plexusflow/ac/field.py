@@ -14,7 +14,10 @@ import numpy as np
 from ..reconcile.harmonics import phasors, coherence, beat_scatter, beat_uncertainty
 
 REF_TILE, F0_BAND, RHO_MIN, Q_DET, RHO_SYNC = 21, 0.15, 0.02, 1e-4, 0.1
-P_DETECT, VAR_PHI_FLOOR = 0.01, np.radians(3.0) ** 2      # sync_weight="detect": F-test level; phase-variance floor (rad²)
+P_DETECT, VAR_PHI_FLOOR = 0.01, np.radians(3.0) ** 2
+# sync_weight="kappa": every pair is a von Mises observation of ψa − ψb with concentration κ(w), w = ρaρb, κ(w) = κmax·w/(w + w0);
+# fitted by von Mises ML on residuals of well-constrained 21S tiles (sandbox/sync_with_continuity.py, 2026-10-23)
+KAPPA_OV, KAPPA_SEAM = (15.1, 0.0464), (3.4, 0.0089)      # sync_weight="detect": F-test level; phase-variance floor (rad²)
 
 
 def detect_p(rho, n, K=3):
@@ -120,6 +123,8 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
             r = min(max(x["rho"], 1e-12), 1 - 1e-12); v = 1.0 / (2.0 * max((r / 6) / ((1 - r) / max(x["n"] - 7, 1)), 1e-9))
         return max(v, VAR_PHI_FLOOR)
     def _w(xa, xb):
+        if sync_weight == "kappa":
+            w_ = max(xa["rho"], 0.0) * max(xb["rho"], 0.0); return KAPPA_OV[0] * w_ / (w_ + KAPPA_OV[1])
         if sync_weight == "detect":
             return 1.0 / (_vphi(xa) + _vphi(xb)) if xa["p_det"] < P_DETECT and xb["p_det"] < P_DETECT else 0.0
         return max(xa["rho"], 0.0) * max(xb["rho"], 0.0)
@@ -190,7 +195,8 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
                 ra, rb = rec[i_], rec[j_]
                 if ra[0] == rb[0] or ra[1] == rb[1]:
                     continue
-                ea.append(ti[ra[0]]); eb.append(ti[rb[0]]); ew.append(cont_lambda * ra[5] * rb[5]); ez.append(ra[4] * np.conj(rb[4])); ev.append(vi0 + n_cont); n_cont += 1
+                w_ = ra[5] * rb[5]; ea.append(ti[ra[0]]); eb.append(ti[rb[0]])
+                ew.append(cont_lambda * (KAPPA_SEAM[0] * w_ / (w_ + KAPPA_SEAM[1]) if sync_weight == "kappa" else w_)); ez.append(ra[4] * np.conj(rb[4])); ev.append(vi0 + n_cont); n_cont += 1
             pa = np.r_[np.asarray(pa), ea]; pb = np.r_[np.asarray(pb), eb]; pw = np.r_[np.asarray(pw), ew]; pz = np.r_[np.asarray(pz), ez]; pv = np.r_[np.asarray(pv), ev]
     pa, pb, pw, pz, pv = map(np.asarray, (pa, pb, pw, pz, pv))
     pa, pb, pv = pa.astype(int), pb.astype(int), pv.astype(int)

@@ -27,7 +27,7 @@ def main():
     ap.add_argument("--sync-da-min-rho", type=float, default=0.0, help="with --sync-da: use only DA measurements with ρ ≥ this")
     ap.add_argument("--sync-da-weight", type=float, default=1.0, help="with --sync-da: multiply the DA pair weights (≫ 1 = anchor)")
     ap.add_argument("--cont-lambda", type=float, default=0.0, help="weight of plexus seam-continuity pairs in the sync (0 = off; 1 = calibrated)")
-    ap.add_argument("--sync-weight", choices=("rho", "detect"), default="rho",
+    ap.add_argument("--sync-weight", choices=("rho", "detect", "kappa"), default="rho",
                     help="pair weights: ρ_aρ_b (canonical) or detected-in-both (F-test p<0.01) with inverse phase variance")
     args = ap.parse_args(); ref = args.ref_tile
     G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
