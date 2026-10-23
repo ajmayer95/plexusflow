@@ -236,7 +236,7 @@ def main():
     axK.plot(hm_, np.array(fd_) * 100, "o-", color=RCOL["S"], ms=3.5, lw=1.2, label="detected above noise (%, left)")
     axK.set_xscale("log"); axK.set_ylim(0, 102); axK.set_yticks([0, 50, 100])
     axK.set_xlabel("amplitude of the fundamental $|H_1|$ (nL/s)", fontsize=7.5, labelpad=1)
-    axK.set_ylabel("vessels with the fundamental\ndetected above noise (%)", fontsize=7.5, labelpad=1); axK.tick_params(labelsize=7)
+    axK.set_ylabel("vessels with measurable phase\nof the fundamental (%)", fontsize=7.5, labelpad=1); axK.tick_params(labelsize=7)
     axK.spines[["top", "right"]].set_visible(False)
     i50_ = next((i_ for i_, v_ in enumerate(fd_) if v_ >= 0.5), None)
     if i50_ is not None:
