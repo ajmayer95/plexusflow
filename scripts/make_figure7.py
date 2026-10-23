@@ -248,7 +248,7 @@ def main():
     # ---- d: one vessel per regime, Q/Q̄ over two beats (raw trace light, 3-harmonic fit bold); recordings shifted to their own H1 phase
     from plexusflow.reconcile.harmonics import phasors as _phz
     EXV, EXA, EXB = (1206, 1267), 3, 5                     # transient: tiles 3 → 5, 12 min apart
-    LPV, LPT = (24146, 24170), 18                           # low pulsatility: large steady vessel, tile 18 (outside every stitchable tile)
+    LPV, LPT, LPR = (12024, 12102), 16, 15                  # low pulsatility: one vessel, clear in retained tile 15, lost in low tile 16
     RV = (49550, 49649); RVe = RV if RV in mall else RV[::-1]; xr_ = mall[RVe]
     rv_t = sorted([t_ for t_, y_ in xr_.items() if t_ in stitch and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
     EXe = EXV if EXV in mall else EXV[::-1]
@@ -264,14 +264,15 @@ def main():
     axs_d = [fig.add_subplot(g_) for g_ in GX]
     a1_, H1a_ = _trace(axs_d[0], EXV, EXA, "#b23a48", f"tile {EXA}, {xs_a[ts.index(EXA)]:.0f} min")
     a1b_, _ = _trace(axs_d[0], EXV, EXB, "#e08a96", f"tile {EXB}, {xs_a[ts.index(EXB)]:.0f} min")
-    aL_, HL_ = _trace(axs_d[1], LPV, LPT, RCOL["L"], f"tile {LPT}, {xs_a[ts.index(LPT)]:.0f} min")
+    _trace(axs_d[1], LPV, LPR, RCOL["S"], f"tile {LPR} (retained)")
+    aL_, HL_ = _trace(axs_d[1], LPV, LPT, RCOL["L"], f"tile {LPT} (low pulsatility)")
     cRV = plt.cm.viridis(np.linspace(0.05, 0.8, len(rv_t)))
     for t_, c_ in zip(rv_t, cRV):
         _trace(axs_d[2], RV, t_, c_, f"{xs_a[ts.index(t_)]:.0f} min")
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]; dEX = _D(mall[EXe][EXA], mall[EXe][EXB])
-    LPe = LPV if LPV in mall else LPV[::-1]; yL_ = mall[LPe][LPT]
+    LPe = LPV if LPV in mall else LPV[::-1]; yL_ = mall[LPe][LPT]; yLR_ = mall[LPe][LPR]
     ttl_ = [("1  transient", f"12 min apart · D = {dEX:.2f}"),
-            ("2  low pulsatility", f"weak fundamental · ρ = {yL_['rho']:.2f}"),
+            ("2  low pulsatility", f"same vessel · ρ = {yLR_['rho']:.2f} vs {yL_['rho']:.3f}"),
             ("3  retained", f"{len(rv_t)} recordings · D = {min(dRV):.2f}–{max(dRV):.2f}")]
     for k_, (ax_, cl_) in enumerate(zip(axs_d, ("T", "L", "S"))):
         ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2] if k_ == 2 else [0, 1])
@@ -865,6 +866,31 @@ def main():
     axP.text(0.03, 0.97, f"{len(obs)} tile pairs\nmedian error {np.median(res):.0f}°", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
     fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.png", dpi=300, facecolor="white"); fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.pdf", facecolor="white")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # SI fig8_supp_phase_rho: repeat-vessel aligned phase difference vs the weaker recording's coherence (retained tiles)
+    PR_ = []
+    for e_, x_ in meas.items():
+        ok_ = [t_ for t_ in x_ if t_ in stitch and np.isfinite(x_[t_]["rho"]) and abs(x_[t_]["H"][0]) > 0]
+        for i_ in range(len(ok_)):
+            for j_ in range(i_ + 1, len(ok_)):
+                a_, b_ = ok_[i_], ok_[j_]
+                PR_.append((min(x_[a_]["rho"], x_[b_]["rho"]), abs(np.degrees(np.angle(x_[a_]["H"][0] * np.exp(-1j * psi[a_])
+                                                                                      * np.conj(x_[b_]["H"][0] * np.exp(-1j * psi[b_])))))))
+    PR_ = np.array(PR_); edg_ = np.array([0.003, 0.01, 0.02, 0.05, 0.1, 0.2, 0.4, 1.0])
+    figP = plt.figure(figsize=(3.4, 2.6), facecolor="white"); axPR = figP.add_axes([0.17, 0.2, 0.78, 0.72])
+    mids_, med_, q1_, q3_ = [], [], [], []
+    for lo_, hi_ in zip(edg_[:-1], edg_[1:]):
+        m_ = (PR_[:, 0] >= lo_) & (PR_[:, 0] < hi_)
+        if m_.sum() >= 20:
+            mids_.append(np.sqrt(lo_ * hi_)); med_.append(np.median(PR_[m_, 1])); q1_.append(np.percentile(PR_[m_, 1], 25)); q3_.append(np.percentile(PR_[m_, 1], 75))
+            log(f"  (SI) weaker ρ {lo_:.3f}–{hi_:.2f}: {int(m_.sum())} pairs, median |Δφ| {med_[-1]:.0f}°")
+    axPR.fill_between(mids_, q1_, q3_, color="#8fb0d3", alpha=0.5, lw=0); axPR.plot(mids_, med_, "o-", color="#2b5c8a", ms=3.5, lw=1.2)
+    axPR.axhline(90, color="#b23a48", lw=0.8, ls="--"); axPR.text(0.98, 92, "random phase", transform=axPR.get_yaxis_transform(), ha="right", va="bottom",
+                                                                    fontsize=6.5, color="#b23a48")
+    axPR.axvline(0.2, color="0.6", lw=0.6, ls=":"); axPR.text(0.21, 60, "ρ = 0.2", fontsize=6.5, color="0.45")
+    axPR.set_xscale("log"); axPR.set_ylim(0, 120); axPR.set_yticks([0, 30, 60, 90, 120])
+    axPR.set_xlabel("coherence of the weaker recording, ρ", fontsize=7.5); axPR.set_ylabel("repeat-vessel phase difference,\naligned (deg)", fontsize=7.5)
+    axPR.tick_params(labelsize=7); axPR.spines[["top", "right"]].set_visible(False)
+    figP.savefig(OUT_DIR / f"fig8_supp_phase_rho{args.tag}.png", dpi=300, facecolor="white"); figP.savefig(OUT_DIR / f"fig8_supp_phase_rho{args.tag}.pdf", facecolor="white")
     figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.png", dpi=300, facecolor="white"); figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.pdf", facecolor="white")
     figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.png", dpi=300, facecolor="white"); figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.pdf", facecolor="white")
     for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync")):
