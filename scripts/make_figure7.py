@@ -148,8 +148,8 @@ def main():
     gDd = figD.add_gridspec(1, 2, width_ratios=[1, 1.15], wspace=0.25, left=0.06, right=0.975, top=0.9, bottom=0.14)
     GMAP, GK7 = gDd[0], gDd[1]
     figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
-    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06, left=0.08, right=0.97, top=0.93, bottom=0.1)
-    gL = gS2[0].subgridspec(2, 1, height_ratios=[3.0, 0.85], hspace=0.2); GB, GD, GC = gL[0], gL[1], gS2[1]
+    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.45, 1], wspace=0.06, left=0.08, right=0.98, top=0.93, bottom=0.1)
+    gL = gS2[0].subgridspec(2, 1, height_ratios=[3.0, 0.8], hspace=0.42); GB, GD, GC = gL[0], gL[1], gS2[1]
     fig = figR
 
     def label(cell, letter):
@@ -687,7 +687,7 @@ def main():
     side = lambda p_: np.dot(p_.mean(0) - mid_s, nrm_s)
     cmc = plt.cm.twilight_shifted; ncy = mcolors.Normalize(-180, 180)
     gBs = GB.subgridspec(3, 1, height_ratios=[1, 1, 0.36], hspace=0.16)
-    for j_, (VV, ttl) in enumerate(((Vraw, "before alignment"), (V, "after alignment: one offset per tile"))):
+    for j_, (VV, ttl) in enumerate(((Vraw, "before alignment"), (V, "after alignment: one rigid offset per tile"))):
         ax = fig.add_subplot(gBs[j_, 0])
         ax.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.3, zorder=0)
         for p_, dl, w, t in VV:
@@ -725,9 +725,12 @@ def main():
     big = ((XL[0], XL[1]), (YL[1], YL[0]))
     fo, fb, ext = smooth_field(V, 150.0, 6.0, big)
     gx = np.linspace(big[0][0], big[0][1], fo.shape[1]); gy = np.linspace(big[1][0], big[1][1], fo.shape[0])
-    axC.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.9, zorder=1, interpolation="bilinear")
-    cs = axC.contour(gx, gy, fo, levels=LEV, colors="0.1", linewidths=0.45, zorder=3)
-    _cl = axC.clabel(cs, levels=[v for v in LEV if v in (40, 80, 160)], fmt="%d°", fontsize=6.5, inline_spacing=1); _seen = set()
+    axC.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.35, zorder=1, interpolation="bilinear")
+    for p_, dl_, w_, t_ in sorted(V, key=lambda v_: v_[2]):             # the measured, aligned vessel phases (data) over the smoothed field
+        axC.plot(p_[:, 0], p_[:, 1], color=cmp(nph(dl_)), lw=1.1, alpha=min(1.0, 0.45 + w_), solid_capstyle="round", zorder=2)
+    LEVc = LEV[::2]
+    cs = axC.contour(gx, gy, fo, levels=LEVc, colors="0.1", linewidths=0.5, zorder=3)
+    _cl = axC.clabel(cs, levels=[v for v in LEVc if v in (40, 80, 160)], fmt="%d°", fontsize=8, inline_spacing=1); _seen = set()
     for t_ in _cl:                                        # one label per level
         if t_.get_text() in _seen:
             t_.set_visible(False)
@@ -737,8 +740,7 @@ def main():
     axC.contour(gx, gy, fbf, levels=[0.5], colors="0.15", linewidths=0.9, linestyles="--", zorder=4)
     if beta_sd:
         bdeg, bsd, _, _ = beta_sd[0]; ys_, xs_ = np.nonzero(fbf > 0.5)
-        axC.text(gx[int(np.median(xs_))], gy[int(np.percentile(ys_, 72))], "separately\noriented block",
-                 ha="center", va="center", fontsize=7, color="0.15", zorder=7, bbox=dict(fc="white", ec="none", alpha=0.75, pad=1.0))
+        pass                                                       # block is keyed in the legend (dashed outline)
     Lt = {t: 0.0 for t in band}
     for (a_, b_), w_ in link.items():
         Lt[a_] += w_; Lt[b_] += w_
@@ -763,13 +765,13 @@ def main():
         axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="v", ms=5.5, color="white", mec="black", mew=0.6, zorder=6)
     for i in [int(i) for i in dom["out"]]:
         n_ = nds[i]; axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
-    rp = np.array(refpts); axC.annotate("simultaneous DA/V\nreference, 0°", xy=(rp[:, 0].mean(), rp[:, 1].min() - 20),
+    rp = np.array(refpts); axC.annotate("simultaneous DA/V\nphase reference, 0°", xy=(rp[:, 0].mean(), rp[:, 1].min() - 20),
                                         xytext=(rp[:, 0].mean() + 0.30 * (XL[1] - XL[0]), YL[1] + 0.02 * (YL[0] - YL[1])), ha="center", va="top", fontsize=8,
                                         arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"), zorder=7)
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="separately oriented block"),
-                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="transient early recordings (Fig. 7)"),
+                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="excluded from AC reconstruction (Fig. 7)"),
                         Patch(fc="white", ec="0.5", hatch="....", ls=":", lw=0.5, label="tile phase offset undetermined")],
                loc="lower left", bbox_to_anchor=(-0.04, 0.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
@@ -927,8 +929,7 @@ def main():
     axS.contour(gx, gy, np.ma.filled(fb, 0), levels=[0.5], colors="0.15", linewidths=0.9, linestyles="--", zorder=4)
     axS.legend(loc="lower left", fontsize=6.3, frameon=False, borderaxespad=0.2, handlelength=2.0)
     axS.set_title("isochrones (20° apart) under alternative β", fontsize=8); labB(axS, "d")
-    axC.add_patch(Polygon(polys[ta], closed=True, fc="none", ec="#0072B2", lw=0.6, ls="--", alpha=0.45, zorder=5))   # location of a
-    axC.add_patch(Polygon(polys[tb], closed=True, fc="none", ec="#D55E00", lw=0.6, ls="--", alpha=0.45, zorder=5))
+
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
     cax = axC.inset_axes([0.2, -0.05, 0.6, 0.028]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=LEV[::3], extend="min")
     cb.set_label("phase lag of the fundamental behind DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
@@ -941,12 +942,11 @@ def main():
         ax.hist(v, bins=bins, density=True, color="#8fb0d3" if k == 1 else "#c9b6d9", ec="white", lw=0.3)
         ax.set_xlim(-60, 60); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-60, 0, 60])
         ax.axvline(0, color="0.3", lw=0.6, zorder=3); ax.tick_params(axis="x", labelsize=7)
-        ax.text(0.0, 1.0, "fundamental" if k == 1 else "2nd harmonic", transform=ax.transAxes, fontsize=7.5, fontweight="bold", va="bottom")
+        ax.text(0.0, 1.13, "fundamental" if k == 1 else "2nd harmonic", transform=ax.transAxes, fontsize=8, fontweight="bold", va="bottom")
+        ax.text(0.0, 1.01, "used to synchronize" if k == 1 else "not used to synchronize", transform=ax.transAxes, fontsize=8, va="bottom",
+                color="0.3" if k == 1 else "#6a4c93")
         ax.text(0.0, 0.97, f"median $|\\Delta\\phi|$ = {np.median(np.abs(v)):.0f}°", transform=ax.transAxes, fontsize=6.5, va="top", ha="left", color="0.25", zorder=5,
                 bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.4))
-        if k == 2:
-            ax.text(1.0, 0.62, "not used to\nsynchronize", transform=ax.transAxes, fontsize=6.3, ha="right", va="top", color="#6a4c93", fontweight="bold",
-                    bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.5))
     fig.text(GD.get_position(fig).x0 + 0.5 * GD.get_position(fig).width, GD.get_position(fig).y0 - 0.045,
              "repeat-vessel phase difference, aligned (deg)", ha="center", va="top", fontsize=7.5)
     label(GD, "b")
