@@ -131,11 +131,12 @@ def main():
     # Fig 7 = can asynchronously acquired waveforms be treated as measurements of the same pulsatile state?
     #   a heart rate vs acquisition time · b repeat-vessel examples · c waveform-shape difference D · d clock-free shape phase Θ21
     # Local measurability of the fundamental (organ map + detection vs |H1|) is a measurement-method question → SI (fig7_supp_detection)
-    figR = plt.figure(figsize=(7.5, 5.0), facecolor="white")
-    gR = figR.add_gridspec(2, 1, height_ratios=[1, 1], hspace=0.5, left=0.075, right=0.975, top=0.92, bottom=0.09)
-    gRt = gR[0].subgridspec(1, 2, width_ratios=[1, 1.9], wspace=0.25); gRd = gRt[1].subgridspec(1, 2, wspace=0.1)
-    gRb = gR[1].subgridspec(1, 2, wspace=0.3)
-    GA, GX, GT, GTH = gRt[0], [gRd[0], gRd[1]], gRb[0], gRb[1]
+    figR = plt.figure(figsize=(7.5, 2.9), facecolor="white")
+    gR = figR.add_gridspec(1, 3, width_ratios=[1, 1.9, 1.05], wspace=0.3, left=0.07, right=0.98, top=0.83, bottom=0.24)
+    gRd = gR[1].subgridspec(1, 2, wspace=0.1)
+    GA, GX, GT = gR[0], [gRd[0], gRd[1]], gR[2]
+    figT = plt.figure(figsize=(3.6, 2.9), facecolor="white")       # SI: clock-free Θ21 check (fig7_supp_theta21)
+    GTH = figT.add_gridspec(1, 1, left=0.17, right=0.97, top=0.95, bottom=0.17)[0]
     figD = plt.figure(figsize=(7.5, 3.6), facecolor="white")
     gDd = figD.add_gridspec(1, 2, width_ratios=[1, 1.15], wspace=0.25, left=0.06, right=0.975, top=0.9, bottom=0.14)
     GMAP, GK7 = gDd[0], gDd[1]
@@ -212,12 +213,12 @@ def main():
     for k_ in ("T", "S"):
         m_ = np.array([reg(t) == k_ for t in ts])
         axA.scatter(xs_a[m_], f[m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3, label=RLAB[k_])
-    axA.plot(xref, f_ref, "s", ms=6, mfc="none", mec="black", mew=0.9, zorder=4)
-    axA.annotate("reference\ntile", xy=(xref, f_ref), xytext=(xref + 0.18 * xs_a.max(), f_ref - 0.85), fontsize=6, color="0.5", ha="left", linespacing=0.9,
-                 arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
+    # the retained set is the heart-rate band (f0 within ±21 % of the reference recording); b–c show it is a reproducible regime
+    _te = max(xs_a[ts.index(t)] for t in early); _tr = min(xs_a[ts.index(t)] for t in ts if reg(t) == "S")
+    axA.axvline((_te + _tr) / 2, color="0.6", lw=0.6, ls=":")
     axA.set_xlabel(xlab, fontsize=7.5, labelpad=1); axA.set_ylabel("heart rate $f_0$ (Hz)", fontsize=7.5); axA.tick_params(labelsize=7)
     axA.spines[["top", "right"]].set_visible(False)
-    axA.legend(loc="upper left", bbox_to_anchor=(0.0, 1.02), fontsize=6.5, frameon=False, handletextpad=0.1, borderaxespad=0.1, markerscale=1.1,
+    axA.legend(loc="lower right", bbox_to_anchor=(1.0, 0.02), fontsize=6.5, frameon=False, handletextpad=0.1, borderaxespad=0.1, markerscale=1.1,
                labelspacing=0.2)
     label(GA, "a")
 
@@ -317,7 +318,7 @@ def main():
                    columnspacing=0.6)
     log(f"  (d) stitchable vessel {RV}: tiles {rv_t}, pairwise D " + ", ".join(f"{v:.2f}" for v in dRV) + f"; transient vessel D {dEX:.2f}")
     _b0, _b1 = axs_d[0].get_position(), axs_d[1].get_position()
-    fig.text((_b0.x0 + _b1.x1) / 2, _b0.y0 - 0.045, "beats (aligned on the fundamental); same vessel recorded repeatedly", ha="center", va="top", fontsize=7.5)
+    fig.text((_b0.x0 + _b1.x1) / 2, _b0.y0 - 0.075, "beats (aligned on the fundamental); same vessel recorded repeatedly", ha="center", va="top", fontsize=7.5)
     label(GX[0], "b")
 
     # ---- e: across all repeat vessels — D, both recordings transient vs both stitchable; examples 1 and 3 marked
@@ -335,12 +336,13 @@ def main():
         xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + (0.08 if g_ == "E" else -0.08), _on(g_, xm_) + 0.1),
                                            fontsize=7, fontweight="bold", color=SCOL[g_], ha="center", arrowprops=dict(arrowstyle="-", lw=0.5, color=SCOL[g_]))
     axD.set_xlim(0, 1.1); axD.set_ylim(0, 1.02); axD.set_yticks([0, 0.5, 1]); axD.spines[["top", "right"]].set_visible(False)
-    axD.set_xlabel("waveform-shape difference $D$", fontsize=7.5, labelpad=1)
+    axD.set_xlabel("waveform-shape difference $D$\n(normalised harmonic shape)", fontsize=7, labelpad=1)
     axD.set_ylabel("cumulative fraction", fontsize=8, labelpad=1); axD.tick_params(labelsize=7)
     axD.legend(title="repeat vessel,\nboth recordings", title_fontsize=6.3, fontsize=6.3, frameon=False, loc="lower right", handlelength=1.0,
                borderaxespad=0.0, labelspacing=0.15, alignment="left", bbox_to_anchor=(1.02, 0.0))
     label(GT, "c")
 
+    fig = figT
     # ---- d: clock-free check — the shape phase Θ21 = φ2 − 2φ1 is unchanged by any tile clock offset (φn → φn + nψ)
     axTH = fig.add_subplot(GTH)
     for g_, ls_, sel_, lab_ in (("E", "-", 0.2, "transient"), ("B", "-", 0.2, "retained"), ("B", "--", 0.5, "retained, both ρ ≥ 0.5")):
@@ -353,7 +355,7 @@ def main():
     axTH.set_ylabel("cumulative fraction", fontsize=8, labelpad=1); axTH.tick_params(labelsize=7); axTH.spines[["top", "right"]].set_visible(False)
     axTH.legend(title="repeat vessel, both recordings", title_fontsize=6.3, fontsize=6.3, frameon=False, loc="lower right",
                 handlelength=1.6, borderaxespad=0.1, labelspacing=0.15, alignment="left")
-    label(GTH, "d")
+    fig = figR
 
     fig = figD
     # ---- a: organ map of the three regimes (union of each regime's tiles ∩ organ, smoothed) and the example vessels
@@ -945,7 +947,7 @@ def main():
     figP.savefig(OUT_DIR / f"fig8_supp_phase_rho{args.tag}.png", dpi=300, facecolor="white"); figP.savefig(OUT_DIR / f"fig8_supp_phase_rho{args.tag}.pdf", facecolor="white")
     figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.png", dpi=300, facecolor="white"); figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.pdf", facecolor="white")
     figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.png", dpi=300, facecolor="white"); figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.pdf", facecolor="white")
-    for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync"), (figD, "fig7_supp_detection")):
+    for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync"), (figD, "fig7_supp_detection"), (figT, "fig7_supp_theta21")):
         f_.savefig(OUT_DIR / f"{nm_}{args.tag}.png", dpi=300, facecolor="white"); f_.savefig(OUT_DIR / f"{nm_}{args.tag}.pdf", facecolor="white")
         f_.savefig(OUT_DIR / f"{nm_}{args.tag}.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
         log(f"wrote {OUT_DIR / f'{nm_}{args.tag}.png'}")
