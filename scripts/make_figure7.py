@@ -725,9 +725,20 @@ def main():
     big = ((XL[0], XL[1]), (YL[1], YL[0]))
     fo, fb, ext = smooth_field(V, 150.0, 6.0, big)
     gx = np.linspace(big[0][0], big[0][1], fo.shape[1]); gy = np.linspace(big[1][0], big[1][1], fo.shape[0])
-    axC.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.35, zorder=1, interpolation="bilinear")
-    for p_, dl_, w_, t_ in sorted(V, key=lambda v_: v_[2]):             # the measured, aligned vessel phases (data) over the smoothed field
-        axC.plot(p_[:, 0], p_[:, 1], color=cmp(nph(dl_)), lw=1.1, alpha=min(1.0, 0.45 + w_), solid_capstyle="round", zorder=2)
+    # one exclusive partition of the organ: excluded (transient, Fig 7) · clock undetermined (covered ONLY by tiles whose offset SD >
+    # SD_MAX) · reconstructed (field) · no measurable data (organ image only).  The field is masked to the reconstructed part.
+    undet_t = sorted(t for t in stitch if sd.get(t, np.inf) > SD_MAX); det_t = {t for t in stitch if sd.get(t, np.inf) <= SD_MAX}
+    log(f"  (c) retained tiles with undetermined offset (SD > {SD_MAX:.0f}°): " + ", ".join(f"{t} ({sd.get(t, np.nan):.0f}°)" for t in undet_t))
+    mX = _gf((lab_ == 0).astype(float), 1.0)
+    mU = _gf(((lab_ == 2) & _cover(set(undet_t)) & ~_cover(det_t)).astype(float), 30 / stp) if undet_t else np.zeros_like(mX)
+    _ccU, _nU = _lab(mU > 0.5)                                         # drop slivers (< 1 % of the organ)
+    for i_ in range(1, _nU + 1):
+        if (_ccU == i_).sum() < 0.01 * (lab_ >= 0).sum():
+            mU[_ccU == i_] = 0
+    ixg = np.clip(np.round((gx - gxs[0]) / stp).astype(int), 0, len(gxs) - 1); iyg = np.clip(np.round((gy - gys[0]) / stp).astype(int), 0, len(gys) - 1)
+    _bad = (mX[np.ix_(iyg, ixg)] > 0.5) | (mU[np.ix_(iyg, ixg)] > 0.5) | (lab_[np.ix_(iyg, ixg)] < 0)
+    fo = np.ma.masked_where(np.ma.getmaskarray(fo) | _bad, fo)
+    axC.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.85, zorder=1, interpolation="bilinear")
     LEVc = LEV[::2]
     cs = axC.contour(gx, gy, fo, levels=LEVc, colors="0.1", linewidths=0.5, zorder=3)
     _cl = axC.clabel(cs, levels=[v for v in LEVc if v in (40, 80, 160)], fmt="%d°", fontsize=8, inline_spacing=1); _seen = set()
@@ -746,17 +757,13 @@ def main():
         Lt[a_] += w_; Lt[b_] += w_
     L_thr = 0.05 * np.median(list(Lt.values())); weak_t = {t for t in band if Lt[t] < L_thr}
     log(f"  (c) weakly constrained tiles (link < 5 % of median, {L_thr:.2f}): {sorted(weak_t)}")
-    # low-pulsatility region from Fig 7 (smoothed union of the weakly linked tiles ∩ organ, minus stitchable coverage)
+    # transient region from Fig 7 (excluded from AC reconstruction)
     plt.rcParams["hatch.color"] = "0.45"; plt.rcParams["hatch.linewidth"] = 0.5
-    mX = _gf(((lab_ == 0) | (lab_ == 1)).astype(float), 1.0)           # everything Fig 7 excludes (transient + low pulsatility), one mask
     axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["white"], alpha=0.6, zorder=4.4)
     axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=4.5)
     axC.contour(gxs, gys, mX, levels=[0.5], colors=["0.5"], linewidths=0.6, zorder=4.6)
-    # retained (Fig 7: physiologically usable) but absolute phase not identifiable: tile offset SD > SD_MAX — left uncoloured, stippled
-    undet_t = sorted(t for t in stitch if sd.get(t, np.inf) > SD_MAX)
-    log(f"  (c) retained tiles with undetermined offset (SD > {SD_MAX:.0f}°): " + ", ".join(f"{t} ({sd.get(t, np.nan):.0f}°)" for t in undet_t))
+    # retained (Fig 7: physiologically usable) but absolute phase not identifiable — area covered only by tiles with offset SD > SD_MAX
     if undet_t:
-        mU = _gf(((lab_ == 2) & _cover(set(undet_t))).astype(float), 1.0)
         axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["white"], alpha=0.75, zorder=4.4)
         axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["none"], hatches=["...."], zorder=4.5)
         axC.contour(gxs, gys, mU, levels=[0.5], colors=["0.5"], linewidths=0.6, linestyles=":", zorder=4.6)
