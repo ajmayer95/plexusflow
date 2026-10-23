@@ -128,11 +128,17 @@ def main():
     # Fig 7 = the two requirements for the phase-aligned composite, as two blocks.
     #   stationarity (top): a heart rate vs acquisition time · b repeat-vessel waveforms, transient vs retained · c D distributions
     #   phase support (bottom, retained only): d organ map, fundamental detected (|H1|) or not · e detection vs |H1|
-    figR = plt.figure(figsize=(7.5, 5.6), facecolor="white")
-    gR = figR.add_gridspec(2, 1, height_ratios=[1, 1.25], hspace=0.38, left=0.075, right=0.975, top=0.92, bottom=0.07)
-    gRt = gR[0].subgridspec(1, 3, width_ratios=[1, 1.75, 1], wspace=0.32); gRd = gRt[1].subgridspec(1, 2, wspace=0.1)
-    gRb = gR[1].subgridspec(1, 2, width_ratios=[1, 1.15], wspace=0.25)
-    GA, GX, GT, GMAP, GK7 = gRt[0], [gRd[0], gRd[1]], gRt[2], gRb[0], gRb[1]
+    # Fig 7 = can asynchronously acquired waveforms be treated as measurements of the same pulsatile state?
+    #   a heart rate vs acquisition time · b repeat-vessel examples · c waveform-shape difference D · d clock-free shape phase Θ21
+    # Local measurability of the fundamental (organ map + detection vs |H1|) is a measurement-method question → SI (fig7_supp_detection)
+    figR = plt.figure(figsize=(7.5, 5.0), facecolor="white")
+    gR = figR.add_gridspec(2, 1, height_ratios=[1, 1], hspace=0.5, left=0.075, right=0.975, top=0.92, bottom=0.09)
+    gRt = gR[0].subgridspec(1, 2, width_ratios=[1, 1.9], wspace=0.25); gRd = gRt[1].subgridspec(1, 2, wspace=0.1)
+    gRb = gR[1].subgridspec(1, 2, wspace=0.3)
+    GA, GX, GT, GTH = gRt[0], [gRd[0], gRd[1]], gRb[0], gRb[1]
+    figD = plt.figure(figsize=(7.5, 3.6), facecolor="white")
+    gDd = figD.add_gridspec(1, 2, width_ratios=[1, 1.15], wspace=0.25, left=0.06, right=0.975, top=0.9, bottom=0.14)
+    GMAP, GK7 = gDd[0], gDd[1]
     figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
     gS2 = figS.add_gridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06, left=0.08, right=0.97, top=0.93, bottom=0.1)
     gL = gS2[0].subgridspec(2, 1, height_ratios=[3.0, 0.85], hspace=0.2); GB, GD, GC = gL[0], gL[1], gS2[1]
@@ -215,6 +221,7 @@ def main():
                labelspacing=0.2)
     label(GA, "a")
 
+    fig = figD
     # ---- c: phase is measurable where the local pulsatile signal is large enough — per vessel recording (retained tiles):
     #      fraction with the fundamental detected, and the phase uncertainty of detected ones, vs the fundamental's amplitude
     DV_ = []
@@ -243,7 +250,7 @@ def main():
         axK.axvline(hm_[i50_], color="0.7", lw=0.6, ls=":")
         axK.text(hm_[i50_] * 1.08, 40, f"50 % at {hm_[i50_]:.3f} nL/s", fontsize=6.3, color="0.45")
     log(f"  (c) {len(DV_)} retained recordings; detected {DV_[:, 1].mean():.0%}; detection vs |H1|: " + ", ".join(f"{h:.3g}:{v:.0%}" for h, v in zip(hm_, fd_)))
-    label(GK7, "e")
+    label(GK7, "b"); fig = figR
 
     # waveform-shape spectrum of one recording, mean-normalised and clock-free: s_n = H_n e^{−inφ1} / Q̄ (n = 1..3, flow-direction frame).
     # Shape difference of two recordings D = ‖s_a − s_b‖ / rms(‖s_a‖, ‖s_b‖) — the relative RMS difference of the H1-aligned Q/Q̄
@@ -253,7 +260,7 @@ def main():
         return H_ * u_ ** np.arange(1, 4) / abs(y_["a0"])
     def _D(ya, yb):
         sa, sb = _shape(ya), _shape(yb); return np.linalg.norm(sa - sb) / np.sqrt((np.linalg.norm(sa) ** 2 + np.linalg.norm(sb) ** 2) / 2)
-    SP = {"E": [], "B": []}; vD = {"E": {}, "B": {}}
+    SP = {"E": [], "B": []}; vD = {"E": {}, "B": {}}; TH = {"E": [], "B": []}
     for e_, x_ in mall.items():
         ok_ = [t_ for t_, y_ in x_.items() if np.isfinite(y_["rho"]) and y_["rho"] >= 0.2 and abs(y_["a0"]) > 0 and abs(y_["H"][0]) > 0]
         for i_ in range(len(ok_)):
@@ -263,6 +270,8 @@ def main():
                 if g_ is None or np.sign(ya["a0"]) != np.sign(yb["a0"]):
                     continue
                 d_ = _D(ya, yb); SP[g_].append(d_); vD[g_].setdefault(e_, []).append(d_)
+                _th = lambda y_: np.angle(y_["H"][1] * np.conj(y_["H"][0]) ** 2)
+                TH[g_].append((abs(np.degrees(np.angle(np.exp(1j * (_th(ya) - _th(yb)))))), min(ya["rho"], yb["rho"])))
     SP = {k: np.array(v) for k, v in SP.items()}; SCOL = {"E": RCOL["T"], "B": RCOL["S"]}
     SLAB = {"E": "transient", "B": "retained"}
     for g_ in ("E", "B"):
@@ -332,6 +341,21 @@ def main():
                borderaxespad=0.0, labelspacing=0.15, alignment="left", bbox_to_anchor=(1.02, 0.0))
     label(GT, "c")
 
+    # ---- d: clock-free check — the shape phase Θ21 = φ2 − 2φ1 is unchanged by any tile clock offset (φn → φn + nψ)
+    axTH = fig.add_subplot(GTH)
+    for g_, ls_, sel_, lab_ in (("E", "-", 0.2, "transient"), ("B", "-", 0.2, "retained"), ("B", "--", 0.5, "retained, both ρ ≥ 0.5")):
+        a_ = np.array(TH[g_]); v_ = np.sort(a_[a_[:, 1] >= sel_, 0])
+        axTH.step(v_, np.arange(1, len(v_) + 1) / len(v_), where="post", color=SCOL[g_], lw=1.3 if ls_ == "-" else 1.0, ls=ls_,
+                  label=f"{lab_} (median {np.median(v_):.0f}°)")
+        log(f"  (d) |ΔΘ21| {lab_}: n {len(v_)}, median {np.median(v_):.0f}°")
+    axTH.set_xlim(0, 180); axTH.set_xticks([0, 45, 90, 135, 180]); axTH.set_ylim(0, 1.02); axTH.set_yticks([0, 0.5, 1])
+    axTH.set_xlabel(r"change in shape phase $\Theta_{21}=\phi_2-2\phi_1$ (deg)", fontsize=7.5, labelpad=1)
+    axTH.set_ylabel("cumulative fraction", fontsize=8, labelpad=1); axTH.tick_params(labelsize=7); axTH.spines[["top", "right"]].set_visible(False)
+    axTH.legend(title="repeat vessel, both recordings", title_fontsize=6.3, fontsize=6.3, frameon=False, loc="lower right",
+                handlelength=1.6, borderaxespad=0.1, labelspacing=0.15, alignment="left")
+    label(GTH, "d")
+
+    fig = figD
     # ---- a: organ map of the three regimes (union of each regime's tiles ∩ organ, smoothed) and the example vessels
     from matplotlib.path import Path as _MPath
     from scipy.ndimage import gaussian_filter as _gf
@@ -393,7 +417,7 @@ def main():
                          _L2a([], [], color="0.78", lw=1.4, label="not detected")],
                 loc="lower left", bbox_to_anchor=(-0.14, -0.04), fontsize=6.3, frameon=False, handlelength=1.4, borderaxespad=0,
                 handletextpad=0.4, labelspacing=0.25)
-    label(GMAP, "d")
+    label(GMAP, "a"); fig = figR
 
     # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
     figSM = plt.figure(figsize=(4.0, 4.6), facecolor="white"); _fig_main = fig; fig = figSM
@@ -921,7 +945,7 @@ def main():
     figP.savefig(OUT_DIR / f"fig8_supp_phase_rho{args.tag}.png", dpi=300, facecolor="white"); figP.savefig(OUT_DIR / f"fig8_supp_phase_rho{args.tag}.pdf", facecolor="white")
     figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.png", dpi=300, facecolor="white"); figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.pdf", facecolor="white")
     figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.png", dpi=300, facecolor="white"); figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.pdf", facecolor="white")
-    for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync")):
+    for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync"), (figD, "fig7_supp_detection")):
         f_.savefig(OUT_DIR / f"{nm_}{args.tag}.png", dpi=300, facecolor="white"); f_.savefig(OUT_DIR / f"{nm_}{args.tag}.pdf", facecolor="white")
         f_.savefig(OUT_DIR / f"{nm_}{args.tag}.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
         log(f"wrote {OUT_DIR / f'{nm_}{args.tag}.png'}")
