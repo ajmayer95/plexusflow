@@ -131,8 +131,8 @@ def main():
     figR = plt.figure(figsize=(7.5, 6.4), facecolor="white")
     gR = figR.add_gridspec(2, 1, height_ratios=[1.45, 1], hspace=0.36, left=0.075, right=0.975, top=0.94, bottom=0.08)
     gRt = gR[0].subgridspec(1, 2, width_ratios=[1, 1.08], wspace=0.22); gRr = gRt[1].subgridspec(2, 1, hspace=0.62)
-    gRb = gR[1].subgridspec(1, 2, width_ratios=[3, 1.35], wspace=0.2); gRd = gRb[0].subgridspec(1, 3, wspace=0.1)
-    GMAP, GA, GK7, GX, GT = gRt[0], gRr[0], gRr[1], [gRd[0], gRd[1], gRd[2]], gRb[1]
+    gRb = gR[1].subgridspec(1, 2, width_ratios=[3, 1.35], wspace=0.2); gRd = gRb[0].subgridspec(1, 2, wspace=0.1)
+    GMAP, GA, GK7, GX, GT = gRt[0], gRr[0], gRr[1], [gRd[0], gRd[1]], gRb[1]
     figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
     gS2 = figS.add_gridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06, left=0.08, right=0.97, top=0.93, bottom=0.1)
     gL = gS2[0].subgridspec(2, 1, height_ratios=[3.0, 0.85], hspace=0.2); GB, GD, GC = gL[0], gL[1], gS2[1]
@@ -173,7 +173,10 @@ def main():
     Fall = build_ac_field(G, dc, n_boot=0, f0_band=10.0); mall = Fall["_meas"]
     early = {t for t in ts if t not in band and tf0[t] < f_ref * (1 - BAND)}; N_MEAS = 15
     nmeas = {t: sum(1 for x in mall.values() if t in x and np.isfinite(x[t]["rho"]) and x[t]["rho"] >= 0.2) for t in ts}
-    lowp = {t for t in band if nmeas[t] < N_MEAS}; stitch = set(band) - lowp
+    # regimes are temporal only: transient (early) vs retained (all band tiles).  Whether a vessel's phase is measurable is a
+    # local, per-vessel property (panels a, c), not a tile class: one tile can hold a detected vein, pulsatile plexus and undetected
+    # small vessels.  Whether a tile's clock is identifiable is decided in Fig 8.
+    lowp = set(); stitch = set(band)
     # the early-tile footprint is transient as a whole: vessels whose midpoint lies inside it are left out of the retained displays
     # and statistics even where a retained tile's edge also recorded them (8 vessels, tiles 14 / 15); the synchronization is unchanged
     from matplotlib.path import Path as _MPath
@@ -184,13 +187,24 @@ def main():
     ezone_e = {e_ for e_ in mall if G.has_edge(*e_) and any(pp_.contains_point(_mid(e_)) for pp_ in _ep)}
     log(f"  early-tile footprint: {len(ezone_e)} vessels")
     RCOL = {"T": "#b23a48", "L": "#8a8a8a", "S": "#2b5c8a"}
-    RLAB = {"T": "transient", "L": "low pulsatility", "S": "retained"}
+    RLAB = {"T": "transient", "L": "", "S": "retained"}
+    # detection of the fundamental above broadband noise, per measurement: F-test of the 3-harmonic fit (ρ = explained-variance
+    # fraction of n samples, 6 regressors); detected = p < P_DET
+    from scipy.stats import f as _Fd
+    P_DET = 0.01; _nsamp = {}
+    for e_ in G.edges:
+        for m_ in G.edges[e_].get("measurements_piv") or []:
+            if m_.get("Q_t") is not None:
+                _nsamp[(e_, int(m_["tile_id"]))] = _nsamp[(e_[::-1], int(m_["tile_id"]))] = len(m_["Q_t"])
+    def _pdet(e_, t_, y_):
+        n_ = _nsamp.get((e_, t_)); r_ = min(max(y_["rho"], 1e-12), 1 - 1e-12)
+        return float(_Fd.sf((r_ / 6) / ((1 - r_) / (n_ - 7)), 6, n_ - 7)) if n_ and n_ > 7 else 1.0
     reg = lambda t: "T" if t in early else ("L" if t in lowp else ("S" if t in stitch else None))
     log(f"  regimes: transient {sorted(early)}; low pulsatility {sorted(lowp)}; retained {len(stitch)} tiles")
 
     # ---- b: heart rate over the acquisition, coloured by regime
     axA.axhspan(f_ref * (1 - BAND), f_ref * (1 + BAND), color="#eef1f5", zorder=0, lw=0)
-    for k_ in ("T", "L", "S"):
+    for k_ in ("T", "S"):
         m_ = np.array([reg(t) == k_ for t in ts])
         axA.scatter(xs_a[m_], f[m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3, label=RLAB[k_])
     axA.plot(xref, f_ref, "s", ms=6, mfc="none", mec="black", mew=0.9, zorder=4)
@@ -203,22 +217,40 @@ def main():
                labelspacing=0.2)
     label(GA, "b")
 
-    # ---- c: where the pulsation is too weak to measure a phase — per tile, vessels with measurable H1 phase vs pulsatile amplitude
-    from scipy.stats import spearmanr as _spr
-    h1t7 = {t: np.median([abs(x[t]["H"][0]) for x in mall.values() if t in x and np.isfinite(x[t]["rho"])]) for t in ts}
-    axK = fig.add_subplot(GK7); tl_k = [t for t in ts if reg(t) is not None]
-    for k_ in ("S", "L", "T"):
-        m_ = [t for t in tl_k if reg(t) == k_]
-        axK.scatter([h1t7[t] for t in m_], [max(nmeas[t], 0.6) for t in m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3)
-    axK.axhline(N_MEAS, color="0.6", lw=0.6, ls=":"); axK.set_xscale("log"); axK.set_yscale("log"); axK.set_ylim(0.45, 320)
-    axK.set_yticks([0.6, 1, 10, 100]); axK.set_yticklabels(["0", "1", "10", "100"])
-    axK.text(0.99, N_MEAS * 1.15, "threshold", transform=axK.get_yaxis_transform(), ha="right", va="bottom", fontsize=6.5, color="0.45")
-    axK.set_xlabel("amplitude of the fundamental, tile median $|H_1|$ (nL/s)", fontsize=7.5, labelpad=1)
-    axK.set_ylabel("vessels with measurable\nphase of the fundamental", fontsize=7.5, labelpad=1); axK.tick_params(labelsize=7)
-    axK.spines[["top", "right"]].set_visible(False)
-    rs7 = _spr([h1t7[t] for t in tl_k], [nmeas[t] for t in tl_k])[0]
-    axK.text(0.02, 0.97, f"Spearman $r_s$ = {rs7:.2f}", transform=axK.transAxes, fontsize=6.5, va="top", color="0.3")
-    log(f"  (c) phase-measurable vessels vs median |H1| (all tiles): Spearman {rs7:+.2f}")
+    # ---- c: phase is measurable where the local pulsatile signal is large enough — per vessel recording (retained tiles):
+    #      fraction with the fundamental detected, and the phase uncertainty of detected ones, vs the fundamental's amplitude
+    DV_ = []
+    for e_, x_ in mall.items():
+        if e_ in ezone_e:
+            continue
+        for t_, y_ in x_.items():
+            if t_ in stitch and np.isfinite(y_["rho"]) and abs(y_["H"][0]) > 0:
+                vp_ = y_["var_phi"][0]
+                DV_.append((abs(y_["H"][0]), _pdet(e_, t_, y_) < P_DET, np.degrees(np.sqrt(vp_)) if vp_ is not None and np.isfinite(vp_) else np.nan))
+    DV_ = np.array(DV_, float); hb_ = np.logspace(np.log10(np.percentile(DV_[:, 0], 1)), np.log10(np.percentile(DV_[:, 0], 99.5)), 13)
+    hm_, fd_, ps_ = [], [], []
+    for lo_, hi_ in zip(hb_[:-1], hb_[1:]):
+        m_ = (DV_[:, 0] >= lo_) & (DV_[:, 0] < hi_)
+        if m_.sum() >= 15:
+            hm_.append(np.sqrt(lo_ * hi_)); fd_.append(DV_[m_, 1].mean()); dd_ = m_ & (DV_[:, 1] == 1)
+            ps_.append(np.nanmedian(DV_[dd_, 2]) if dd_.sum() >= 5 else np.nan)
+    axK = fig.add_subplot(GK7)
+    axK.plot(hm_, np.array(fd_) * 100, "o-", color=RCOL["S"], ms=3.5, lw=1.2, label="detected above noise (%, left)")
+    axK.set_xscale("log"); axK.set_ylim(0, 102); axK.set_yticks([0, 50, 100])
+    axK.set_xlabel("amplitude of the fundamental $|H_1|$ (nL/s)", fontsize=7.5, labelpad=1)
+    axK.set_ylabel("detected (%)", fontsize=7.5, labelpad=1, color=RCOL["S"]); axK.tick_params(labelsize=7)
+    axK2 = axK.twinx(); axK2.plot(hm_, ps_, "s--", color="0.4", ms=3, lw=0.9); axK2.set_ylim(0, 40); axK2.set_yticks([0, 20, 40])
+    axK2.tick_params(labelsize=7, pad=1); axK2.set_ylabel("")
+    from matplotlib.lines import Line2D as _L2c
+    axK.legend(handles=[_L2c([], [], color=RCOL["S"], marker="o", ms=3.5, lw=1.2, label="fundamental detected (%, left)"),
+                        _L2c([], [], color="0.4", marker="s", ms=3, lw=0.9, ls="--", label="phase uncertainty if detected (deg, right)")],
+               loc="upper left", bbox_to_anchor=(0.0, 1.0), fontsize=6.3, frameon=False, handlelength=1.8, borderaxespad=0.2)
+    axK.spines[["top"]].set_visible(False); axK2.spines[["top"]].set_visible(False)
+    i50_ = next((i_ for i_, v_ in enumerate(fd_) if v_ >= 0.5), None)
+    if i50_ is not None:
+        axK.axvline(hm_[i50_], color="0.7", lw=0.6, ls=":")
+        axK.text(hm_[i50_] * 1.08, 40, f"50 % at {hm_[i50_]:.3f} nL/s", fontsize=6.3, color="0.45")
+    log(f"  (c) {len(DV_)} retained recordings; detected {DV_[:, 1].mean():.0%}; detection vs |H1|: " + ", ".join(f"{h:.3g}:{v:.0%}" for h, v in zip(hm_, fd_)))
     label(GK7, "c")
 
     # waveform-shape spectrum of one recording, mean-normalised and clock-free: s_n = H_n e^{−inφ1} / Q̄ (n = 1..3, flow-direction frame).
@@ -264,19 +296,15 @@ def main():
     axs_d = [fig.add_subplot(g_) for g_ in GX]
     a1_, H1a_ = _trace(axs_d[0], EXV, EXA, "#b23a48", f"tile {EXA}, {xs_a[ts.index(EXA)]:.0f} min")
     a1b_, _ = _trace(axs_d[0], EXV, EXB, "#e08a96", f"tile {EXB}, {xs_a[ts.index(EXB)]:.0f} min")
-    _trace(axs_d[1], LPV, LPR, RCOL["S"], f"tile {LPR} (retained)")
-    aL_, HL_ = _trace(axs_d[1], LPV, LPT, RCOL["L"], f"tile {LPT} (low pulsatility)")
     cRV = plt.cm.viridis(np.linspace(0.05, 0.8, len(rv_t)))
     for t_, c_ in zip(rv_t, cRV):
-        _trace(axs_d[2], RV, t_, c_, f"{xs_a[ts.index(t_)]:.0f} min")
+        _trace(axs_d[1], RV, t_, c_, f"{xs_a[ts.index(t_)]:.0f} min")
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]; dEX = _D(mall[EXe][EXA], mall[EXe][EXB])
-    LPe = LPV if LPV in mall else LPV[::-1]; yL_ = mall[LPe][LPT]; yLR_ = mall[LPe][LPR]
-    ttl_ = [("1  transient", f"12 min apart · D = {dEX:.2f}"),
-            ("2  low pulsatility", f"same vessel · ρ = {yLR_['rho']:.2f} vs {yL_['rho']:.3f}"),
-            ("3  retained", f"{len(rv_t)} recordings · D = {min(dRV):.2f}–{max(dRV):.2f}")]
-    for k_, (ax_, cl_) in enumerate(zip(axs_d, ("T", "L", "S"))):
-        ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2] if k_ == 2 else [0, 1])
-        ax_.set_ylim(-1.0, 2.6); ax_.set_xlabel("beats (aligned on the fundamental)" if k_ == 1 else "", fontsize=7.5, labelpad=1); ax_.tick_params(labelsize=7)
+    ttl_ = [("1  transient", f"same vessel, 12 min apart · D = {dEX:.2f}"),
+            ("2  retained", f"same vessel, {len(rv_t)} recordings · D = {min(dRV):.2f}–{max(dRV):.2f}")]
+    for k_, (ax_, cl_) in enumerate(zip(axs_d, ("T", "S"))):
+        ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2] if k_ == 1 else [0, 1])
+        ax_.set_ylim(-1.0, 2.6); ax_.set_xlabel("beats (aligned on the fundamental)", fontsize=7.5, labelpad=1); ax_.tick_params(labelsize=7)
         ax_.spines[["top", "right"]].set_visible(False)
         ax_.text(0.0, 1.13, ttl_[k_][0], transform=ax_.transAxes, fontsize=7.5, fontweight="bold", color=RCOL[cl_], va="bottom")
         ax_.text(0.0, 1.02, ttl_[k_][1], transform=ax_.transAxes, fontsize=6.2, color="0.35", va="bottom")
@@ -284,7 +312,7 @@ def main():
             ax_.set_ylabel(r"$Q\,/\,\bar Q$", fontsize=8, labelpad=1)
         else:
             ax_.set_yticklabels([])
-        ax_.legend(loc="lower left", fontsize=5.8, frameon=False, handlelength=0.9, borderaxespad=0.1, labelspacing=0.1, ncol=2 if k_ == 2 else 1,
+        ax_.legend(loc="lower left", fontsize=5.8, frameon=False, handlelength=0.9, borderaxespad=0.1, labelspacing=0.1, ncol=2 if k_ == 1 else 1,
                    columnspacing=0.6)
     log(f"  (d) stitchable vessel {RV}: tiles {rv_t}, pairwise D " + ", ".join(f"{v:.2f}" for v in dRV) + f"; transient vessel D {dEX:.2f}")
     label(GX[0], "d")
@@ -298,7 +326,7 @@ def main():
         axD.plot([m_, m_], [0, 0.5], color=SCOL[g_], lw=0.6, ls=":", zorder=2)
         axD.text(m_, 0.5, f"  {m_:.2f}", color=SCOL[g_], fontsize=7, ha="left", va="top" if g_ == "E" else "bottom", fontweight="bold")
     _on = lambda g_, x_: np.searchsorted(ecdf_[g_], x_, side="right") / len(ecdf_[g_])
-    for g_, xs_, tag_ in (("E", [dEX], "1"), ("B", dRV, "3")):
+    for g_, xs_, tag_ in (("E", [dEX], "1"), ("B", dRV, "2")):
         for x_ in xs_:
             axD.plot(x_, _on(g_, x_), "o", ms=3.5, mfc="white", mec=SCOL[g_], mew=0.9, zorder=5)
         xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + (0.08 if g_ == "E" else -0.08), _on(g_, xm_) + 0.1),
@@ -349,14 +377,23 @@ def main():
     axMp = fig.add_subplot(GMAP)
     axMp.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.25, zorder=0)
     plt.rcParams["hatch.linewidth"] = 0.5; plt.rcParams["hatch.color"] = "0.45"
-    axMp.contourf(gxs, gys, mS, levels=[0.5, 2], colors=[RCOL["S"]], alpha=0.22, zorder=1)
-    axMp.contourf(gxs, gys, mL, levels=[0.5, 2], colors=[RCOL["L"]], alpha=0.18, zorder=1)
-    axMp.contourf(gxs, gys, mL, levels=[0.5, 2], colors=["none"], hatches=["/////"], zorder=1)
     axMp.contourf(gxs, gys, mT, levels=[0.5, 2], colors=[RCOL["T"]], alpha=0.3, zorder=1)
+    # per vessel (retained recordings; best-ρ recording of each vessel): fundamental detected → coloured by its amplitude, else grey
+    cmH = plt.cm.viridis; nH = mcolors.LogNorm(2e-3, 5e-2); vmap_ = []
+    for e_, x_ in mall.items():
+        if e_ in ezone_e or not G.has_edge(*e_):
+            continue
+        rr_ = [(y_["rho"], t_) for t_, y_ in x_.items() if t_ in stitch and np.isfinite(y_["rho"]) and abs(y_["H"][0]) > 0]
+        if not rr_:
+            continue
+        t_ = max(rr_)[1]; y_ = x_[t_]; vmap_.append((e_, _pdet(e_, t_, y_) < P_DET, abs(y_["H"][0])))
+    for e_, d_, h_ in sorted(vmap_, key=lambda v_: (v_[1], v_[2])):
+        xx_, yy_ = _path(e_)
+        axMp.plot(xx_, yy_, color=cmH(nH(h_)) if d_ else "0.72", lw=0.9 if d_ else 0.45, zorder=3 if d_ else 2.5, solid_capstyle="round")
+    log(f"  (a) map: {len(vmap_)} retained vessels, {sum(v_[1] for v_ in vmap_)} with the fundamental detected")
     axMp.contour(gxs, gys, _gf((lab_ >= 0).astype(float), 1.0), levels=[0.5], colors=["0.3"], linewidths=1.0, zorder=2)   # organ outline
-    for m_ in (mT, mL):                                                                                    # shared internal boundaries
-        axMp.contour(gxs, gys, m_, levels=[0.5], colors=["0.15"], linewidths=1.0, zorder=2)
-    for E_, tag_, k_, off_ in ((EXV, "1", "T", (-330, -260)), (LPV, "2", "L", (330, 120)), (RV, "3", "S", (330, -260))):
+    axMp.contour(gxs, gys, mT, levels=[0.5], colors=[RCOL["T"]], linewidths=1.0, zorder=4)
+    for E_, tag_, k_, off_ in ((EXV, "1", "T", (-330, -260)), (RV, "2", "S", (330, -260))):
         e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_)
         axMp.plot(xx_, yy_, color="black", lw=2.2, zorder=5, solid_capstyle="round")
         axMp.annotate("", xy=(cx_, cy_), xytext=(cx_ + off_[0], cy_ + off_[1]), arrowprops=dict(arrowstyle="-", lw=0.7, color="black"), zorder=6)
@@ -365,11 +402,15 @@ def main():
     oy_, ox_ = np.nonzero(lab_ >= 0); pad2 = 60
     axMp.set_xlim(gxs[ox_.min()] - pad2, gxs[ox_.max()] + pad2); axMp.set_ylim(gys[oy_.max()] + pad2, gys[oy_.min()] - pad2)
     axMp.set_aspect("equal"); axMp.set_xticks([]); axMp.set_yticks([]); [s_.set_visible(False) for s_ in axMp.spines.values()]
+    from matplotlib.lines import Line2D as _L2a
     axMp.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.35), ec=RCOL["T"], label="transient early recordings"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["L"], 0.18), ec=RCOL["L"], hatch="/////", label="low pulsatility"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.22), ec=RCOL["S"], label="retained")],
-                loc="upper center", bbox_to_anchor=(0.5, 0.0), fontsize=6.5, frameon=False, handlelength=1.4, borderaxespad=0, ncol=3,
-                columnspacing=1.0, handletextpad=0.4)
+                         _L2a([], [], color="0.72", lw=1.0, label="fundamental not detected")],
+                loc="upper left", bbox_to_anchor=(0.0, 0.0), fontsize=6.5, frameon=False, handlelength=1.4, borderaxespad=0, ncol=1,
+                handletextpad=0.4, labelspacing=0.25)
+    caxH = axMp.inset_axes([0.6, -0.065, 0.36, 0.025]); cbH = fig.colorbar(plt.cm.ScalarMappable(norm=nH, cmap=cmH), cax=caxH, orientation="horizontal", ticks=[0.002, 0.005, 0.01, 0.02, 0.05])
+    cbH.ax.set_xticklabels(["0.002", "0.005", "0.01", "0.02", "0.05"]); cbH.ax.minorticks_off()
+    cbH.ax.tick_params(labelsize=6, pad=1); cbH.outline.set_linewidth(0.4); cbH.ax.xaxis.set_label_position("top")
+    cbH.set_label("detected: $|H_1|$ (nL/s)", fontsize=6.5, labelpad=1)
     label(GMAP, "a")
 
     # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
@@ -676,7 +717,7 @@ def main():
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     axC.legend(handles=[Patch(fc="none", ec="0.15", ls="--", label="separately oriented block"),
-                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="excluded from reconstruction (Fig. 7)"),
+                        Patch(fc="white", ec="0.45", hatch="//////", lw=0.5, label="transient early recordings (Fig. 7)"),
                         Patch(fc="white", ec="0.5", hatch="....", ls=":", lw=0.5, label="tile phase offset undetermined")],
                loc="lower left", bbox_to_anchor=(-0.04, 0.0), fontsize=6, frameon=False, handlelength=1.4, borderaxespad=0)
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
