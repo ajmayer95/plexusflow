@@ -293,7 +293,7 @@ def main():
     RV = (49550, 49649); RVe = RV if RV in mall else RV[::-1]; xr_ = mall[RVe]
     rv_t = sorted([t_ for t_, y_ in xr_.items() if t_ in stitch and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
     # example 3: retained, other half of the organ, recordings 40 min apart (sandbox/find_example3.py)
-    RV3 = (20401, 20993); RV3e = RV3 if RV3 in mall else RV3[::-1]; xr3_ = mall[RV3e]
+    RV3 = (71514, 71560); RV3e = RV3 if RV3 in mall else RV3[::-1]; xr3_ = mall[RV3e]   # intermediate D (sandbox/find_retained_mid.py)
     rv3_t = sorted([t_ for t_, y_ in xr3_.items() if t_ in stitch and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
     EXe = EXV if EXV in mall else EXV[::-1]
     def _trace(ax_, E_, t_, col_, lab_):
@@ -319,7 +319,7 @@ def main():
     dRV3 = [_D(xr3_[a_], xr3_[b_]) for i_, a_ in enumerate(rv3_t) for b_ in rv3_t[i_ + 1:]]
     _sp = lambda tl_: xs_a[ts.index(tl_[-1])] - xs_a[ts.index(tl_[0])]
     ttl_ = [("1", "T", f"transient\nD = {dEX:.2f}"), ("2", "T", f"transient\nD = {dT2:.2f}"),
-            ("3", "S", f"retained\nD ≤ {max(dRV):.2f}"), ("4", "S", f"retained\nD ≤ {max(dRV3):.2f}")]
+            ("3", "S", f"retained\nD ≤ {max(dRV):.2f}"), ("4", "S", f"retained\nD {'=' if len(dRV3) == 1 else '≤'} {max(dRV3):.2f}")]
     for k_, ax_ in enumerate(axs_d):
         tag_, cl_, sub_ = ttl_[k_]
         ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2])
@@ -340,7 +340,7 @@ def main():
     log(f"  (c) examples: transient D {dEX:.2f}, {dT2:.2f}; retained max D {max(dRV):.2f}, {max(dRV3):.2f}")
     _q0, _q1 = axs_d[0].get_position(), axs_d[1].get_position()
     fig.text((_q0.x0 + _q1.x1) / 2, _q0.y1 + 0.07, "same vessel measured repeatedly", fontsize=8, ha="center", va="bottom", fontweight="bold", color="0.2")
-    _q0_ = axs_d[0].get_position(); fig.text(_q0_.x0 - 0.06, _q0_.y1 + 0.075, "d", fontsize=10, fontweight="bold", va="bottom")
+    # the examples belong to panel c (bottom row = map + examples); no separate letter
 
     # ---- e: across all repeat vessels — D, both recordings transient vs both stitchable; examples 1 and 3 marked
     axD = fig.add_subplot(GT); ecdf_ = {}
