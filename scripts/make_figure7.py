@@ -731,7 +731,11 @@ def main():
     undet_t = sorted(t for t in stitch if sd.get(t, np.inf) > SD_MAX); det_t = {t for t in stitch if sd.get(t, np.inf) <= SD_MAX}
     log(f"  (c) retained tiles with undetermined offset (SD > {SD_MAX:.0f}°): " + ", ".join(f"{t} ({sd.get(t, np.nan):.0f}°)" for t in undet_t))
     mX = _gf((lab_ == 0).astype(float), 1.0)
-    mU = _gf(((lab_ == 2) & _cover(set(undet_t)) & ~_cover(det_t)).astype(float), 30 / stp) if undet_t else np.zeros_like(mX)
+    # clock unresolved = not reconstructed by the field AND recorded by an unresolved tile (even if a solved neighbour's edge also covers it)
+    _recon = np.zeros(GX_.shape, bool)
+    _ixf = np.clip(np.round((gxs - gx[0]) / (gx[1] - gx[0])).astype(int), 0, len(gx) - 1); _iyf = np.clip(np.round((gys - gy[0]) / (gy[1] - gy[0])).astype(int), 0, len(gy) - 1)
+    _recon = ~np.ma.getmaskarray(fo)[np.ix_(_iyf, _ixf)]
+    mU = _gf(((lab_ == 2) & _cover(set(undet_t)) & ~_recon).astype(float), 30 / stp) if undet_t else np.zeros_like(mX)
     _ccU, _nU = _lab(mU > 0.5)                                         # drop slivers (< 1 % of the organ)
     for i_ in range(1, _nU + 1):
         if (_ccU == i_).sum() < 0.01 * (lab_ >= 0).sum():
