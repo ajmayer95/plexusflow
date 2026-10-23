@@ -128,12 +128,11 @@ def main():
     # Fig 7 = the two requirements for the phase-aligned composite, as two blocks.
     #   stationarity (top): a heart rate vs acquisition time · b repeat-vessel waveforms, transient vs retained · c D distributions
     #   phase support (bottom, retained only): d organ map, fundamental detected (|H1|) or not · e detection vs |H1|
-    figR = plt.figure(figsize=(7.5, 6.6), facecolor="white")
-    gR = figR.add_gridspec(2, 1, height_ratios=[1, 1.5], hspace=0.42, left=0.075, right=0.975, top=0.93, bottom=0.08)
+    figR = plt.figure(figsize=(7.5, 5.6), facecolor="white")
+    gR = figR.add_gridspec(2, 1, height_ratios=[1, 1.25], hspace=0.38, left=0.075, right=0.975, top=0.92, bottom=0.07)
     gRt = gR[0].subgridspec(1, 3, width_ratios=[1, 1.75, 1], wspace=0.32); gRd = gRt[1].subgridspec(1, 2, wspace=0.1)
-    gRb = gR[1].subgridspec(1, 2, width_ratios=[1.25, 1], wspace=0.22)
-    gRe = gRb[1].subgridspec(3, 1, height_ratios=[0.22, 1, 0.38])
-    GA, GX, GT, GMAP, GK7 = gRt[0], [gRd[0], gRd[1]], gRt[2], gRb[0], gRe[1]
+    gRb = gR[1].subgridspec(1, 2, width_ratios=[1, 1.15], wspace=0.25)
+    GA, GX, GT, GMAP, GK7 = gRt[0], [gRd[0], gRd[1]], gRt[2], gRb[0], gRb[1]
     figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
     gS2 = figS.add_gridspec(1, 2, width_ratios=[0.5, 1], wspace=0.06, left=0.08, right=0.97, top=0.93, bottom=0.1)
     gL = gS2[0].subgridspec(2, 1, height_ratios=[3.0, 0.85], hspace=0.2); GB, GD, GC = gL[0], gL[1], gS2[1]
@@ -204,14 +203,12 @@ def main():
     log(f"  regimes: transient {sorted(early)}; low pulsatility {sorted(lowp)}; retained {len(stitch)} tiles")
 
     # ---- b: heart rate over the acquisition, coloured by regime
-    axA.axhspan(f_ref * (1 - BAND), f_ref * (1 + BAND), color="#eef1f5", zorder=0, lw=0)
     for k_ in ("T", "S"):
         m_ = np.array([reg(t) == k_ for t in ts])
         axA.scatter(xs_a[m_], f[m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3, label=RLAB[k_])
     axA.plot(xref, f_ref, "s", ms=6, mfc="none", mec="black", mew=0.9, zorder=4)
     axA.annotate("reference\ntile", xy=(xref, f_ref), xytext=(xref + 0.18 * xs_a.max(), f_ref - 0.85), fontsize=6, color="0.5", ha="left", linespacing=0.9,
                  arrowprops=dict(arrowstyle="-", lw=0.4, color="0.5"))
-    axA.text(0.99, f_ref * (1 + BAND) - 0.03, "heart-rate band", transform=axA.get_yaxis_transform(), ha="right", va="top", fontsize=6.5, color="0.45")
     axA.set_xlabel(xlab, fontsize=7.5, labelpad=1); axA.set_ylabel("heart rate $f_0$ (Hz)", fontsize=7.5); axA.tick_params(labelsize=7)
     axA.spines[["top", "right"]].set_visible(False)
     axA.legend(loc="upper left", bbox_to_anchor=(0.0, 1.02), fontsize=6.5, frameon=False, handletextpad=0.1, borderaxespad=0.1, markerscale=1.1,
@@ -385,20 +382,17 @@ def main():
         t_ = max(rr_)[1]; y_ = x_[t_]; vmap_.append((e_, _pdet(e_, t_, y_) < P_DET, abs(y_["H"][0])))
     for e_, d_, h_ in sorted(vmap_, key=lambda v_: (v_[1], v_[2])):
         xx_, yy_ = _path(e_)
-        axMp.plot(xx_, yy_, color=cmH(nH(h_)) if d_ else "0.72", lw=0.9 if d_ else 0.45, zorder=3 if d_ else 2.5, solid_capstyle="round")
+        axMp.plot(xx_, yy_, color=RCOL["S"] if d_ else "0.78", lw=0.8 if d_ else 0.45, zorder=3 if d_ else 2.5, solid_capstyle="round")
     log(f"  (a) map: {len(vmap_)} retained vessels, {sum(v_[1] for v_ in vmap_)} with the fundamental detected")
     axMp.contour(gxs, gys, _gf((lab_ >= 0).astype(float), 1.0), levels=[0.5], colors=["0.3"], linewidths=1.0, zorder=2)   # organ outline
-    oy_, ox_ = np.nonzero(lab_ >= 0); pad2 = 60
+    oy_, ox_ = np.nonzero(lab_ >= 0); pad2 = 15
     axMp.set_xlim(gxs[ox_.min()] - pad2, gxs[ox_.max()] + pad2); axMp.set_ylim(gys[oy_.max()] + pad2, gys[oy_.min()] - pad2)
     axMp.set_aspect("equal"); axMp.set_xticks([]); axMp.set_yticks([]); [s_.set_visible(False) for s_ in axMp.spines.values()]
     from matplotlib.lines import Line2D as _L2a
-    axMp.legend(handles=[_L2a([], [], color="0.72", lw=1.0, label="fundamental not detected")],
-                loc="upper left", bbox_to_anchor=(0.0, 0.0), fontsize=6.5, frameon=False, handlelength=1.4, borderaxespad=0, ncol=1,
+    axMp.legend(handles=[_L2a([], [], color=RCOL["S"], lw=1.4, label="phase measurable"),
+                         _L2a([], [], color="0.78", lw=1.4, label="not detected")],
+                loc="lower left", bbox_to_anchor=(-0.14, -0.04), fontsize=6.3, frameon=False, handlelength=1.4, borderaxespad=0,
                 handletextpad=0.4, labelspacing=0.25)
-    caxH = axMp.inset_axes([0.6, -0.065, 0.36, 0.025]); cbH = fig.colorbar(plt.cm.ScalarMappable(norm=nH, cmap=cmH), cax=caxH, orientation="horizontal", ticks=[0.002, 0.005, 0.01, 0.02, 0.05])
-    cbH.ax.set_xticklabels(["0.002", "0.005", "0.01", "0.02", "0.05"]); cbH.ax.minorticks_off()
-    cbH.ax.tick_params(labelsize=6, pad=1); cbH.outline.set_linewidth(0.4); cbH.ax.xaxis.set_label_position("top")
-    cbH.set_label("detected: $|H_1|$ (nL/s)", fontsize=6.5, labelpad=1)
     label(GMAP, "d")
 
     # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
