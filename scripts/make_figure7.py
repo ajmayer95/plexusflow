@@ -133,11 +133,13 @@ def main():
     # Local measurability of the fundamental (organ map + detection vs |H1|) is a measurement-method question → SI (fig7_supp_detection)
     # layout: col 0 = a heart rate (top) over d D (bottom) · col 1 = b organ split into the two regimes, example vessels magnified ·
     # col 2 = c the two examples' waveforms, stacked
-    figR = plt.figure(figsize=(7.5, 5.2), facecolor="white")
-    gR = figR.add_gridspec(2, 3, width_ratios=[1, 1.25, 1], height_ratios=[1.25, 1], wspace=0.32, hspace=0.78,
+    figR = plt.figure(figsize=(7.5, 5.4), facecolor="white")
+    gR = figR.add_gridspec(2, 2, width_ratios=[1, 1.6], height_ratios=[1.3, 1], wspace=0.2, hspace=0.38,
                            left=0.075, right=0.975, top=0.94, bottom=0.08)
     # a heart rate · b organ locator of the three example vessels · c D distributions · d the three examples' waveforms
-    GA, GB7, GT = gR[0, 0], gR[0, 1], gR[0, 2]; gRw = gR[1, :].subgridspec(1, 3, wspace=0.12); GX = [gRw[0], gRw[1], gRw[2]]
+    # top: a heart rate (small) | b organ locator (large) · bottom: c the three examples' waveforms | d D (compact)
+    GA = gR[0, 0].subgridspec(3, 1, height_ratios=[0.15, 1, 0.3])[1]; GB7 = gR[0, 1]
+    gRw = gR[1, :].subgridspec(1, 4, width_ratios=[1, 1, 1, 1.05], wspace=0.3); GX = [gRw[0], gRw[1], gRw[2]]; GT = gRw[3]
     figT = plt.figure(figsize=(3.6, 2.9), facecolor="white")       # SI: clock-free Θ21 check (fig7_supp_theta21)
     GTH = figT.add_gridspec(1, 1, left=0.17, right=0.97, top=0.95, bottom=0.17)[0]
     figD = plt.figure(figsize=(7.5, 3.6), facecolor="white")
@@ -313,18 +315,18 @@ def main():
         _trace(axs_d[1], RV, t_, c_, f"{xs_a[ts.index(t_)]:.0f} min")
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]; dEX = _D(mall[EXe][EXA], mall[EXe][EXB])
     _sp = lambda tl_: xs_a[ts.index(tl_[-1])] - xs_a[ts.index(tl_[0])]
-    ttl_ = [("1  transient", f"2 recordings, 12 min apart · D = {dEX:.2f}"),
-            ("2  retained", f"{len(rv_t)} recordings, {_sp(rv_t):.0f} min · D ≤ {max(dRV):.2f}"),
-            ("3  retained", f"{len(rv3_t)} recordings, {_sp(rv3_t):.0f} min · D ≤ {max(dRV3):.2f}")]
+    ttl_ = [("1  transient", f"12 min apart · D = {dEX:.2f}"),
+            ("2  retained", f"{len(rv_t)} rec., {_sp(rv_t):.0f} min · D ≤ {max(dRV):.2f}"),
+            ("3  retained", f"{len(rv3_t)} rec., {_sp(rv3_t):.0f} min · D ≤ {max(dRV3):.2f}")]
     for k_, (ax_, cl_) in enumerate(zip(axs_d, ("T", "S", "S"))):
         ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2])
-        ax_.set_ylim(-1.0, 2.6); ax_.set_xlabel("beats (aligned on the fundamental)" if k_ == 1 else "", fontsize=7.5, labelpad=1)
+        ax_.set_ylim(-1.0, 2.6); ax_.set_xlabel("beats (aligned on the fundamental)" if k_ == 1 else "", fontsize=7, labelpad=1)
         ax_.tick_params(labelsize=7)
         if k_ > 0:
             ax_.set_yticklabels([])
         ax_.spines[["top", "right"]].set_visible(False)
         ax_.text(0.0, 1.13, ttl_[k_][0], transform=ax_.transAxes, fontsize=7.5, fontweight="bold", color=RCOL[cl_], va="bottom")
-        ax_.text(0.0, 1.02, ttl_[k_][1], transform=ax_.transAxes, fontsize=6.2, color="0.35", va="bottom")
+        ax_.text(0.0, 1.02, ttl_[k_][1], transform=ax_.transAxes, fontsize=5.6, color="0.35", va="bottom")
         if k_ == 0:
             ax_.set_ylabel(r"$Q\,/\,\bar Q$", fontsize=8, labelpad=1)
         ax_.legend(loc="lower left", fontsize=5.8, frameon=False, handlelength=0.9, borderaxespad=0.1, labelspacing=0.1, ncol=2 if k_ >= 1 else 1,
@@ -332,8 +334,8 @@ def main():
     log(f"  (d) stitchable vessel {RV}: tiles {rv_t}, pairwise D " + ", ".join(f"{v:.2f}" for v in dRV) + f"; transient vessel D {dEX:.2f}")
     _c0 = axs_d[0].get_position()
     _c2 = axs_d[2].get_position()
-    fig.text((_c0.x0 + _c2.x1) / 2, _c0.y1 + 0.095, "same vessel measured repeatedly", fontsize=8, color="0.15", va="bottom", ha="center")
-    label(GX[0], "d")
+    fig.text((_c0.x0 + _c2.x1) / 2, _c0.y1 + 0.075, "same vessel measured repeatedly", fontsize=7.5, color="0.15", va="bottom", ha="center")
+    label(GX[0], "c")
 
     # ---- e: across all repeat vessels — D, both recordings transient vs both stitchable; examples 1 and 3 marked
     axD = fig.add_subplot(GT); ecdf_ = {}
@@ -350,11 +352,11 @@ def main():
         xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + {"1": 0.08, "2": -0.08, "3": 0.14}[tag_], _on(g_, xm_) + {"1": 0.1, "2": 0.1, "3": -0.08}[tag_]),
                                            fontsize=7, fontweight="bold", color=SCOL[g_], ha="center", arrowprops=dict(arrowstyle="-", lw=0.5, color=SCOL[g_]))
     axD.set_xlim(0, 1.1); axD.set_ylim(0, 1.02); axD.set_yticks([0, 0.5, 1]); axD.spines[["top", "right"]].set_visible(False)
-    axD.set_xlabel("normalized waveform-shape\ndifference $D$  (← more reproducible)", fontsize=7.5, labelpad=1)
-    axD.set_ylabel("cumulative fraction", fontsize=8, labelpad=1); axD.tick_params(labelsize=7)
-    axD.legend(title="repeat vessel,\nboth recordings", title_fontsize=6.3, fontsize=6.3, frameon=False, loc="lower right", handlelength=1.0,
+    axD.set_xlabel("shape difference $D$\n(← more reproducible)", fontsize=7.5, labelpad=1)
+    axD.set_ylabel("cumulative fraction", fontsize=7.5, labelpad=0); axD.tick_params(labelsize=7)
+    axD.legend(title=None, fontsize=6, frameon=False, loc="lower right", handlelength=1.0,
                borderaxespad=0.0, labelspacing=0.15, alignment="left", bbox_to_anchor=(1.02, 0.0))
-    label(GT, "c")
+    label(GT, "d")
 
     fig = figT
     # ---- d: clock-free check — the shape phase Θ21 = φ2 − 2φ1 is unchanged by any tile clock offset (φn → φn + nψ)
@@ -457,7 +459,7 @@ def main():
         axB7.text(cx_ + off_[0], cy_ + off_[1] + (130 if off_[1] > 0 else -130), ", ".join(f"{v:.0f}" for v in tm_) + " min",
                   fontsize=5.8, ha="center", va="top" if off_[1] > 0 else "bottom", color=RCOL[k_], zorder=7,
                   bbox=dict(fc="white", ec="none", alpha=0.75, pad=0.4))
-    fig = figR; label(GB7, "b")
+    fig = figR; _pb = axB7.get_position(); fig.text(_pb.x0 - 0.02, _pb.y1 + 0.005, "b", fontsize=10, fontweight="bold", va="bottom")
 
     # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
     figSM = plt.figure(figsize=(4.0, 4.6), facecolor="white"); _fig_main = fig; fig = figSM
