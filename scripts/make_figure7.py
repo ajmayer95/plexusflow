@@ -136,10 +136,12 @@ def main():
     # three full-height columns: a heart rate (acquisition time running down) · b organ, transient vs retained shaded, four example
     # vessels · right: c two transient examples (top), d D distributions with the examples marked (middle), two retained examples (bottom)
     # left: a heart rate (short, horizontal) over d D distributions · centre: b organ · right: c 2×2 repeat-vessel examples
-    figR = plt.figure(figsize=(7.5, 3.9), facecolor="white")
-    gR = figR.add_gridspec(1, 3, width_ratios=[0.95, 1.25, 1.25], wspace=0.24, left=0.07, right=0.985, top=0.84, bottom=0.12)
-    gRl = gR[0].subgridspec(2, 1, height_ratios=[0.8, 1], hspace=0.75); gRx = gR[2].subgridspec(2, 2, wspace=0.1, hspace=0.6)
-    GA, GB7, GT = gRl[0], gR[1], gRl[1]; GX = [gRx[0, 0], gRx[0, 1], gRx[1, 0], gRx[1, 1]]
+    # top (quantitative): a heart rate vs acquisition time · b D distributions; bottom (concrete): c organ with vessels 1–4 · d their waveforms
+    figR = plt.figure(figsize=(7.5, 5.6), facecolor="white")
+    gR = figR.add_gridspec(2, 2, width_ratios=[1, 1.1], height_ratios=[0.58, 1], wspace=0.24, hspace=0.5,
+                           left=0.075, right=0.985, top=0.95, bottom=0.08)
+    gRx = gR[1, 1].subgridspec(2, 2, wspace=0.1, hspace=0.55)
+    GA, GT, GB7 = gR[0, 0], gR[0, 1], gR[1, 0]; GX = [gRx[0, 0], gRx[0, 1], gRx[1, 0], gRx[1, 1]]
     figT = plt.figure(figsize=(3.6, 2.9), facecolor="white")       # SI: clock-free Θ21 check (fig7_supp_theta21)
     GTH = figT.add_gridspec(1, 1, left=0.17, right=0.97, top=0.95, bottom=0.17)[0]
     figD = plt.figure(figsize=(7.5, 3.6), facecolor="white")
@@ -337,8 +339,8 @@ def main():
         pass
     log(f"  (c) examples: transient D {dEX:.2f}, {dT2:.2f}; retained max D {max(dRV):.2f}, {max(dRV3):.2f}")
     _q0, _q1 = axs_d[0].get_position(), axs_d[1].get_position()
-    fig.text((_q0.x0 + _q1.x1) / 2, _q0.y1 + 0.1, "same vessel measured repeatedly", fontsize=8, ha="center", va="bottom", fontweight="bold", color="0.2")
-    label(GX[0], "c")
+    fig.text((_q0.x0 + _q1.x1) / 2, _q0.y1 + 0.07, "same vessel measured repeatedly", fontsize=8, ha="center", va="bottom", fontweight="bold", color="0.2")
+    _q0_ = axs_d[0].get_position(); fig.text(_q0_.x0 - 0.06, _q0_.y1 + 0.075, "d", fontsize=10, fontweight="bold", va="bottom")
 
     # ---- e: across all repeat vessels — D, both recordings transient vs both stitchable; examples 1 and 3 marked
     axD = fig.add_subplot(GT); ecdf_ = {}
@@ -352,7 +354,7 @@ def main():
     for g_, xs_, tag_ in (("E", [dEX], "1"), ("E", [dT2], "2"), ("B", dRV, "3"), ("B", dRV3, "4")):
         for x_ in xs_:
             axD.plot(x_, _on(g_, x_), "o", ms=3.5, mfc="white", mec=SCOL[g_], mew=0.9, zorder=5)
-        xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + {"1": -0.1, "2": 0.14, "3": -0.04, "4": 0.2}[tag_], _on(g_, xm_) + {"1": 0.05, "2": 0.2, "3": 0.34, "4": -0.06}[tag_]),
+        xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + {"1": -0.1, "2": 0.07, "3": -0.04, "4": 0.12}[tag_], _on(g_, xm_) + {"1": 0.05, "2": 0.12, "3": 0.3, "4": -0.06}[tag_]),
                                            fontsize=7, fontweight="bold", color=SCOL[g_], ha="center", arrowprops=dict(arrowstyle="-", lw=0.5, color=SCOL[g_]))
     axD.set_xlim(0, 1.1); axD.set_ylim(0, 1.02); axD.set_yticks([0, 0.5, 1]); axD.spines[["top", "right"]].set_visible(False)
     axD.set_xlabel("waveform-shape difference $D$", fontsize=8, labelpad=1)
@@ -360,7 +362,7 @@ def main():
     axD.text(0.98, 0.26, f"retained ({len(SP['B'])})", color=SCOL["B"], fontsize=8, transform=axD.transAxes, va="bottom", ha="right")
     axD.text(0.98, 0.1, f"transient ({len(SP['E'])})", color=SCOL["E"], fontsize=8, transform=axD.transAxes, va="bottom", ha="right")
     axD.set_ylabel("cum. fraction", fontsize=8, labelpad=0); axD.tick_params(labelsize=7)
-    _pd = axD.get_position(); fig.text(_pd.x0 - 0.06, _pd.y1 + 0.03, "d", fontsize=10, fontweight="bold", va="bottom")
+    _pd = axD.get_position(); fig.text(_pd.x0 - 0.06, _pd.y1 + 0.03, "b", fontsize=10, fontweight="bold", va="bottom")
     pass
 
     fig = figT
@@ -461,7 +463,7 @@ def main():
     axB7.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.28), ec=RCOL["T"], label="transient early recordings"),
                          matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.16), ec="0.35", label="retained")],
                 loc="upper center", bbox_to_anchor=(0.5, 0.0), fontsize=8, frameon=False, ncol=2, handlelength=1.2, borderaxespad=0, columnspacing=0.8)
-    fig = figR; _pb = axB7.get_position(); fig.text(_pb.x0 - 0.02, _pb.y1 + 0.005, "b", fontsize=10, fontweight="bold", va="bottom")
+    fig = figR; _pb = axB7.get_position(); fig.text(_pb.x0 - 0.02, _pb.y1 + 0.005, "c", fontsize=10, fontweight="bold", va="bottom")
 
     # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
     figSM = plt.figure(figsize=(4.0, 4.6), facecolor="white"); _fig_main = fig; fig = figSM
