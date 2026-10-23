@@ -87,7 +87,8 @@ def main():
     _dom0 = _cd(G); _carved = set(_dom0["edges"])
     da_edges = [e if G.has_edge(*e) else e[::-1] for n in _dom0["DA"] for e in G.edges(n)]
     da_edges = [e for e in da_edges if e not in _carved and e[::-1] not in _carved]
-    F = build_ac_field(G, dc, sync_extra_edges=da_edges, sync_extra_min_rho=0.5, sync_extra_weight=100.0, f0_band=BAND)
+    # canonical sync (2026-10-23): DA anchor + plexus seam continuity (λ 1), as results/ac_field_v5_cont (scripts/ac_field.py --cont-lambda 1)
+    F = build_ac_field(G, dc, sync_extra_edges=da_edges, sync_extra_min_rho=0.5, sync_extra_weight=100.0, f0_band=BAND, cont_lambda=1.0)
     meas, psi, pairs, sd = F["_meas"], F["psi"], F["_pairs"], F["gauge_sd_deg"]
     pairs = [(e, a, b) for e, a, b in pairs if e not in set(da_edges)]          # validation on carved vessels only
     tf0, ref, f_ref, band = G.graph["tile_f0_piv"], F["ref_tile"], F["f_ref"], set(F["band"])
@@ -645,9 +646,7 @@ def main():
     # its common offset set by plexus seam continuity (sandbox/group_beta_continuity.py: pairs of different detected plexus vessels within
     # 150 µm across the group / left-block seam: −132° ± 3°, R 0.83; same statistic on a solved seam: +2°); agrees with the D-fit gauge
     # (−136°) and the cross-links via tiles 19 / 32 (−114 … −129°).  Applied as a display offset only; the synchronization is unchanged.
-    BETA_GRP = np.radians(-132.0)
-    for t_ in WEAKGRP:
-        beta[t_] = beta.get(t_, 0.0) - BETA_GRP
+    # (oriented by the seam-continuity term in the synchronization itself; no display offset)
     shown_t = {t for t in band if t not in masked and (sd.get(t, np.inf) <= SD_MAX or t in WEAKGRP)}
     def pts(e, step=2.0):
         pth = G.edges[e].get("path")
@@ -837,7 +836,7 @@ def main():
             axN.text(cen[t_][0] + _dx * 130, cen[t_][1] - 170, str(t_), fontsize=8, color=TCOL[t_], fontweight="bold", zorder=5,
                      ha="left" if _dx > 0 else "right")
         else:
-            axN.plot(*cen[t_], "o", ms=3.6, mfc=("0.72" if t_ in WEAKGRP else "white") if und_ else "0.3", mec="0.3", mew=0.6, zorder=3)
+            axN.plot(*cen[t_], "o", ms=3.6, mfc="0.72" if t_ in WEAKGRP else ("white" if und_ else "0.3"), mec="0.3", mew=0.6, zorder=3)
         if t_ == ref:
             axN.plot(*cen[t_], "s", ms=6.5, mfc="none", mec="black", mew=0.9, zorder=4)
     if cother_:
@@ -850,7 +849,7 @@ def main():
     axN.text(0.5, 1.0, "tile overlap network", transform=axN.transAxes, ha="center", va="bottom", fontsize=8, color="0.25")
     from matplotlib.lines import Line2D as _L2n
     axN.legend(handles=[_L2n([], [], ls="none", marker="o", ms=4, mfc="0.3", mec="0.3", label="clock solved"),
-                        _L2n([], [], ls="none", marker="o", ms=4, mfc="0.72", mec="0.3", label="from seam continuity"),
+                        _L2n([], [], ls="none", marker="o", ms=4, mfc="0.72", mec="0.3", label="oriented by seam continuity"),
                         _L2n([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.3", label="unresolved"),
                         _L2n([], [], ls="none", marker="s", ms=5, mfc="none", mec="black", label="reference"),
                         _L2n([], [], color="0.2", lw=0.8, ls="--", label="separate block")],

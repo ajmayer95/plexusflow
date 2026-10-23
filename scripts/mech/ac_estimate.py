@@ -37,7 +37,7 @@ def main():
     ap.add_argument("--gauge-passes", type=int, default=2)
     ap.add_argument("--n-jobs", type=int, default=8)
     ap.add_argument("--out", default="ac_estimate_v3")
-    ap.add_argument("--field", default="ac_field_v2", help="results/<field>.pkl (default ac_field_v2)")
+    ap.add_argument("--field", default="ac_field_v5_cont", help="results/<field>.pkl (canonical: ac_field_v5_cont)")
     ap.add_argument("--gauge-block", default=None, help="tiles sharing one extra gauge offset with a flat prior, e.g. 15,18,19,20,29,30,31,32,33,34")
     a = ap.parse_args()
     G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())

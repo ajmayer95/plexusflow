@@ -61,7 +61,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--picks', default=None, help='six edges "u,v;u,v;…" for panel C (default: automatic)')
     ap.add_argument('--bc-json', default=None, help='profiled fit (D, η, boundary forcing per node), e.g. results/ac_profiled_bc_local_ratio.json')
-    ap.add_argument('--field', default='ac_field_v2', help='results/<field>.pkl (default ac_field_v2)')
+    ap.add_argument('--field', default='ac_field_v5_cont', help='results/<field>.pkl (canonical 2026-10-23: ac_field_v5_cont, DA anchor + seam continuity)')
     ap.add_argument('--tag', default=None, help='output name suffix: fig9alt_v3_<tag>')
     args = ap.parse_args()
 
