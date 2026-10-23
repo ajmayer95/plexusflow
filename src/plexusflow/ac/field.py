@@ -17,7 +17,8 @@ REF_TILE, F0_BAND, RHO_MIN, Q_DET, RHO_SYNC = 21, 0.15, 0.02, 1e-4, 0.1
 P_DETECT, VAR_PHI_FLOOR = 0.01, np.radians(3.0) ** 2
 # sync_weight="kappa": every pair is a von Mises observation of ψa − ψb with concentration κ(w), w = ρaρb, κ(w) = κmax·w/(w + w0);
 # fitted by von Mises ML on residuals of well-constrained 21S tiles (sandbox/sync_with_continuity.py, 2026-10-23)
-KAPPA_OV, KAPPA_SEAM = (15.1, 0.0464), (3.4, 0.0089)      # sync_weight="detect": F-test level; phase-variance floor (rad²)
+# (overlap curve refitted with the flow-direction consistency rule below: κmax 51.4, w0 0.0744; seam unchanged 3.4, 0.0089)
+KAPPA_OV, KAPPA_SEAM = (51.4, 0.0744), (3.4, 0.0089)      # sync_weight="detect": F-test level; phase-variance floor (rad²)
 
 
 def detect_p(rho, n, K=3):
@@ -86,7 +87,7 @@ def sync_diagnostics(pa, pb, pw, pz, nT, ref_i, psi, n_starts=50, step_deg=5.0, 
 
 def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=50, sync_extra_edges=None, stitch_lambda=0.0,
                    sync_extra_min_rho=0.0, sync_extra_weight=1.0, sync_weight="rho", cont_lambda=0.0, cont_radius_um=150.0,
-                   cont_radius_pct=60.0, um_per_px=1.7):
+                   cont_radius_pct=60.0, um_per_px=1.7, sign_check=False):
     """dc: output of reconcile_dc (needs edges, Qp).  Returns the field dict (H is 3 × nE, u→v frame).
 
     sync_extra_edges: edges outside the carved domain whose repeated measurements also constrain the tile gauge (e.g. the
@@ -145,6 +146,10 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
             for j in range(i + 1, len(ok)):
                 a, b = ok[i], ok[j]; ua = d[a]["H"][0] / abs(d[a]["H"][0]); ub = d[b]["H"][0] / abs(d[b]["H"][0])
                 if e in xset and min(d[a]["rho"], d[b]["rho"]) < sync_extra_min_rho:
+                    continue
+                # sign_check: a repeat measurement of one vessel must agree on its mean-flow direction; pairs that disagree are
+                # mismatched or orientation-flipped (21S: 50 % disagree across the left-edge / left-block boundary vs 2 % elsewhere)
+                if sign_check and np.sign(d[a]["a0"]) != np.sign(d[b]["a0"]):
                     continue
                 pa.append(ti[a]); pb.append(ti[b]); pw.append(_w(d[a], d[b]) * (sync_extra_weight if e in xset else 1.0))
                 pz.append(ua * np.conj(ub)); pv.append(vi)

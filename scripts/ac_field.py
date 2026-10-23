@@ -26,6 +26,7 @@ def main():
     ap.add_argument("--out", default="ac_field_v2", help="results/<out>.pkl (default ac_field_v2)")
     ap.add_argument("--sync-da-min-rho", type=float, default=0.0, help="with --sync-da: use only DA measurements with ρ ≥ this")
     ap.add_argument("--sync-da-weight", type=float, default=1.0, help="with --sync-da: multiply the DA pair weights (≫ 1 = anchor)")
+    ap.add_argument("--sign-check", action="store_true", help="drop repeat-vessel pairs whose mean-flow directions disagree")
     ap.add_argument("--cont-lambda", type=float, default=0.0, help="weight of plexus seam-continuity pairs in the sync (0 = off; 1 = calibrated)")
     ap.add_argument("--sync-weight", choices=("rho", "detect", "kappa"), default="rho",
                     help="pair weights: ρ_aρ_b (canonical) or detected-in-both (F-test p<0.01) with inverse phase variance")
@@ -38,8 +39,8 @@ def main():
         extra = [e for e in extra if e not in carved and e[::-1] not in carved]
         print(f"synchronising also on {len(extra)} dorsal-aorta stub edges: {extra}")
     A = build_ac_field(G, D, ref_tile=ref, f0_band=args.f0_band, sync_extra_edges=extra,
-                       sync_extra_min_rho=args.sync_da_min_rho, sync_extra_weight=args.sync_da_weight, sync_weight=args.sync_weight, cont_lambda=args.cont_lambda)
-    A["sync"] = dict(sync_da=bool(args.sync_da), min_rho=args.sync_da_min_rho, weight=args.sync_da_weight, pair_weight=args.sync_weight, cont_lambda=args.cont_lambda)
+                       sync_extra_min_rho=args.sync_da_min_rho, sync_extra_weight=args.sync_da_weight, sync_weight=args.sync_weight, cont_lambda=args.cont_lambda, sign_check=args.sign_check)
+    A["sync"] = dict(sync_da=bool(args.sync_da), min_rho=args.sync_da_min_rho, weight=args.sync_da_weight, pair_weight=args.sync_weight, cont_lambda=args.cont_lambda, sign_check=args.sign_check)
     A["f0_band"] = args.f0_band
     A["ref_tile"] = ref
     print(f"f0 band (±{args.f0_band:.0%} of tile {ref}, {A['f_ref']:.2f} Hz): {len(A['band'])} tiles;  "

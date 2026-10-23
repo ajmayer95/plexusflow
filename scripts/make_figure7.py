@@ -87,8 +87,11 @@ def main():
     _dom0 = _cd(G); _carved = set(_dom0["edges"])
     da_edges = [e if G.has_edge(*e) else e[::-1] for n in _dom0["DA"] for e in G.edges(n)]
     da_edges = [e for e in da_edges if e not in _carved and e[::-1] not in _carved]
-    # canonical sync (2026-10-23): DA anchor + plexus seam continuity (λ 1), as results/ac_field_v5_cont (scripts/ac_field.py --cont-lambda 1)
-    F = build_ac_field(G, dc, sync_extra_edges=da_edges, sync_extra_min_rho=0.5, sync_extra_weight=100.0, f0_band=BAND, cont_lambda=1.0)
+    # canonical sync (frozen 2026-10-23) = results/ac_field_v7: von Mises synchronization with fitted precision curves κ(ρaρb) for
+    # repeat-vessel and plexus seam-continuity pairs, repeat pairs required to agree on mean-flow direction, DA anchor
+    # (scripts/ac_field.py --sync-da --sync-da-min-rho 0.5 --sync-da-weight 100 --sync-weight kappa --cont-lambda 1 --sign-check)
+    F = build_ac_field(G, dc, sync_extra_edges=da_edges, sync_extra_min_rho=0.5, sync_extra_weight=100.0, f0_band=BAND,
+                       sync_weight="kappa", cont_lambda=1.0, sign_check=True)
     meas, psi, pairs, sd = F["_meas"], F["psi"], F["_pairs"], F["gauge_sd_deg"]
     pairs = [(e, a, b) for e, a, b in pairs if e not in set(da_edges)]          # validation on carved vessels only
     tf0, ref, f_ref, band = G.graph["tile_f0_piv"], F["ref_tile"], F["f_ref"], set(F["band"])
@@ -692,7 +695,7 @@ def main():
     for e, a, b in pairs:
         if a in shown_t and b in shown_t and a not in block_t and b not in block_t:
             cnt[(a, b)] = cnt.get((a, b), 0) + 1
-    (ta, tb), npair_ = max(cnt.items(), key=lambda kv: kv[1])
+    (ta, tb), npair_ = ((12, 13), cnt[(12, 13)]) if (12, 13) in cnt else max(cnt.items(), key=lambda kv: kv[1])   # fixed example pair
     pp = np.vstack([polys[ta], polys[tb]]); box = ((pp[:, 0].min(), pp[:, 0].max()), (pp[:, 1].min(), pp[:, 1].max()))
     x0, x1 = box[0]; y0, y1 = box[1]; TCOL = {ta: "#0072B2", tb: "#D55E00"}
     # each vessel shown with the phase from the tile whose centre is nearer (a seam through the overlap); colour = H1 phase (cyclic)
