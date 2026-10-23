@@ -133,10 +133,10 @@ def main():
     # Local measurability of the fundamental (organ map + detection vs |H1|) is a measurement-method question → SI (fig7_supp_detection)
     # layout: col 0 = a heart rate (top) over d D (bottom) · col 1 = b organ split into the two regimes, example vessels magnified ·
     # col 2 = c the two examples' waveforms, stacked
-    figR = plt.figure(figsize=(7.5, 4.6), facecolor="white")
-    gR = figR.add_gridspec(2, 3, width_ratios=[1, 1.35, 1], height_ratios=[1, 1], wspace=0.32, hspace=0.62,
-                           left=0.075, right=0.975, top=0.9, bottom=0.11)
-    GA, GB7, GX, GT = gR[0, 0], gR[:, 1], [gR[0, 2], gR[1, 2]], gR[1, 0]
+    figR = plt.figure(figsize=(7.5, 4.4), facecolor="white")
+    gR = figR.add_gridspec(2, 3, width_ratios=[1.05, 0.75, 1.2], height_ratios=[1, 1], wspace=0.3, hspace=0.6,
+                           left=0.075, right=0.975, top=0.86, bottom=0.11)
+    GA, GB7, GX, GT = gR[0, 0], gR[0, 1], [gR[0, 2], gR[1, 2]], gR[1, 0:2]
     figT = plt.figure(figsize=(3.6, 2.9), facecolor="white")       # SI: clock-free Θ21 check (fig7_supp_theta21)
     GTH = figT.add_gridspec(1, 1, left=0.17, right=0.97, top=0.95, bottom=0.17)[0]
     figD = plt.figure(figsize=(7.5, 3.6), facecolor="white")
@@ -217,7 +217,8 @@ def main():
         axA.scatter(xs_a[m_], f[m_], s=12, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3, label=RLAB[k_])
     # the retained set is the heart-rate band (f0 within ±21 % of the reference recording); b–c show it is a reproducible regime
     _te = max(xs_a[ts.index(t)] for t in early); _tr = min(xs_a[ts.index(t)] for t in ts if reg(t) == "S")
-    axA.axvline((_te + _tr) / 2, color="0.6", lw=0.6, ls=":")
+    axA.axvline((_te + _tr) / 2, color="0.5", lw=0.7, ls=":")
+    axA.text((_te + _tr) / 2 - 4, 2.25, "end of transient\nregime", rotation=90, fontsize=6.3, color="0.4", va="bottom", ha="right", linespacing=0.95)
     axA.set_xlabel(xlab, fontsize=7.5, labelpad=1); axA.set_ylabel("heart rate $f_0$ (Hz)", fontsize=7.5); axA.tick_params(labelsize=7)
     axA.spines[["top", "right"]].set_visible(False)
     axA.legend(loc="lower right", bbox_to_anchor=(1.0, 0.02), fontsize=6.5, frameon=False, handletextpad=0.1, borderaxespad=0.1, markerscale=1.1,
@@ -319,6 +320,8 @@ def main():
         ax_.legend(loc="lower left", fontsize=5.8, frameon=False, handlelength=0.9, borderaxespad=0.1, labelspacing=0.1, ncol=2 if k_ == 1 else 1,
                    columnspacing=0.6)
     log(f"  (d) stitchable vessel {RV}: tiles {rv_t}, pairwise D " + ", ".join(f"{v:.2f}" for v in dRV) + f"; transient vessel D {dEX:.2f}")
+    _c0 = axs_d[0].get_position()
+    fig.text(_c0.x0 - 0.05, _c0.y1 + 0.075, "same vessel measured repeatedly", fontsize=7.5, color="0.15", va="bottom")
     label(GX[0], "c")
 
     # ---- e: across all repeat vessels — D, both recordings transient vs both stitchable; examples 1 and 3 marked
@@ -336,7 +339,7 @@ def main():
         xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + (0.08 if g_ == "E" else -0.08), _on(g_, xm_) + 0.1),
                                            fontsize=7, fontweight="bold", color=SCOL[g_], ha="center", arrowprops=dict(arrowstyle="-", lw=0.5, color=SCOL[g_]))
     axD.set_xlim(0, 1.1); axD.set_ylim(0, 1.02); axD.set_yticks([0, 0.5, 1]); axD.spines[["top", "right"]].set_visible(False)
-    axD.set_xlabel("waveform-shape difference $D$\n(normalised harmonic shape)", fontsize=7, labelpad=1)
+    axD.set_xlabel("normalized waveform-shape difference $D$     (← more reproducible)", fontsize=7.5, labelpad=1)
     axD.set_ylabel("cumulative fraction", fontsize=8, labelpad=1); axD.tick_params(labelsize=7)
     axD.legend(title="repeat vessel,\nboth recordings", title_fontsize=6.3, fontsize=6.3, frameon=False, loc="lower right", handlelength=1.0,
                borderaxespad=0.0, labelspacing=0.15, alignment="left", bbox_to_anchor=(1.02, 0.0))
@@ -421,39 +424,23 @@ def main():
                 handletextpad=0.4, labelspacing=0.25)
     label(GMAP, "a"); fig = figR
 
-    # ---- b (Fig 7): the organ divided into the two regimes; the two example vessels highlighted and magnified
+    # ---- b (Fig 7): locator — where the two example vessels are (organ faint; tiles that recorded each lightly outlined)
     axB7 = figR.add_subplot(GB7)
-    axB7.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.45, zorder=0)
-    axB7.contourf(gxs, gys, mT, levels=[0.5, 2], colors=[RCOL["T"]], alpha=0.30, zorder=1)
-    axB7.contourf(gxs, gys, _gf((lab_ >= 1).astype(float), 1.0), levels=[0.5, 2], colors=[RCOL["S"]], alpha=0.16, zorder=1)
-    axB7.contour(gxs, gys, _gf((lab_ >= 0).astype(float), 1.0), levels=[0.5], colors=["0.3"], linewidths=0.9, zorder=2)
-    axB7.contour(gxs, gys, mT, levels=[0.5], colors=[RCOL["T"]], linewidths=1.0, zorder=2)
+    axB7.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.35, zorder=0)
+    axB7.contour(gxs, gys, _gf((lab_ >= 0).astype(float), 1.0), levels=[0.5], colors=["0.45"], linewidths=0.7, zorder=2)
     oyB, oxB = np.nonzero(lab_ >= 0)
     axB7.set_xlim(gxs[oxB.min()] - 15, gxs[oxB.max()] + 15); axB7.set_ylim(gys[oyB.max()] + 15, gys[oyB.min()] - 15)
     axB7.set_aspect("equal"); axB7.set_xticks([]); axB7.set_yticks([]); [s_.set_visible(False) for s_ in axB7.spines.values()]
-    for E_, tag_, k_, rect_ in ((EXV, "1", "T", [-0.06, 0.0, 0.36, 0.36]), (RV, "2", "S", [0.70, 0.0, 0.36, 0.36])):
-        e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_); hw_ = 110
-        axB7.plot(xx_, yy_, color="black", lw=1.6, zorder=5, solid_capstyle="round")
-        axZ = axB7.inset_axes(rect_, zorder=6)
-        axZ.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.7)
-        for f_ in G.edges:                                                       # local network context
-            pf_ = G.edges[f_].get("path")
-            if pf_ is None or len(pf_) < 2:
-                continue
-            pf_ = np.asarray(pf_, float)
-            if abs(pf_[:, 0].mean() - cx_) < 1.6 * hw_ and abs((Hm - pf_[:, 1]).mean() - cy_) < 1.6 * hw_:
-                axZ.plot(pf_[:, 0], Hm - pf_[:, 1], color="white", lw=0.5, alpha=0.8)
-        axZ.plot(xx_, yy_, color=RCOL[k_], lw=3.0, solid_capstyle="round")
-        axZ.set_xlim(cx_ - hw_, cx_ + hw_); axZ.set_ylim(cy_ + hw_, cy_ - hw_); axZ.set_xticks([]); axZ.set_yticks([])
-        for sp_ in axZ.spines.values():
-            sp_.set_color(RCOL[k_]); sp_.set_linewidth(1.2)
-        axZ.text(0.06, 0.94, tag_, transform=axZ.transAxes, fontsize=8, fontweight="bold", color="white", va="top",
-                 bbox=dict(boxstyle="circle,pad=0.15", fc=RCOL[k_], ec="none"))
-        axB7.indicate_inset_zoom(axZ, edgecolor=RCOL[k_], lw=0.8, alpha=0.9)
-    from matplotlib.lines import Line2D as _L2b
-    axB7.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.3), ec=RCOL["T"], label="transient early recordings"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.16), ec="0.3", label="retained")],
-                loc="upper center", bbox_to_anchor=(0.5, 0.0), fontsize=6.5, frameon=False, ncol=2, handlelength=1.4, borderaxespad=0)
+    for E_, tag_, k_, tl7_, off_ in ((EXV, "1", "T", (EXA, EXB), (-300, -330)), (RV, "2", "S", tuple(rv_t), (330, -330))):
+        for t_ in tl7_:
+            axB7.add_patch(Polygon(polys[t_], closed=True, fc="none", ec=RCOL[k_], lw=0.6, ls="--", alpha=0.7, zorder=3))
+        e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_)
+        axB7.add_patch(matplotlib.patches.Rectangle((cx_ - 90, cy_ - 90), 180, 180, fc="none", ec=RCOL[k_], lw=1.1, zorder=5))
+        axB7.plot(xx_, yy_, color=RCOL[k_], lw=2.0, zorder=5, solid_capstyle="round")
+        axB7.annotate("", xy=(cx_ + np.sign(off_[0]) * 90, cy_ - 90), xytext=(cx_ + off_[0], cy_ + off_[1]),
+                      arrowprops=dict(arrowstyle="-", lw=0.6, color=RCOL[k_]), zorder=5)
+        axB7.plot(cx_ + off_[0], cy_ + off_[1], "o", ms=8, mfc=RCOL[k_], mec="white", mew=0.7, zorder=6)
+        axB7.text(cx_ + off_[0], cy_ + off_[1], tag_, fontsize=6.5, ha="center", va="center", fontweight="bold", color="white", zorder=7)
     fig = figR; label(GB7, "b")
 
     # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
