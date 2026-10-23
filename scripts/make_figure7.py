@@ -751,7 +751,7 @@ def main():
     for i_ in range(1, _nG + 1):
         if (_ccG == i_).sum() < 0.01 * (lab_ >= 0).sum():
             mG[_ccG == i_] = 0
-    axC.contour(gxs, gys, mG, levels=[0.5], colors=["0.15"], linewidths=1.0, linestyles=":", zorder=4.7)
+    pass                                             # group {16,17,18,31} is synchronized (seam continuity); no separate outline
     _ccU, _nU = _lab(mU > 0.5)                                         # drop slivers (< 1 % of the organ)
     for i_ in range(1, _nU + 1):
         if (_ccU == i_).sum() < 0.01 * (lab_ >= 0).sum():
@@ -784,7 +784,7 @@ def main():
     axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["none"], hatches=["//"], zorder=4.5)
     axC.contour(gxs, gys, mX, levels=[0.5], colors=["0.6"], linewidths=0.5, zorder=4.6)
     # retained (Fig 7: physiologically usable) but absolute phase not identifiable — area covered only by tiles with offset SD > SD_MAX
-    if undet_t:
+    if False:                                        # tiles 52/53: ≤ 9 detected vessels — shown as "no usable phase", not separately
         axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["white"], alpha=0.7, zorder=4.4)
         plt.rcParams["hatch.color"] = "0.2"
         axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["none"], hatches=["..."], zorder=4.5)
@@ -801,10 +801,8 @@ def main():
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch as _Pt
     axC.legend(handles=[_Pt(fc="white", ec="0.6", hatch="//", lw=0.5, label="transient — excluded (Fig. 7)"),
-                        _Pt(fc="white", ec="0.3", hatch="...", ls=":", lw=0.6, label="clock unresolved"),
                         _Pt(fc="0.82", ec="none", label="no usable phase of the fundamental"),
-                        _Pt(fc="none", ec="0.15", ls="--", lw=0.9, label="separately oriented block"),
-                        _Pt(fc="none", ec="0.15", ls=":", lw=1.0, label="group offset from seam continuity")],
+                        _Pt(fc="none", ec="0.15", ls="--", lw=0.9, label="separately oriented block")],
                loc="upper center", bbox_to_anchor=(0.5, -0.1), fontsize=8, frameon=False, handlelength=1.6, borderaxespad=0, labelspacing=0.25,
                ncol=2, columnspacing=1.0)
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
