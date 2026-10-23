@@ -147,10 +147,12 @@ def main():
     figD = plt.figure(figsize=(7.5, 3.6), facecolor="white")
     gDd = figD.add_gridspec(1, 2, width_ratios=[1, 1.15], wspace=0.25, left=0.06, right=0.975, top=0.9, bottom=0.14)
     GMAP, GK7 = gDd[0], gDd[1]
-    figS = plt.figure(figsize=(7.5, 5.4), facecolor="white")
-    # a one overlap → relative clock constraint · b overlap network → tile clocks · c validation · d organ phase field
-    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.52, 1], wspace=0.1, left=0.07, right=0.98, top=0.95, bottom=0.1)
-    gL = gS2[0].subgridspec(2, 1, height_ratios=[2.4, 0.8], hspace=0.45); GB, GD, GC = gL[0], gL[1], gS2[1]
+    # left column: a tile overlap network (left) with one highlighted pair, before/after alignment of that pair (right) ·
+    # b validation histograms · right: c organ phase field
+    figS = plt.figure(figsize=(7.5, 5.6), facecolor="white")
+    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.62, 1], wspace=0.1, left=0.05, right=0.98, top=0.95, bottom=0.1)
+    gL = gS2[0].subgridspec(2, 1, height_ratios=[2.0, 0.95], hspace=0.38); GD, GC = gL[1], gS2[1]
+    gA = gL[0].subgridspec(1, 2, width_ratios=[1, 0.85], wspace=0.15); GNET, GB = gA[0], gA[1]
     fig = figR
 
     def label(cell, letter):
@@ -687,8 +689,8 @@ def main():
     ca, cb_ = cen[ta], cen[tb]; nrm_s = (cb_ - ca) / np.linalg.norm(cb_ - ca); mid_s = (ca + cb_) / 2
     side = lambda p_: np.dot(p_.mean(0) - mid_s, nrm_s)
     cmc = plt.cm.twilight_shifted; ncy = mcolors.Normalize(-180, 180)
-    gBs = GB.subgridspec(3, 1, height_ratios=[1, 1, 0.22], hspace=0.16)
-    for j_, (VV, ttl) in enumerate(((Vraw, "before alignment"), (V, "after alignment: one rigid offset per tile"))):
+    gBs = GB.subgridspec(3, 1, height_ratios=[1, 1, 0.3], hspace=0.2)
+    for j_, (VV, ttl) in enumerate(((Vraw, "before"), (V, "after: one offset per tile"))):
         ax = fig.add_subplot(gBs[j_, 0])
         ax.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.3, zorder=0)
         for p_, dl, w, t in VV:
@@ -700,7 +702,7 @@ def main():
         ax.plot([mid_s[0] - L_ * sx[0], mid_s[0] + L_ * sx[0]], [mid_s[1] - L_ * sx[1], mid_s[1] + L_ * sx[1]], color="black", lw=1.0, ls=":", zorder=4)
         for t in (ta, tb):
             ax.add_patch(Polygon(polys[t], closed=True, fc="none", ec=TCOL[t], lw=1.0, ls="--", zorder=5))
-            if j_ == 0:
+            if False:
                 ax.text(*(polys[t].mean(0) + 0.42 * (polys[t][0] - polys[t].mean(0))), f"tile {t}", color=TCOL[t], fontsize=7, fontweight="bold", zorder=6,
                         bbox=dict(fc="white", ec="none", alpha=0.8, pad=0.6))
         ax.set_xlim(x0, x1); ax.set_ylim(y1, y0); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
@@ -714,10 +716,10 @@ def main():
     fig.text(xm_ + 0.012, (p0_.y0 + p1_.y1) / 2, r"$-\psi_t$", ha="left", va="center", fontsize=8, zorder=10)
 
     bb = GB.get_position(fig)
-    fig.text(bb.x0 + 0.3 * bb.width, bb.y0 + 0.03 * bb.height, r"$\phi^{\rm aligned}_{e,t} = \phi^{\rm obs}_{e,t} - \psi_t$", ha="center", fontsize=8.5)
+    fig.text(bb.x0 + 0.5 * bb.width, bb.y0 + 0.06 * bb.height, r"$\phi^{\rm aligned}_{e,t} = \phi^{\rm obs}_{e,t} - \psi_t$", ha="center", fontsize=8.5)
 
     log(f"  (b) tile pair {ta}/{tb} ({npair_} shared coherent vessels)")
-    label(GB, "a")
+    pass
 
     # ---- c: organ-scale smoothed delay field with isochrones; the second stitching component dashed, offset β from inlet symmetry
     axC = fig.add_subplot(GC); organ(axC); axC.set_anchor("C")
@@ -796,13 +798,22 @@ def main():
     GCOL = {"main": "#2b5c8a", "side": "#E69F00"}
     # ---- b (Fig 8): the overlap network that turns pairwise clock differences into one clock per tile (nodes at tile centres)
     _pa = figS.axes[0].get_position() if False else None
-    axN = axb1.inset_axes([0.62, -0.72, 0.42, 0.55]); axN.set_aspect("equal"); axN.set_xticks([]); axN.set_yticks([]); [sp_.set_visible(False) for sp_ in axN.spines.values()]
+    axN = figS.add_subplot(GNET); axN.set_aspect("equal"); axN.set_xticks([]); axN.set_yticks([]); [sp_.set_visible(False) for sp_ in axN.spines.values()]
 
     for a_, b_ in Tg.edges():
-        axN.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="0.6", lw=0.4, zorder=1)
+        hl_ = {a_, b_} == {ta, tb}
+        axN.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="black" if hl_ else "0.65", lw=2.2 if hl_ else 0.45, zorder=2 if hl_ else 1)
     for t_ in Tg.nodes():
         und_ = sd.get(t_, np.inf) > SD_MAX
-        axN.plot(*cen[t_], "o", ms=3.2, mfc="white" if und_ else "0.2", mec="0.2", mew=0.6, zorder=3)
+        if t_ in (ta, tb):
+            axN.plot(*cen[t_], "o", ms=7, mfc=TCOL[t_], mec="black", mew=0.8, zorder=4)
+            _dx = np.sign(cen[t_][0] - np.mean([cen[ta][0], cen[tb][0]])) or 1
+            axN.text(cen[t_][0] + _dx * 130, cen[t_][1] - 170, str(t_), fontsize=8, color=TCOL[t_], fontweight="bold", zorder=5,
+                     ha="left" if _dx > 0 else "right")
+        else:
+            axN.plot(*cen[t_], "o", ms=3.6, mfc="white" if und_ else "0.3", mec="0.3", mew=0.6, zorder=3)
+        if t_ == ref:
+            axN.plot(*cen[t_], "s", ms=6.5, mfc="none", mec="black", mew=0.9, zorder=4)
     if cother_:
         from scipy.spatial import ConvexHull as _CH
         _sb = np.array([cen[t_] for t_ in max(cother_, key=len)]); _h = _CH(_sb); _v = _sb[_h.vertices]; _c = _v.mean(0); _v = _c + 1.25 * (_v - _c)
@@ -810,7 +821,19 @@ def main():
     allN_ = np.array([cen[t_] for t_ in Tg.nodes()]); pN_ = 160
     axN.set_xlim(allN_[:, 0].min() - pN_, allN_[:, 0].max() + pN_); axN.set_ylim(allN_[:, 1].max() + pN_, allN_[:, 1].min() - pN_)
 
-    axN.text(0.5, -0.04, "tile overlap network", transform=axN.transAxes, ha="center", va="top", fontsize=8, color="0.3")
+    axN.text(0.5, 1.0, "tile overlap network", transform=axN.transAxes, ha="center", va="bottom", fontsize=8, color="0.25")
+    from matplotlib.lines import Line2D as _L2n
+    axN.legend(handles=[_L2n([], [], ls="none", marker="o", ms=4, mfc="0.3", mec="0.3", label="clock solved"),
+                        _L2n([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.3", label="unresolved"),
+                        _L2n([], [], ls="none", marker="s", ms=5, mfc="none", mec="black", label="reference"),
+                        _L2n([], [], color="0.2", lw=0.8, ls="--", label="separate block")],
+               loc="upper left", bbox_to_anchor=(-0.05, -0.02), fontsize=8, frameon=False, ncol=2, handletextpad=0.3, columnspacing=0.5,
+               borderaxespad=0, labelspacing=0.2)
+    # connector from the highlighted edge to the before/after maps
+    _midab = (np.asarray(cen[ta]) + np.asarray(cen[tb])) / 2; _pb0 = axb0.get_position()
+    figS.add_artist(matplotlib.patches.ConnectionPatch(xyA=_midab, coordsA=axN.transData, xyB=(_pb0.x0, (_pb0.y0 + axb1.get_position().y1) / 2),
+                                                       coordsB=figS.transFigure, arrowstyle="-|>", lw=0.8, color="0.3", mutation_scale=8))
+    figS.text(axN.get_position().x0 - 0.01, axb0.get_position().y1 + 0.015, "a", fontsize=10, fontweight="bold", va="bottom")
     # ---- SI figure fig8_supp_block: a overlap graph · b soft mode of the synchronization Laplacian · c estimates of the block offset β ·
     #      d sensitivity of the phase map to β
     figB = plt.figure(figsize=(7.5, 6.4), facecolor="white")
