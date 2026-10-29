@@ -1,14 +1,13 @@
-"""Figure 1 — acquisition: the organ is recorded tile by tile, one high-speed movie per tile (PLOS, 7.5 in wide).
+"""Figure 1 — from microscopy to a whole-organ vessel graph (PLOS, 7.5 in wide; old Figs 1–3 combined).
 
-  a  imaging setup: figures/fig1/setup.png (rendered from setup.svg: objective over the windowed egg, the scan across the
-     yolk-sac plexus; BioRender elements — Created with BioRender.com); without that file a plain drawn schematic is used
-  b  one tile (default tile 36, the representative vessel's tile of Figs 3–4): a few consecutive frames of its 250 fps
-     recording and the moving max-projection (frame − temporal median, max over time) that shows the perfused lumen
-  c  acquisition order: tile centres joined in recording order (boustrophedon), coloured by elapsed acquisition time
-     (Photron .cih clocks, relative to the first tile) over the fused organ; the tile of b boxed
+  a  acquisition: imaging setup (figures/fig1/setup.png, rendered from setup.svg; BioRender elements — Created with
+     BioRender.com) and one tile's 250 fps recording (tile 36) as a stack of frames → max over time
+  b  stitching: the fused whole-organ mosaic with the acquisition order (tile centres in recording order, coloured by
+     elapsed time from the Photron .cih clocks); the crop of c boxed
+  c  segmentation and vectorization of one crop: mosaic → ilastik vessel probability → extracted graph (radius-encoded)
+  d  the whole-organ vessel graph (net3 vectorization of the curated mask), coloured by radius; crop of c boxed
 
-Writes figures/fig1/fig1.{png,pdf,tif}.  Ported from the archived hand-assembly scripts (make_figure1.py,
-make_acquisition_assets.py, 2026-08) into one code-generated figure.
+Writes figures/fig1/fig1.{png,pdf,tif}.
 """
 from __future__ import annotations
 import sys
@@ -31,6 +30,7 @@ import plos_style
 
 PX_UM_RAW = 1.7                 # µm per raw camera pixel (10× objective)
 ACCENT = "#e8711a"
+EDGE = (75489, 75638)             # representative vessel (tile 36), followed in Figs 2+
 INK = "#1a1a1a"
 
 
@@ -76,6 +76,15 @@ def scalebar(ax, um_per_px, um, label, color="white", x=0.06, y=0.9, lw=2.0):
     ax.plot([xa, xa + L], [ya, ya], color=color, lw=lw, solid_capstyle="butt", zorder=9)
     ax.annotate(label, (xa + L / 2, ya), xytext=(0, 2), textcoords="offset points", ha="center", va="bottom",
                 color=color, fontsize=8, zorder=9)
+
+
+def graph_segments(G, Hm):
+    """Edge polylines in mosaic pixel coordinates (row = Hm − y) and radii (px)."""
+    segs, rad, keys = [], [], []
+    for u, v, d in G.edges(data=True):
+        q = np.asarray(d["path"], float) if d.get("path") is not None else np.array([[G.nodes[n]["x"], G.nodes[n]["y"]] for n in (u, v)])
+        segs.append(np.column_stack([q[:, 0], Hm - q[:, 1]])); rad.append(float(d.get("radius") or np.nan)); keys.append((u, v))
+    return segs, np.array(rad), keys
 
 
 def draw_grid(ax, x0, x1, ytop, ybot, nr=5, nc=10):
@@ -130,7 +139,8 @@ def draw_schematic(ax):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--tile", type=int, default=36, help="example tile for b")
+    ap.add_argument("--tile", type=int, default=36, help="example tile for a")
+    ap.add_argument("--crop-um", type=float, default=650.0, help="side of the c crop (µm), centred on the representative vessel")
     args = ap.parse_args()
     plos_style.apply()
     cfg = StageConfig.load(_paths.STAGE)
@@ -148,41 +158,51 @@ def main():
     mip = np.clip(st - np.median(st, axis=0), 0, None).max(0)
     print(f"[fig1] tile {args.tile}: {T} frames {st.shape[1:]} at {um_rt:.1f} µm/px")
 
-    fig = plt.figure(figsize=(7.5, 2.75))
-    gs = fig.add_gridspec(1, 3, width_ratios=[0.62, 1.55, 1.05], wspace=0.1, left=0.01, right=0.885, top=0.9, bottom=0.03)
-    # a: imaging setup — figures/fig1/setup.png (Alex's drawing, from setup.svg; objective + BioRender egg, Created with
-    # BioRender.com); fallback: the plain drawn schematic
-    setup = out / "setup.png"
-    axA = fig.add_subplot(gs[0])
+    G = _paths.load_graph(); Hm, Wm = mos.shape
+    maxmed = tifffile.imread(str(_paths.STAGE / "fuse" / "maxmed.tif")).astype(float); maxmed = maxmed.mean(-1) if maxmed.ndim == 3 else maxmed
+    prob = tifffile.imread(str(_paths.STAGE / "fuse" / "probs_logit.tif")).astype(float)
+    mask = tifffile.imread(str(_paths.STAGE / "mask" / "mask.tif")) > 127
+    segs, rad, keys = graph_segments(G, Hm); rad_um = rad * PX_UM_RAW
+    rnorm = Normalize(np.nanpercentile(rad_um, 2), np.nanpercentile(rad_um, 98)); rcmap = plt.cm.viridis
+    rcol = lambda r: rcmap(rnorm(np.nan_to_num(r, nan=rnorm.vmin)))
+    lw_of = lambda r: 0.2 + 1.0 * np.clip(np.nan_to_num(r / np.nanpercentile(rad_um, 98), nan=0.3), 0, 1)
+    # crop of c: centred on the representative vessel (Figs 2+), side args.crop_um
+    ve = keys.index(EDGE) if EDGE in keys else keys.index(EDGE[::-1]); vmid = segs[ve][len(segs[ve]) // 2]
+    hs = args.crop_um / PX_UM_RAW / 2
+    cx0, cx1, cy0, cy1 = int(vmid[0] - hs), int(vmid[0] + hs), int(vmid[1] - hs), int(vmid[1] + hs)
+
+    fig = plt.figure(figsize=(7.5, 8.3))
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.0, 0.9, 1.75], hspace=0.12, left=0.015, right=0.985, top=0.975, bottom=0.01)
+    gTop = gs[0].subgridspec(1, 2, width_ratios=[1.0, 0.8], wspace=0.06)
+    letter = lambda ax, l, dx=0.0, dy=1.01: ax.text(dx, dy, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
+    head = lambda ax, t: ax.text(0.5, 1.01, t, transform=ax.transAxes, fontsize=9, va="bottom", ha="center")
+
+    # a: acquisition — setup drawing + frame stack → max-projection
+    gA = gTop[0].subgridspec(1, 2, width_ratios=[0.36, 1.0], wspace=0.02)
+    axA = fig.add_subplot(gA[0]); setup = out / "setup.png"
     if setup.exists():
         axA.imshow(plt.imread(str(setup)), interpolation="antialiased"); axA.axis("off")
     else:
         draw_schematic(axA)
-    axA.text(0.0, 1.02, "a", transform=axA.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
-
-    # b: the tile's recording as a receding stack of frames (time runs into the page) → max over time
-    axB = fig.add_subplot(gs[1]); axB.axis("off")
+    letter(axA, "a")
+    axB = fig.add_subplot(gA[1]); axB.axis("off")
     H_, W_ = st.shape[1:]; fw = 1.0; fh = fw * H_ / W_
     n_show, dx, dy = 6, 0.13, 0.11
     lo, hi = np.percentile(st[:20], 1), np.percentile(st[:20], 99.6)
-    for k in range(n_show)[::-1]:                                     # back (late) first, front (t = 0) last
+    for k in range(n_show)[::-1]:
         x0, y0 = k * dx, k * dy
-        axB.add_patch(Rectangle((x0 + 0.025, y0 - 0.025), fw, fh, fc="0.2", ec="none", alpha=0.18, zorder=2 * (n_show - k)))   # shadow
+        axB.add_patch(Rectangle((x0 + 0.025, y0 - 0.025), fw, fh, fc="0.2", ec="none", alpha=0.18, zorder=2 * (n_show - k)))
         axB.imshow(st[k * 6], cmap="gray", vmin=lo, vmax=hi, extent=(x0, x0 + fw, y0, y0 + fh), zorder=2 * (n_show - k) + 1,
                    interpolation="antialiased")
         axB.add_patch(Rectangle((x0, y0), fw, fh, fc="none", ec="white", lw=0.8, zorder=2 * (n_show - k) + 1.5))
     axB.add_patch(Rectangle((0, 0), fw, fh, fc="none", ec=INK, lw=0.6, zorder=2 * n_show + 2))
-    # time axis along the stack diagonal
     t0, t1 = np.array([fw + 0.06, -0.02]), np.array([fw + 0.06 + (n_show - 1) * dx + 0.06, (n_show - 1) * dy + 0.03])
     axB.annotate("", xy=t1, xytext=t0, arrowprops=dict(arrowstyle="-|>", lw=0.8, color=INK, mutation_scale=7))
     axB.text(*(t0 + t1) / 2 + np.array([0.08, -0.06]), "t", fontsize=8, style="italic", ha="left", va="top")
-    axB.text(0.5 * (fw + (n_show - 1) * dx), fh + (n_show - 1) * dy + 0.06, f"{T} frames, 250 fps", ha="center", va="bottom", fontsize=8)
-    # → max-projection
-    xm = fw + (n_show - 1) * dx + 0.42
-    axB.annotate("", xy=(xm - 0.04, fh / 2 + 0.25), xytext=(xm - 0.3, fh / 2 + 0.25),
-                 arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
+    axB.text(0.5 * (fw + (n_show - 1) * dx), fh + (n_show - 1) * dy + 0.06, f"one tile: {T} frames, 250 fps", ha="center", va="bottom", fontsize=8)
+    xm = fw + (n_show - 1) * dx + 0.42; ym = 0.25
+    axB.annotate("", xy=(xm - 0.04, fh / 2 + 0.25), xytext=(xm - 0.3, fh / 2 + 0.25), arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
     axB.text(xm - 0.17, fh / 2 + 0.31, "max\nover t", ha="center", va="bottom", fontsize=8, linespacing=1.0)
-    ym = 0.25
     axB.imshow(mip, cmap="magma", vmin=np.percentile(mip, 1), vmax=np.percentile(mip, 99.7), extent=(xm, xm + fw, ym, ym + fh),
                interpolation="antialiased", zorder=3)
     axB.add_patch(Rectangle((xm, ym), fw, fh, fc="none", ec=ACCENT, lw=1.0, zorder=4))
@@ -191,26 +211,55 @@ def main():
     axB.text(xm + 0.16 + L / 2, ym + 0.1, "200 µm", color="white", ha="center", va="bottom", fontsize=8, zorder=5)
     axB.text(xm + fw / 2, ym + fh + 0.06, "max-projection", ha="center", va="bottom", fontsize=8)
     axB.set_xlim(-0.05, xm + fw + 0.03); axB.set_ylim(-0.1, fh + (n_show - 1) * dy + 0.25); axB.set_aspect("equal")
-    axB.text(0.0, 1.02, "b", transform=axB.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
-    # c: acquisition order
-    axC = fig.add_subplot(gs[2])
-    vis = np.ma.masked_equal(mos, 0)
-    axC.imshow(vis, cmap="gray", vmin=np.percentile(mos[mos > 0], 1), vmax=np.percentile(mos, 99.7), alpha=0.55, interpolation="antialiased")
-    ok = np.isfinite(tmin); norm = Normalize(0, np.nanmax(tmin)); cmap = plt.cm.viridis
+
+    # b: stitching — fused mosaic + acquisition order
+    axS = fig.add_subplot(gTop[1])
+    axS.imshow(np.ma.masked_equal(mos, 0), cmap="gray", vmin=np.percentile(mos[mos > 0], 1), vmax=np.percentile(mos, 99.7), interpolation="antialiased")
+    ok = np.isfinite(tmin); norm = Normalize(0, np.nanmax(tmin)); cmap = plt.cm.plasma
     seg = np.stack([cen[:-1], cen[1:]], axis=1); sv = (tmin[:-1] + tmin[1:]) / 2
-    lc = LineCollection(seg, cmap=cmap, norm=norm, linewidths=1.0, zorder=2); lc.set_array(np.where(np.isfinite(sv), sv, 0)); axC.add_collection(lc)
-    axC.scatter(cen[ok, 0], cen[ok, 1], c=tmin[ok], cmap=cmap, norm=norm, s=9, edgecolor=INK, linewidth=0.3, zorder=3)
-    axC.scatter(*cen[0], s=45, facecolor="none", edgecolor=INK, linewidth=0.8, zorder=4)
-    axC.annotate("start", cen[0], xytext=(-4, 4), textcoords="offset points", ha="right", va="bottom", fontsize=8)
-    i = int(np.flatnonzero(tids == args.tile)[0]); box = W_ * 2 * 0.95       # realtime px × ds → mosaic px
-    hb = H_ * 2 * 0.95
-    axC.add_patch(Rectangle((cen[i, 0] - box / 2, cen[i, 1] - hb / 2), box, hb, fill=False, ec=ACCENT, lw=1.1, zorder=5))
-    axC.set_xlim(0, mos.shape[1]); axC.set_ylim(mos.shape[0], 0); axC.set_aspect("equal"); axC.axis("off")
-    scalebar(axC, PX_UM_RAW, 1000, "1 mm", color=INK, x=0.0, y=0.03)
-    axC.text(0.0, 1.02, "c", transform=axC.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
-    pC = axC.get_position(); cax = fig.add_axes([pC.x1 + 0.01, pC.y0 + 0.15 * pC.height, 0.012, 0.7 * pC.height])
-    cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax); cb.set_label("acquisition time (min)", labelpad=2)
-    cb.outline.set_linewidth(0.5)
+    lc = LineCollection(seg, cmap=cmap, norm=norm, linewidths=0.9, zorder=2); lc.set_array(np.where(np.isfinite(sv), sv, 0)); axS.add_collection(lc)
+    axS.scatter(cen[ok, 0], cen[ok, 1], c=tmin[ok], cmap=cmap, norm=norm, s=5, edgecolor="none", zorder=3)
+    axS.scatter(*cen[0], s=30, facecolor="none", edgecolor="white", linewidth=0.8, zorder=4)
+    axS.add_patch(Rectangle((cx0, cy0), cx1 - cx0, cy1 - cy0, fill=False, ec="white", lw=0.8, zorder=5))
+    axS.set_xlim(0, Wm); axS.set_ylim(Hm, 0); axS.set_aspect("equal"); axS.axis("off")
+    scalebar(axS, PX_UM_RAW, 1000, "1 mm", color=INK, x=0.0, y=0.03)
+    letter(axS, "b"); head(axS, f"stitched mosaic ({len(tids)} tiles)")
+    pS = axS.get_position(); cax = fig.add_axes([pS.x1 - 0.005, pS.y0 + 0.2 * pS.height, 0.01, 0.6 * pS.height])
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax); cb.set_label("acquisition time (min)", labelpad=2); cb.outline.set_linewidth(0.5)
+
+    # c: segmentation and vectorization of one crop
+    gC = gs[1].subgridspec(1, 3, wspace=0.22)
+    sub = lambda im: im[cy0:cy1, cx0:cx1]
+    inside = [k for k, s_ in enumerate(segs) if ((s_[:, 0] > cx0) & (s_[:, 0] < cx1) & (s_[:, 1] > cy0) & (s_[:, 1] < cy1)).any()]
+    for k, ttl in enumerate(("mosaic crop", "vessel probability", "extracted graph")):
+        ax = fig.add_subplot(gC[k])
+        if k == 0:
+            im = sub(maxmed); ax.imshow(im, cmap="gray", vmin=np.percentile(im, 1), vmax=np.percentile(im, 99.5), interpolation="antialiased")
+            letter(ax, "c", -0.02, 1.07); scalebar(ax, PX_UM_RAW, 200, "200 µm", x=0.07, y=0.1)
+        elif k == 1:
+            im = sub(prob); ax.imshow(im, cmap="magma", vmin=np.percentile(im, 1), vmax=np.percentile(im, 99.5), interpolation="antialiased")
+        else:
+            ax.imshow(np.where(sub(mask), 0.9, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
+            ax.add_collection(LineCollection([segs[i] - [cx0, cy0] for i in inside], colors=rcol(rad_um[inside]), linewidths=lw_of(rad_um[inside]) * 1.6))
+        ax.set_xlim(0, cx1 - cx0); ax.set_ylim(cy1 - cy0, 0); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_color("0.6"); sp.set_linewidth(0.6)
+        ax.set_title(ttl, fontsize=9, pad=2)
+        if k < 2:
+            ax.annotate("", xy=(1.17, 0.5), xytext=(1.04, 0.5), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.9, color="0.25", mutation_scale=9))
+    fig.text(0.5, gC[0].get_position(fig).y1 + 0.035, "segmentation and vectorization", ha="center", va="bottom", fontsize=9)
+
+    # d: whole-organ vessel graph
+    axD = fig.add_subplot(gs[2])
+    axD.add_collection(LineCollection(segs, colors=rcol(rad_um), linewidths=lw_of(rad_um) * 0.75))
+    axD.add_patch(Rectangle((cx0, cy0), cx1 - cx0, cy1 - cy0, fill=False, ec=INK, lw=0.8, zorder=5))
+    axD.set_xlim(0, Wm); axD.set_ylim(Hm, 0); axD.set_aspect("equal"); axD.axis("off")
+    scalebar(axD, PX_UM_RAW, 1000, "1 mm", color=INK, x=0.02, y=0.03)
+    fig.canvas.draw(); pD = axD.get_position()                 # the equal-aspect box actually drawn
+    fig.text(pD.x0 - 0.01, pD.y1 + 0.004, "d", fontsize=12, fontweight="bold", va="bottom", ha="left")
+    head(axD, f"whole-organ vessel graph ({G.number_of_edges():,} vessels)")
+    cax = fig.add_axes([pD.x1 + 0.02, pD.y0 + 0.25 * pD.height, 0.013, 0.5 * pD.height])
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax); cb.set_label("vessel radius (µm)", labelpad=2); cb.outline.set_linewidth(0.5)
     plos_style.save(fig, out / "fig1")
 
 
