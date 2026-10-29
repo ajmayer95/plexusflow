@@ -56,6 +56,10 @@ def main():
     mm = tifffile.imread(str(P / "fuse" / "maxmed.tif")).astype(float); mm = mm.mean(-1) if mm.ndim == 3 else mm
     prob = tifffile.imread(str(P / "fuse" / "probs_logit.tif")).astype(float)
     mask = tifffile.imread(str(P / "mask" / "mask.tif")) > 127
+    from scipy import ndimage as _ndi0
+    _lab, _n = _ndi0.label(mask); _sz = np.bincount(_lab.ravel()); _sz[0] = 0
+    mask = _lab == int(np.argmax(_sz))                    # display: keep the connected vascular network, drop isolated specks
+    print(f"[fig2] mask: kept largest component, dropped {_n - 1} specks ({int(_sz.sum() - _sz.max())} px)")
     Hm, Wm = mm.shape
     segs, rad, keys, paths = [], [], [], []
     for u, v, d in G.edges(data=True):
