@@ -360,8 +360,15 @@ def order_panel(fig, ax, mos, positions):
     A = {t: np.asarray(e["affine_matrix"], float) for t, e in pos.items() if e.get("affine_matrix") is not None}
     tids = sorted(A); C = np.array([352.0, 320.0])                 # full-res tile centre (H/2, W/2)
     from scipy import ndimage as _ndi
-    outside = ~_ndi.binary_fill_holes(mos > 0)                     # mask only the exterior; interior zeros stay (dark)
-    ax.imshow(np.ma.masked_where(outside, mos), cmap="gray", vmin=np.percentile(mos[mos > 0], 1), vmax=np.percentile(mos[mos > 0], 99.7),
+    outside = ~_ndi.binary_fill_holes(mos > 0)                     # mask only the exterior
+    # display only: saturated (255) blobs and zero-valued holes inside the organ are filled by a masked Gaussian average of the
+    # surrounding tissue (normalised convolution, σ = 6 px) — stated in the caption
+    bad = ~outside & ((mos >= mos.max()) | (mos <= 0)); bad = _ndi.binary_dilation(bad, iterations=1) & ~outside
+    good = (~bad & ~outside).astype(float); num = gaussian_filter(mos * good, 6.0); den = gaussian_filter(good, 6.0)
+    disp = np.where(bad, num / np.maximum(den, 1e-6), mos)
+    print(f"[fig1] mosaic display fill: {100 * bad.sum() / (~outside).sum():.1f}% of organ pixels (saturated or empty)")
+    ok = ~outside & ~bad
+    ax.imshow(np.ma.masked_where(outside, disp), cmap="gray", vmin=np.percentile(disp[ok], 1), vmax=np.percentile(disp[ok], 99.5),
               interpolation="antialiased")
     for t in tids:
         q = (np.array([[0, 0], [0, 640], [704, 640], [704, 0], [0, 0]], float) @ A[t][:2, :2].T + A[t][:2, 2])[:, [1, 0]]
