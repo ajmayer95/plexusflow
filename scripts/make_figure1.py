@@ -87,17 +87,23 @@ def draw_schematic(ax):
     ax.plot([0.5, 0.5], [0.84, 0.78], color=INK, lw=0.8)
     ax.add_patch(Polygon([[0.38, 0.78], [0.62, 0.78], [0.56, 0.64], [0.44, 0.64]], closed=True, fc="0.7", ec=INK, lw=0.8))
     ax.text(0.66, 0.71, "10×\nobjective", ha="left", va="center", fontsize=8, linespacing=1.0)
-    ax.add_patch(Polygon([[0.44, 0.64], [0.56, 0.64], [0.60, 0.43], [0.50, 0.43]], closed=True, fc="#ffe08a", ec="none", alpha=0.6))
-    ax.add_patch(Ellipse((0.5, 0.33), 0.96, 0.34, fc="#f3e1c7", ec="#b08850", lw=0.8))
-    ax.add_patch(Ellipse((0.5, 0.35), 0.70, 0.22, fc="#e7b9a8", ec="#b06a5a", lw=0.6, alpha=0.9))
-    cols = np.linspace(0.25, 0.75, 6); rows = [0.43, 0.355, 0.28]; w, h = 0.095, 0.07
+    ax.add_patch(Polygon([[0.44, 0.64], [0.56, 0.64], [0.62, 0.42], [0.53, 0.42]], closed=True, fc="#ffe08a", ec="none", alpha=0.6))
+    ax.add_patch(Ellipse((0.5, 0.35), 0.99, 0.36, fc="#f3e1c7", ec="#b08850", lw=0.8))
+    ax.add_patch(Ellipse((0.5, 0.35), 0.84, 0.27, fc="#e7b9a8", ec="#b06a5a", lw=0.6, alpha=0.9))
+    # 5 rows × 10 columns of overlapping fields of view (~25 % overlap), scanned column by column (boustrophedon):
+    # top-left → down to bottom-left → one column right → up to the top → …
+    nr, nc = 5, 10
+    cols = np.linspace(0.16, 0.84, nc); rows = np.linspace(0.45, 0.25, nr)
+    w, h = 1.3 * (cols[1] - cols[0]), 1.3 * (rows[0] - rows[1])
     for yy in rows:
         for xx in cols:
-            ax.add_patch(Rectangle((xx - w / 2, yy - h / 2), w, h, fc="none", ec="0.35", lw=0.4))
-    ax.add_patch(Rectangle((cols[3] - w / 2, rows[0] - h / 2), w, h, fc="none", ec=ACCENT, lw=1.2))
-    path = [(cols[0], rows[0])] + [(c, r) for k, r in enumerate(rows) for c in (cols if k % 2 == 0 else cols[::-1])]
-    ax.plot(*np.array(path[1:]).T, color=INK, lw=0.5, alpha=0.6)
-    ax.text(0.5, 0.11, "yolk-sac plexus, scanned\none field of view at a time", ha="center", va="center", fontsize=8, linespacing=1.05)
+            ax.add_patch(Rectangle((xx - w / 2, yy - h / 2), w, h, fc="none", ec="0.35", lw=0.35, alpha=0.9))
+    ax.add_patch(Rectangle((cols[6] - w / 2, rows[1] - h / 2), w, h, fc="none", ec=ACCENT, lw=1.1, zorder=4))
+    path = np.array([(c, r) for j, c in enumerate(cols) for r in (rows if j % 2 == 0 else rows[::-1])])
+    ax.plot(*path.T, color=INK, lw=0.6, alpha=0.75, zorder=3)
+    ax.plot(*path[0], "o", ms=3.5, mfc="white", mec=INK, mew=0.7, zorder=5)
+    ax.annotate("", xy=path[-1], xytext=path[-2], arrowprops=dict(arrowstyle="-|>", lw=0.6, color=INK, mutation_scale=6), zorder=5)
+    ax.text(0.5, 0.06, "yolk-sac plexus, scanned\none field of view at a time", ha="center", va="center", fontsize=8, linespacing=1.05)
 
 
 def main():
