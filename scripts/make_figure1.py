@@ -445,7 +445,7 @@ def main():
         xd = (len(ACQ_TILES) - 1) * pitch + fw + (n_show - 1) * dx + 0.1 + q * 0.11
         axB.plot(xd, ytop + 0.5 * fh, "o", ms=3.2, color=INK, zorder=50)
         axB.plot(xd, 0.5 * fh2, "o", ms=3.2, color=INK, zorder=50)
-    axB.text(-0.06, ytop + 0.5 * (fh + (n_show - 1) * dy), "250 fps", rotation=90, ha="right", va="center", fontsize=8)
+    axB.text(-0.06, ytop + 0.5 * (fh + (n_show - 1) * dy), "250 fps, ~3 s", rotation=90, ha="right", va="center", fontsize=8)
     axB.text(-0.06, fh2 / 2, "Projection", rotation=90, ha="right", va="center", fontsize=8)
     L = 500 / PX_UM_RAW / p_.shape[1] * fw; xr = (len(ACQ_TILES) - 1) * pitch + fw - 0.06
     axB.plot([xr - L, xr], [0.08, 0.08], color="white", lw=2, solid_capstyle="butt", path_effects=HALO)
