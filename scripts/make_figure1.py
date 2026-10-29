@@ -201,10 +201,37 @@ def stitch_panel(ax, positions, tile_dir, ds=2):
     return dict(sx=sx, sy=sy, sh=sh, dth=dth)
 
 
+def best_rigid_shift(positions, tile_dir, tile, nb, ds=2):
+    """Rigid baseline for the registration panel: the tile's manual rotation, the neighbours' common scale, translation
+    chosen to maximise overlap NCC with the (fixed) neighbours.  Returns (shift in full-res px, NCC rigid, NCC manual affine)."""
+    from scipy.optimize import minimize
+    _, A = _load_positions_and_affines(positions, ds)
+    TL = {t: _load_tile(tile_dir / f"vid{t}_maxmed.tif", ds) for t in tuple(nb) + (tile,)}
+    hp = lambda im: (lambda x: (x - x.mean()) / (x.std() + 1e-9))(gaussian_filter(im - gaussian_filter(im, 20), 1.5))
+    y0, y1, x0, x1 = compute_world_bbox({u: TL[u].shape for u in TL}, {u: A[u] for u in TL}, pad=40); sh = (y1 - y0, x1 - x0)
+    num = np.zeros(sh); den = np.zeros(sh)
+    for u in nb:
+        num += _warp_into_canvas(hp(TL[u]), A[u], sh, y0, x0); den += _warp_into_canvas(np.ones_like(TL[u]), A[u], sh, y0, x0)
+    G = np.where(den > 0.5, num / np.maximum(den, 1e-9), np.nan); Ht = hp(TL[tile]); one = np.ones_like(TL[tile])
+    def ncc(Aa):
+        M = _warp_into_canvas(Ht, Aa, sh, y0, x0); o = (_warp_into_canvas(one, Aa, sh, y0, x0) > 0.99) & np.isfinite(G)
+        if o.sum() < 2000:
+            return -1.0
+        a, b = M[o] - M[o].mean(), G[o] - G[o].mean(); return float((a * b).sum() / np.sqrt((a * a).sum() * (b * b).sum() + 1e-12))
+    H, W = TL[tile].shape; c = np.array([H / 2, W / 2]); U, _, Vt = np.linalg.svd(A[tile][:2, :2]); R0 = U @ Vt
+    s_nb = float(np.median([np.sqrt(abs(np.linalg.det(A[u][:2, :2]))) for u in nb])); L = s_nb * R0
+    ctr0 = A[tile][:2, :2] @ c + A[tile][:2, 2]
+    def rigid(d):
+        Aa = np.eye(3); Aa[:2, :2] = L; Aa[:2, 2] = ctr0 + d - L @ c; return Aa
+    best = min((minimize(lambda d: -ncc(rigid(d)), np.array(q, float), method="Powell", options=dict(xtol=0.2, ftol=1e-4, maxfev=200))
+                for q in ((0, 0), (-10, 0), (10, 0), (0, -10), (0, 10))), key=lambda r: r.fun)
+    return best.x * ds, -best.fun, ncc(A[tile])
+
+
 def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=280.0, n_lm=3, zoom_with=None):
     """Tile 15 and its neighbours.  axF: full footprints at the stored placement (magenta = tile 15, green = neighbours,
     white = agreement), tile outlines + numbers, zoom box on the 15 | 19–20 overlap.  axZ = (rigid, affine): that zoom with
-    tile 15 placed rigidly (own rotation, neighbours' scale, same centre) vs by the stored affine; stars = vessel junctions
+    tile placed by the NCC-optimal rigid (manual rotation, neighbours' scale, best translation) vs by the stored affine; stars = vessel junctions
     of the neighbours (illustrative — the manual registration stored no point correspondences)."""
     _, affines = _load_positions_and_affines(positions, ds)
     T15 = tile                                                     # (name kept from the tile-15 version)
@@ -217,7 +244,9 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
         return np.clip((x - lo) / max(hi - lo, 1e-9), 0, 1)
     A15 = affines[T15]; H15, W15 = tiles[T15].shape; c = np.array([H15 / 2, W15 / 2])
     U, S, Vt = np.linalg.svd(A15[:2, :2]); s_nb = np.median([np.sqrt(abs(np.linalg.det(affines[u][:2, :2]))) for u in nb])
-    Rp = (U @ Vt) * s_nb; Ar = np.eye(3); Ar[:2, :2] = Rp; Ar[:2, 2] = A15[:2, :2] @ c + A15[:2, 2] - Rp @ c
+    shift, n_r, n_a = best_rigid_shift(positions, tile_dir, tile, nb)        # NCC-optimal rigid (translation; manual rotation)
+    print(f"[fig1] tile {tile}: optimal rigid NCC {n_r:.3f} vs manual affine {n_a:.3f} (shift {shift.round(1)} px)")
+    Rp = (U @ Vt) * s_nb; Ar = np.eye(3); Ar[:2, :2] = Rp; Ar[:2, 2] = A15[:2, :2] @ c + A15[:2, 2] + shift / ds - Rp @ c
     y0, y1, x0, x1 = compute_world_bbox({t: tiles[t].shape for t in nb + (T15,)}, {**{t: affines[t] for t in nb}, T15: A15}, pad=10)
     sh = (y1 - y0, x1 - x0); num = np.zeros(sh); den = np.zeros(sh); cov = {}
     for t in nb:
