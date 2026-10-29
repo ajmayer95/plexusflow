@@ -42,9 +42,10 @@ KW = dict(dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="media
 COL = ["#0072B2", "#E69F00", "#CC79A7"]          # Okabe–Ito, as fig6v3
 LOWCOL = "#009E73"
 INK, MUTED = "#1a1a1a", "#6b6b6b"
-plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"], "font.size": 8,
-                     "axes.linewidth": 0.6, "xtick.major.width": 0.6, "ytick.major.width": 0.6, "xtick.major.size": 2.5,
-                     "ytick.major.size": 2.5, "mathtext.default": "regular", "pdf.fonttype": 42})
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import plos_style
+plos_style.apply()
+plt.rcParams["mathtext.default"] = "regular"
 
 t0 = time.time()
 log = lambda s: print(f"[{time.strftime('%H:%M:%S')} +{time.time() - t0:4.0f} s] {s}", flush=True)
@@ -199,13 +200,13 @@ def main():
     axb.errorbar(R_[:, 0], R_[:, 1], yerr=[R_[:, 1] - R_[:, 2], R_[:, 3] - R_[:, 1]], fmt="o", ms=4, color="#2a6fb0",
                  mec="white", mew=0.5, ecolor="#1a1a1a", elinewidth=0.9, capsize=2.0, capthick=0.9, zorder=3)
     axb.set_xscale("log"); axb.set_yscale("log"); axb.set_xlim(lo_, hi_); axb.set_ylim(lo_, hi_); axb.set_aspect("equal")
-    axb.set_xlabel(r"binned RMS predicted uncertainty $\sigma_j$ (nL/s)", fontsize=8)
-    axb.set_ylabel(r"binned RMS observed residual $r_j$ (nL/s)", fontsize=8); axb.tick_params(labelsize=8)
+    axb.set_xlabel(r"RMS predicted uncertainty $\sigma_j$ (nL/s)", fontsize=8)
+    axb.set_ylabel(r"RMS observed residual $r_j$ (nL/s)", fontsize=8); axb.tick_params(labelsize=8)
     for s_ in ("top", "right"):
         axb.spines[s_].set_visible(False)
     axb.text(0.04, 0.96, r"$\sigma_j^2 = \Sigma_e\,(c_e\,y_e)^2 + \sigma_0^2$", transform=axb.transAxes, ha="left", va="top", fontsize=8, color=INK)
     axb.text(0.04, 0.84, "held-out tiles", transform=axb.transAxes, ha="left", va="top", fontsize=8, color=MUTED)
-    axb.text(-0.30, 1.03, "b", transform=axb.transAxes, **{**head, "fontsize": 10})
+    axb.text(-0.34, 1.03, "b", transform=axb.transAxes, **{**head, "fontsize": 10})
 
     # c: patch maps (same geometry & widths in every map), plus the three-vessel junction chart
     geom = load_tile_geometry(StageConfig.load(ST)); E = [tuple(e) for e in D["edges"]]
@@ -313,7 +314,7 @@ def main():
     axq.vlines(xm, lo_, hi_, color=INK, lw=0.8, zorder=2)
     axq.plot(xm, ym, "o-", color=INK, ms=3.5, lw=1.0, zorder=3, label="all vessels")
     log("  network: median |ΔQ|/|Q| by c sextile " + ", ".join(f"c≈{x:.2f}: {y:.2f}" for x, y in zip(xm, ym)))
-    axq.set_xlabel("c", fontsize=8, labelpad=1); axq.set_ylabel("|Q′ − y| / |y|", fontsize=8, labelpad=1)
+    axq.set_xlabel("c", fontsize=8, labelpad=1); axq.set_ylabel("|Q′ − y| / |y|", fontsize=8, labelpad=2)
     axq.set_ylim(0, 1.3); axq.set_xlim(0.1, 1.5); axq.tick_params(labelsize=8)
     for s_ in ("top", "right"):
         axq.spines[s_].set_visible(False)
@@ -323,9 +324,7 @@ def main():
     axq.text(0.15, 0.88, "all vessels", transform=axq.transAxes, fontsize=8, color=INK, va="center", ha="left")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    for ext in ("png", "pdf"):
-        fig.savefig(f"{OUT}.{ext}", dpi=300 if ext == "png" else None, facecolor="white")
-    fig.savefig(f"{OUT}.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
+    plos_style.save(fig, OUT)
     log(f"wrote {OUT}.png/.pdf")
     # supplement: (a) the five tile folds on the mosaic, (b) held-out standardized residuals
     fs = plt.figure(figsize=(7.5, 3.4), facecolor="white"); gS = fs.add_gridspec(1, 2, width_ratios=[1.25, 1], wspace=0.30,
@@ -373,9 +372,7 @@ def main():
         ax.spines[s_].set_visible(False)
     ax.text(-0.02, 1.02, "b", transform=ax.transAxes, fontsize=10, fontweight="bold", va="bottom")
     so = OUT.parent / "fig6v5_S_heldout"
-    for ext in ("png", "pdf"):
-        fs.savefig(f"{so}.{ext}", dpi=300 if ext == "png" else None, facecolor="white")
-    fs.savefig(f"{so}.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
+    plos_style.save(fs, so)
     log(f"wrote {so}.png/.pdf")
 
 
