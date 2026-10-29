@@ -72,7 +72,7 @@ def main():
     fig = plt.figure(figsize=(7.5, 5.6))
     gs = fig.add_gridspec(2, 1, height_ratios=[0.5, 1.0], hspace=0.1, left=0.02, right=0.98, top=0.965, bottom=0.02)
     gA = gs[0].subgridspec(1, 4, wspace=0.12)
-    gB = gs[1].subgridspec(1, 2, width_ratios=[1.0, 1.0], wspace=0.08)
+    gB = gs[1].subgridspec(1, 2, width_ratios=[1.0, 1.0], wspace=0.16)
     letter = lambda ax, l, dx=0.0: ax.text(dx, 1.02, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
 
     # a: crop pipeline
@@ -100,18 +100,18 @@ def main():
 
     # b: whole graph by radius
     axB = fig.add_subplot(gB[0])
-    axB.add_collection(LineCollection(segs, colors=rcol(rad_um), linewidths=lw_of(rad_um) * 0.7))
+    axB.add_collection(LineCollection(segs, colors=rcol(rad_um), linewidths=lw_of(rad_um) * 1.1))
     axB.add_patch(Rectangle((cx0, cy0), cx1 - cx0, cy1 - cy0, fill=False, ec=INK, lw=0.8))
     geom = load_tile_geometry(StageConfig.load(P)); tg = geom.tiles[args.tile]
     Ht, Wt = tifffile.imread(str(P / "tiles" / "maxmed" / f"vid{args.tile}_maxmed.tif")).shape[:2]
     corners = np.array([[0, 0, 1], [0, Wt, 1], [Ht, Wt, 1], [Ht, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
-    ds = geom.downsample; axB.plot(corners[:, 1] / ds - geom.x0, corners[:, 0] / ds - geom.y0, color="#e8711a", lw=1.0)
+    ds = geom.downsample; axB.plot(corners[:, 1] / ds - geom.x0, corners[:, 0] / ds - geom.y0, color=INK, lw=0.7, ls=(0, (3, 2)))
     axB.set_xlim(0, Wm); axB.set_ylim(Hm, 0); axB.set_aspect("equal"); axB.axis("off")
     scalebar(axB, 1000, PX_UM, x_frac=0.3, y_frac=0.98, color=INK, halo=False)
     fig.canvas.draw(); pB = axB.get_position()
     fig.text(pB.x0, pB.y1 + 0.005, "b", fontsize=12, fontweight="bold", va="bottom", ha="left")
-    cax = fig.add_axes([pB.x0 + 0.62 * pB.width, pB.y0 + 0.04, 0.32 * pB.width, 0.014])
-    cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax, orientation="horizontal"); cb.set_label("Radius (µm)", labelpad=1)
+    cax = fig.add_axes([pB.x1 + 0.005, pB.y0 + 0.25 * pB.height, 0.012, 0.5 * pB.height])
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax); cb.set_label("Radius (µm)", labelpad=2)
     cb.outline.set_linewidth(0.5)
 
     # c: graph in tile 36's own frame
@@ -127,7 +127,7 @@ def main():
     axC.add_collection(LineCollection(loc, colors=rcol(lr), linewidths=lw_of(lr) * 1.6, alpha=0.95))
     axC.set_xlim(0, Wt); axC.set_ylim(Ht, 0); axC.set_aspect("equal"); axC.set_xticks([]); axC.set_yticks([])
     for sp in axC.spines.values():
-        sp.set_color("#e8711a"); sp.set_linewidth(1.2)
+        sp.set_visible(False)
     scalebar(axC, 100, PX_UM)
     letter(axC, "c", 0.0)
     print(f"[fig2] tile {args.tile}: {len(loc)} edges mapped into its frame")
