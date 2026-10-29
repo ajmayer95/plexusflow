@@ -65,6 +65,9 @@ def main():
     ap.add_argument('--tag', default=None, help='output name suffix: fig9alt_v3_<tag>')
     args = ap.parse_args()
 
+    plt.rcParams.update({'font.family': 'Arial', 'mathtext.fontset': 'custom', 'mathtext.rm': 'Arial', 'mathtext.it': 'Arial:italic',
+                         'font.size': 8, 'axes.linewidth': 0.6, 'xtick.major.width': 0.6, 'ytick.major.width': 0.6,
+                         'xtick.major.size': 2.5, 'ytick.major.size': 2.5})
     G = _paths.load_graph()
     D = pickle.loads((_paths.RESULTS / 'dc_reconciled_v2.pkl').read_bytes())
     A = pickle.loads((_paths.RESULTS / f'{args.field}.pkl').read_bytes())
@@ -142,7 +145,7 @@ def main():
 
     def edgemap(ax, val, mask, norm, cmap, lw=1.2):
         ax.add_collection(LineCollection([segs[c] for c in np.flatnonzero(~mask)], colors=(0.35, 0.35, 0.35, 0.35),
-                                         linewidths=0.4, zorder=2))
+                                         linewidths=0.2, zorder=2))
         sel = np.flatnonzero(mask & np.isfinite(val))
         ax.add_collection(LineCollection([segs[c] for c in sel], colors=cmap(norm(val[sel])), linewidths=lw, zorder=3))
 
@@ -150,17 +153,17 @@ def main():
         for k, c in enumerate(picks):
             if c is None: continue
             mid = segs[c][len(segs[c]) // 2]
-            ax.plot(*mid, 'o', color='#f5d400', markersize=18, markeredgecolor='black', markeredgewidth=1.4, zorder=8)
-            ax.text(*mid, str(k + 1), ha='center', va='center', fontsize=10, fontweight='bold', zorder=9)
+            ax.plot(*mid, 'o', color='#f5d400', markersize=8, markeredgecolor='black', markeredgewidth=0.6, zorder=8)
+            ax.text(*mid, str(k + 1), ha='center', va='center', fontsize=8, fontweight='bold', zorder=9)
 
     aspect = (y1 - y0) / (x1 - x0)          # >1 for tall embryos
-    fig = plt.figure(figsize=(21, 11.5 + 6.5 * aspect), facecolor='white')
-    outer = fig.add_gridspec(2, 1, height_ratios=[1.6 * aspect, 1.0], hspace=0.10, left=0.03, right=0.98,
-                             top=0.97, bottom=0.04)
-    top = outer[0].subgridspec(1, 2, width_ratios=[2.1, 1.0], wspace=0.11)
-    gA = top[0].subgridspec(2, 3, hspace=0.06, wspace=0.04)
-    gB = top[1].subgridspec(2, 1, hspace=0.22)
-    gC = outer[1].subgridspec(2, 3, hspace=0.35, wspace=0.22)
+    fig = plt.figure(figsize=(7.5, 3.9 + 2.2 * aspect), facecolor='white')
+    outer = fig.add_gridspec(2, 1, height_ratios=[1.3 * aspect, 1.0], hspace=0.2, left=0.07, right=0.93,
+                             top=0.97, bottom=0.05)
+    top = outer[0].subgridspec(1, 2, width_ratios=[2.1, 1.0], wspace=0.22)
+    gA = top[0].subgridspec(2, 3, hspace=0.04, wspace=0.04)
+    gB = top[1].subgridspec(2, 1, hspace=0.35)
+    gC = outer[1].subgridspec(2, 3, hspace=0.55, wspace=0.28)
 
     nPF = mcolors.LogNorm(0.05, 0.6); cPF = plt.cm.magma
     nPH = mcolors.Normalize(0, np.pi); cPH = plt.cm.hsv
@@ -169,51 +172,51 @@ def main():
                                                            ('simulated', pf_s, Hs[1], Hs[2], allmask, allmask))):
         for col in range(3):
             ax = fig.add_subplot(gA[row, col]); bg(ax); axes_A[row, col] = ax
-            if col == 0: edgemap(ax, pf, mask, nPF, cPF, 1.3)
-            elif col == 1: edgemap(ax, ph(H1), pmask, nPH, cPH, 1.1)
-            else: edgemap(ax, ph(H2), pmask, nPH, cPH, 1.1)
+            if col == 0: edgemap(ax, pf, mask, nPF, cPF, 0.5)
+            elif col == 1: edgemap(ax, ph(H1), pmask, nPH, cPH, 0.45)
+            else: edgemap(ax, ph(H2), pmask, nPH, cPH, 0.45)
             if row == 0:
-                ax.set_title(['pulsatility fraction', r'$H_1$ phase lag', r'$H_2$ phase lag'][col],
-                             fontsize=13, fontweight='bold', pad=5)
+                ax.set_title(['pulsatility fraction', 'fundamental phase', '2nd-harmonic phase'][col],
+                             fontsize=8, pad=3)
             if col == 0:
                 ax.text(-0.04, 0.5, side, transform=ax.transAxes, rotation=90, ha='center', va='center',
-                        fontsize=12, fontweight='bold')
+                        fontsize=8)
             if row == 0 and col == 0:
-                ax.text(-0.05, 1.03, 'A', transform=ax.transAxes, fontsize=22, fontweight='bold', va='bottom', ha='right')
-    for col, (nrm, cm_, lab) in enumerate(((nPF, cPF, r'$(|H_1|^2 + |H_2|^2)/|\bar Q|^2$'),
-                                           (nPH, cPH, r'$H_1$ phase  (rad, mod $\pi$)'),
-                                           (nPH, cPH, r'$H_2$ phase  (rad, mod $\pi$)'))):
-        cax = axes_A[1, col].inset_axes([0.1, -0.07, 0.8, 0.025])
+                ax.text(-0.08, 1.03, 'a', transform=ax.transAxes, fontsize=10, fontweight='bold', va='bottom', ha='right')
+    for col, (nrm, cm_, lab) in enumerate(((nPF, cPF, 'pulsatile / mean power'),
+                                           (nPH, cPH, r'phase (rad, mod $\pi$)'),
+                                           (nPH, cPH, r'phase (rad, mod $\pi$)'))):
+        cax = axes_A[1, col].inset_axes([0.1, -0.08, 0.8, 0.035])
         cb = plt.colorbar(plt.cm.ScalarMappable(norm=nrm, cmap=cm_), cax=cax, orientation='horizontal')
-        cb.set_label(lab, fontsize=10); cb.ax.tick_params(labelsize=8)
+        cb.set_label(lab, fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
         if nrm is nPF:
-            cb.set_ticks([0.05, 0.1, 0.2, 0.4, 0.6]); cb.set_ticklabels(['0.05', '0.1', '0.2', '0.4', '0.6'])
+            cb.set_ticks([0.05, 0.1, 0.2, 0.6]); cb.set_ticklabels(['0.05', '0.1', '0.2', '0.6'])
             cb.ax.minorticks_off()
 
     # B
     nPI = mcolors.LogNorm(0.05, 1.5); cPI = plt.cm.magma
-    axB1 = fig.add_subplot(gB[0]); bg(axB1); edgemap(axB1, pires, e, nPI, cPI, 1.1); pick_marks(axB1)
-    cb = plt.colorbar(plt.cm.ScalarMappable(norm=nPI, cmap=cPI), cax=axB1.inset_axes([1.03, 0.10, 0.03, 0.80]))
-    cb.set_label(r'PI residual: $\sqrt{|\Delta PI_1|^2 + |\Delta PI_2|^2}$', fontsize=10); cb.ax.tick_params(labelsize=8)
-    axB1.text(-0.05, 1.03, 'B', transform=axB1.transAxes, fontsize=22, fontweight='bold', va='bottom', ha='right')
+    axB1 = fig.add_subplot(gB[0]); bg(axB1); edgemap(axB1, pires, e, nPI, cPI, 0.45); pick_marks(axB1)
+    cb = plt.colorbar(plt.cm.ScalarMappable(norm=nPI, cmap=cPI), cax=axB1.inset_axes([1.03, 0.10, 0.05, 0.80]))
+    cb.set_label('pulsatility-index residual', fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
+    axB1.text(-0.05, 1.03, 'b', transform=axB1.transAxes, fontsize=10, fontweight='bold', va='bottom', ha='right')
     axB2 = fig.add_subplot(gB[1])
     sel = e & (rms_s > 0) & (rms_m > 0)
-    axB2.scatter(rms_m[sel], rms_s[sel], c=pires[sel], s=5, cmap=cPI, norm=nPI, alpha=0.6, linewidths=0)
+    axB2.scatter(rms_m[sel], rms_s[sel], c=pires[sel], s=1.5, cmap=cPI, norm=nPI, alpha=0.6, linewidths=0)
     lo = max(min(np.percentile(rms_m[sel], 2), np.percentile(rms_s[sel], 2)) * 0.5, 1e-4)
     hi = max(np.percentile(rms_m[sel], 99.5), np.percentile(rms_s[sel], 99.5),
              *[max(rms_m[c], rms_s[c]) for c in picks if c is not None and sel[c]]) * 2      # keep every pick on scale
-    axB2.plot([lo, hi], [lo, hi], 'k--', lw=0.7, alpha=0.6)
+    axB2.plot([lo, hi], [lo, hi], 'k--', lw=0.5, alpha=0.6)
     axB2.set_xscale('log'); axB2.set_yscale('log'); axB2.set_xlim(lo, hi); axB2.set_ylim(lo, hi); axB2.set_aspect('equal')
-    axB2.set_xlabel(r'$\|Q(t)\|_{\mathrm{RMS}}$  measured  (nL/s)', fontsize=10)
-    axB2.set_ylabel(r'$\|Q(t)\|_{\mathrm{RMS}}$  RC network  (nL/s)', fontsize=10)
+    axB2.set_xlabel('measured pulsatile RMS (nL/s)', fontsize=8, labelpad=1)
+    axB2.set_ylabel('RC network pulsatile RMS (nL/s)', fontsize=8, labelpad=1); axB2.tick_params(labelsize=8)
     axB2.text(0.03, 0.97, f"r(log) = {stats['rms_corr']:.3f}\nn = {int(sel.sum())}", transform=axB2.transAxes,
-              va='top', fontsize=10, bbox=dict(fc='white', ec='0.6', alpha=0.9))
+              va='top', fontsize=8, bbox=dict(fc='white', ec='0.6', lw=0.4, alpha=0.9, pad=1.5))
     for k, c in enumerate(picks):
         if c is None or not sel[c]: continue
-        axB2.plot(rms_m[c], rms_s[c], 'o', color='#f5d400', markersize=15, markeredgecolor='black', markeredgewidth=1.3, zorder=7)
-        axB2.text(rms_m[c], rms_s[c], str(k + 1), ha='center', va='center', fontsize=9, fontweight='bold', zorder=8)
+        axB2.plot(rms_m[c], rms_s[c], 'o', color='#f5d400', markersize=8, markeredgecolor='black', markeredgewidth=0.6, zorder=7)
+        axB2.text(rms_m[c], rms_s[c], str(k + 1), ha='center', va='center', fontsize=8, fontweight='bold', zorder=8)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=nPI, cmap=cPI), cax=axB2.inset_axes([1.03, 0.10, 0.03, 0.80]))
-    cb.set_label('PI residual', fontsize=10); cb.ax.tick_params(labelsize=8)
+    cb.set_label('pulsatility-index residual', fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
 
     # C waveforms (DC + H1 + H2)
     t = np.linspace(0, 1, 400)
@@ -222,25 +225,28 @@ def main():
     for k, c in enumerate(picks):
         ax = fig.add_subplot(gC[k // 3, k % 3])
         if c is None:
-            ax.text(0.5, 0.5, 'not in carved network', transform=ax.transAxes, ha='center', color='red'); continue
+            ax.text(0.5, 0.5, 'not in carved network', transform=ax.transAxes, ha='center', color='red', fontsize=8); continue
         if e[c]:
-            ax.plot(t, wave(Qp[c], {j: Hm_[j][c] for j in (1, 2)}), color='#2ca02c', lw=2.6, zorder=2,
-                    label='measured (conservative)' if k == 0 else None)
+            ax.plot(t, wave(Qp[c], {j: Hm_[j][c] for j in (1, 2)}), color='#2ca02c', lw=1.4, zorder=2,
+                    label='measured')
         else:
-            ax.text(0.5, 0.9, 'measured: not AC-eligible', transform=ax.transAxes, ha='center', fontsize=9, color='0.4')
-        ax.plot(t, wave(Qdc_s[c], {j: Hs[j][c] for j in (1, 2)}), color='#d62728', lw=1.8, ls='--', zorder=3,
-                label=f'RC network (D={d_main:.2g}, η={eta_main:g})' if k == 0 else None)
-        ax.set_xlabel('t / T', fontsize=10); ax.set_ylabel('Q (nL/s)', fontsize=10); ax.tick_params(labelsize=9)
-        ax.text(0.03, 0.95, str(k + 1), transform=ax.transAxes, ha='center', va='center', fontsize=11, fontweight='bold',
-                bbox=dict(fc='#f5d400', ec='black', lw=1.3, boxstyle='circle,pad=0.25'))
+            ax.text(0.5, 0.9, 'measured: not AC-eligible', transform=ax.transAxes, ha='center', fontsize=8, color='0.4')
+        ax.plot(t, wave(Qdc_s[c], {j: Hs[j][c] for j in (1, 2)}), color='#d62728', lw=1.0, ls='--', zorder=3,
+                label='RC network')
+        ax.set_xlabel('$t/T$', fontsize=8, labelpad=1); ax.set_ylabel('$Q$ (nL/s)', fontsize=8, labelpad=1); ax.tick_params(labelsize=8)
+        ax.spines[['top', 'right']].set_visible(False)
+        ax.text(0.03, 0.95, str(k + 1), transform=ax.transAxes, ha='center', va='center', fontsize=8, fontweight='bold',
+                bbox=dict(fc='#f5d400', ec='black', lw=0.6, boxstyle='circle,pad=0.2'))
+        if k == 1:
+            ax.legend(fontsize=8, loc='upper center', frameon=False, borderaxespad=0.1, handlelength=1.8)
         if k == 0:
-            ax.legend(fontsize=9, loc='lower left', frameon=False)
-            ax.text(-0.07, 1.08, 'C', transform=ax.transAxes, fontsize=22, fontweight='bold', va='bottom', ha='right')
+            ax.text(-0.18, 1.04, 'c', transform=ax.transAxes, fontsize=10, fontweight='bold', va='bottom', ha='right')
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     stem = 'fig9alt_v3' + (f'_{args.tag}' if args.tag else '')
-    plt.savefig(OUT_DIR / f'{stem}.png', dpi=180, bbox_inches='tight', facecolor='white')
-    plt.savefig(OUT_DIR / f'{stem}.pdf', bbox_inches='tight', facecolor='white')
+    plt.savefig(OUT_DIR / f'{stem}.png', dpi=300, facecolor='white')
+    plt.savefig(OUT_DIR / f'{stem}.pdf', facecolor='white')
+    plt.savefig(OUT_DIR / f'{stem}.tif', dpi=600, facecolor='white', pil_kwargs={'compression': 'tiff_lzw'})
     print(f"[fig9alt_v3] wrote {OUT_DIR / f'{stem}.png'}")
 
 
