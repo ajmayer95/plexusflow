@@ -228,7 +228,7 @@ def best_rigid_shift(positions, tile_dir, tile, nb, ds=2):
     return best.x * ds, -best.fun, ncc(A[tile])
 
 
-def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=280.0, n_lm=3, zoom_with=None):
+def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=280.0, n_lm=3, zoom_with=None, nb=None):
     """Tile 15 and its neighbours.  axF: full footprints at the stored placement (magenta = tile 15, green = neighbours,
     white = agreement), tile outlines + numbers, zoom box on the 15 | 19–20 overlap.  axZ = (rigid, affine): that zoom with
     tile placed by the NCC-optimal rigid (manual rotation, neighbours' scale, best translation) vs by the stored affine; stars = vessel junctions
@@ -236,7 +236,7 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
     _, affines = _load_positions_and_affines(positions, ds)
     T15 = tile                                                     # (name kept from the tile-15 version)
     cen = {t: (A @ [176.0 * 2 / ds, 160.0 * 2 / ds, 1])[:2] for t, A in affines.items()}
-    nb = tuple(t for t in sorted(affines, key=lambda u: np.hypot(*(cen[u] - cen[tile]))) if t != tile
+    nb = tuple(nb) if nb else tuple(t for t in sorted(affines, key=lambda u: np.hypot(*(cen[u] - cen[tile]))) if t != tile
                and np.hypot(*(cen[t] - cen[tile])) < 0.85 * 704 / ds)[:5]
     tiles = {t: _load_tile(tile_dir / f"vid{t}_maxmed.tif", ds) for t in nb + (T15,)}
     def norm01(im):
@@ -346,8 +346,9 @@ def order_panel(fig, ax, mos, positions):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tile", type=int, default=36, help="tile whose movie is shown in a")
-    ap.add_argument("--reg-tile", type=int, default=36, help="tile shown registered against its neighbours in b")
-    ap.add_argument("--zoom-with", type=int, nargs="+", default=[39, 27], help="zoom on the overlap with these neighbours")
+    ap.add_argument("--reg-tile", type=int, default=15, help="tile shown registered against its neighbours in b")
+    ap.add_argument("--reg-nb", type=int, nargs="+", default=[20, 19, 16, 14], help="its (fixed, rigid) neighbours")
+    ap.add_argument("--zoom-with", type=int, nargs="+", default=[19, 16], help="zoom on the overlap with these neighbours")
     ap.add_argument("--out-name", default="fig1")
     args = ap.parse_args()
     plos_style.apply()
@@ -395,7 +396,7 @@ def main():
     gR = gL[1].subgridspec(1, 2, width_ratios=[1.1, 1.0], wspace=0.1)
     gZ = gR[1].subgridspec(4, 2, height_ratios=[0.3, 1, 1, 0.3], hspace=0.04, wspace=0.04)
     axF = fig.add_subplot(gR[0]); axZ = [[fig.add_subplot(gZ[r + 1, c]) for c in range(2)] for r in range(2)]
-    registration_panel(axF, axZ, P / "stitch" / "positions.json", P / "tiles" / "maxmed", tile=args.reg_tile, zoom_with=args.zoom_with)
+    registration_panel(axF, axZ, P / "stitch" / "positions.json", P / "tiles" / "maxmed", tile=args.reg_tile, zoom_with=args.zoom_with, nb=args.reg_nb)
     letter(axF, "b", 0.0, 1.02)
 
     # c: whole-organ mosaic + acquisition order
