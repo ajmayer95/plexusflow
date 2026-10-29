@@ -37,7 +37,7 @@ PX_UM_RAW = 1.7
 ACCENT = "#e8711a"
 INK = "#1a1a1a"
 N_ZOOM = 3
-FORCE_SEAMS = (18,)                 # tile 31: one zoom on the 31 | 18 seam
+FORCE_SEAMS = ((18, 19),)           # tile 31: one zoom where 31, 18 and 19 all overlap
 T15, ANCHORS = 15, (7, 14, 21, 17, 18, 16, 19, 20, 22)
 CORNERS = lambda H, W: np.array([[0, 0, 1], [H, 0, 1], [H, W, 1], [0, W, 1], [0, 0, 1]], float).T
 
@@ -262,7 +262,7 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
     # zooms: one per requested neighbour seam; window inside that overlap where the affine raises local agreement most
     win = int(zoom_um / (PX_UM_RAW * ds))
     def pick(nbr):
-        ov = (m15["affine"][1] & m15["rigid"][1] & (cov[nbr] if nbr in cov else np.any([cov[t] for t in nb], axis=0))).astype(float)
+        ov = (m15["affine"][1] & m15["rigid"][1] & (np.all([cov[t] for t in nbr], axis=0) if isinstance(nbr, tuple) else cov[nbr] if nbr in cov else np.any([cov[t] for t in nb], axis=0))).astype(float)
         I = np.pad(ov.cumsum(0).cumsum(1), ((1, 0), (1, 0))); frac = (I[win:, win:] - I[:-win, win:] - I[win:, :-win] + I[:-win, :-win]) / win ** 2
         thr = 0.98 if (frac >= 0.98).any() else 0.9 * frac.max(); cand = []
         for r_ in range(0, frac.shape[0], max(win // 8, 1)):
@@ -291,7 +291,10 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
                 break
         for n in FORCE_SEAMS:                          # one zoom on a required seam: biggest rigid → affine gain there
             pool = [c_ for c_ in pick(n) if all(max(abs(c_[2][0] - z[2][0]), abs(c_[2][2] - z[2][2])) >= win for z in chosen)]
-            chosen.append(max(pool, key=lambda c_: (c_[3][1] - c_[3][0]) + 0.3 * c_[3][1]))
+            wa_ = (A15 @ CORNERS(H15, W15))[:2, :4] - np.array([[y0], [x0]])
+            tr = wa_[:, np.argmax(wa_[1] - wa_[0])]                          # tile's top-right corner on the canvas
+            near = lambda c_: np.hypot((c_[2][0] + c_[2][1]) / 2 - tr[0], (c_[2][2] + c_[2][3]) / 2 - tr[1])
+            chosen.append(min([c_ for c_ in pool if c_[3][1] > 0.4] or pool, key=near))
     else:
         chosen = [max(pick(n), key=lambda c_: c_[1]) for n in zoom_with]
     for c_ in chosen:
