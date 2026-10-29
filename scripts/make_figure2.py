@@ -50,7 +50,7 @@ def main():
     ap.add_argument("--tile", type=int, default=36)
     ap.add_argument("--crop-um", type=float, default=650.0)
     ap.add_argument("--edge", type=int, nargs=2, default=[75489, 75638], help="crop centred on this vessel")
-    ap.add_argument("--center", type=float, nargs=2, default=None, help="crop centre (mosaic col, row) instead of --edge")
+    ap.add_argument("--center", type=float, nargs=2, default=[2800, 1300], help="crop centre (mosaic col, row) instead of --edge")
     ap.add_argument("--out-name", default="fig2")
     args = ap.parse_args()
     plos_style.apply()
