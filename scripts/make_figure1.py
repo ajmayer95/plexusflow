@@ -37,6 +37,7 @@ PX_UM_RAW = 1.7
 ACCENT = "#e8711a"
 INK = "#1a1a1a"
 N_ZOOM = 3
+ACQ_TILES = (1, 2, 3)              # panel a: the first three recorded tiles
 FORCE_SEAMS = ((18, 19),)           # tile 31: one zoom where 31, 18 and 19 all overlap
 T15, ANCHORS = 15, (7, 14, 21, 17, 18, 16, 19, 20, 22)
 CORNERS = lambda H, W: np.array([[0, 0, 1], [H, 0, 1], [H, W, 1], [0, W, 1], [0, 0, 1]], float).T
@@ -401,11 +402,11 @@ def main():
 
     fig = plt.figure(figsize=(7.5, 4.4))
     gs = fig.add_gridspec(1, 2, width_ratios=[1.0, 1.08], wspace=0.06, left=0.01, right=0.9, top=0.965, bottom=0.02)
-    gL = gs[0].subgridspec(2, 1, height_ratios=[0.85, 1.1], hspace=0.12)
+    gL = gs[0].subgridspec(2, 1, height_ratios=[0.9, 1.0], hspace=0.08)
     letter = lambda ax, l, dx=0.0, dy=1.01: ax.text(dx, dy, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
 
     # a: setup → one tile's movie → projection
-    gA = gL[0].subgridspec(1, 2, width_ratios=[0.42, 1.0], wspace=0.0)
+    gA = gL[0].subgridspec(1, 2, width_ratios=[0.34, 1.0], wspace=0.04)
     axA = fig.add_subplot(gA[0]); setup = out / "setup.png"
     if setup.exists():
         axA.imshow(plt.imread(str(setup)), interpolation="antialiased"); axA.axis("off")
@@ -413,25 +414,31 @@ def main():
         draw_schematic(axA)
     letter(axA, "a")
     axB = fig.add_subplot(gA[1]); axB.axis("off")
-    H_, W_ = st.shape[1:]; fw = 1.0; fh = fw * H_ / W_; n_show, dx, dy = 6, 0.09, 0.08
-    lo, hi = np.percentile(st[:20], 1), np.percentile(st[:20], 99.6)
-    for k in range(n_show)[::-1]:
-        x0, y0 = k * dx, k * dy; z = 2 * (n_show - k)
-        axB.add_patch(Rectangle((x0 + 0.02, y0 - 0.02), fw, fh, fc="0.2", ec="none", alpha=0.16, zorder=z))
-        axB.imshow(st[k * 8], cmap="gray", vmin=lo, vmax=hi, extent=(x0, x0 + fw, y0, y0 + fh), zorder=z + 1, interpolation="antialiased")
-        axB.add_patch(Rectangle((x0, y0), fw, fh, fc="none", ec="white", lw=0.6, zorder=z + 1.5))
-    t0 = np.array([fw + 0.04, -0.03]); t1 = t0 + [(n_show - 1) * dx + 0.05, (n_show - 1) * dy + 0.05]
-    axB.annotate("", xy=t1, xytext=t0, arrowprops=dict(arrowstyle="-|>", lw=0.8, color=INK, mutation_scale=7))
-    axB.text(t0[0] + 0.06, t0[1] - 0.02, "250 fps", ha="left", va="top", fontsize=8)
-    xs = fw + (n_show - 1) * dx + 0.42; fh2 = fw * mm.shape[0] / mm.shape[1]; y2 = (fh + (n_show - 1) * dy - fh2) / 2
-    axB.annotate("", xy=(xs - 0.04, y2 + fh2 / 2), xytext=(xs - 0.28, y2 + fh2 / 2), arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
-    lo, hi = np.percentile(mm, (1, 99.5)); axB.imshow(mm, cmap="gray", vmin=lo, vmax=hi, extent=(xs, xs + fw, y2, y2 + fh2), interpolation="antialiased")
-    axB.add_patch(Rectangle((xs, y2), fw, fh2, fc="none", ec="0.5", lw=0.6))
-    axB.text(xs + fw / 2, y2 + fh2 + 0.05, "Projection", ha="center", va="bottom", fontsize=8)
-    L = 200 / PX_UM_RAW / mm.shape[1] * fw
-    axB.plot([xs + fw - 0.2 - L, xs + fw - 0.2], [y2 + 0.08, y2 + 0.08], color="white", lw=2, solid_capstyle="butt")
-    axB.text(xs + fw - 0.2 - L / 2, y2 + 0.11, "200 µm", color="white", ha="center", va="bottom", fontsize=8)
-    axB.set_xlim(-0.03, xs + fw + 0.03); axB.set_ylim(-0.25, fh + (n_show - 1) * dy + 0.12); axB.set_aspect("equal")
+    # the first three tiles: each one 250 fps movie (stack, top) projected down to its max − median image (bottom)
+    H_, W_ = st.shape[1:]; fw = 1.0; fh = fw * H_ / W_; n_show, dx, dy = 5, 0.07, 0.06; pitch = 1.42
+    ytop = fh + 0.55; xmax = 0
+    for j, t in enumerate(ACQ_TILES):
+        s_ = tifffile.imread(str(next(Path(cfg.videos_realtime_dir).glob(f"*loc{t}_realtime.tif")))).astype(np.float32)
+        p_ = tifffile.imread(str(P / "tiles" / "maxmed" / f"vid{t}_maxmed.tif")).astype(float); p_ = p_.mean(-1) if p_.ndim == 3 else p_
+        lo, hi = np.percentile(s_[:20], 1), np.percentile(s_[:20], 99.6); ox = j * pitch
+        for k in range(n_show)[::-1]:
+            x0, y0 = ox + k * dx, ytop + k * dy; z = 2 * (n_show - k)
+            axB.add_patch(Rectangle((x0 + 0.02, y0 - 0.02), fw, fh, fc="0.2", ec="none", alpha=0.16, zorder=z))
+            axB.imshow(s_[k * 8], cmap="gray", vmin=lo, vmax=hi, extent=(x0, x0 + fw, y0, y0 + fh), zorder=z + 1, interpolation="antialiased")
+            axB.add_patch(Rectangle((x0, y0), fw, fh, fc="none", ec="white", lw=0.5, zorder=z + 1.5))
+        fh2 = fw * p_.shape[0] / p_.shape[1]; lo, hi = np.percentile(p_, (1, 99.5))
+        axB.imshow(p_, cmap="gray", vmin=lo, vmax=hi, extent=(ox, ox + fw, 0, fh2), interpolation="antialiased")
+        axB.add_patch(Rectangle((ox, 0), fw, fh2, fc="none", ec="0.5", lw=0.6))
+        axB.annotate("", xy=(ox + fw / 2, fh2 + 0.04), xytext=(ox + fw / 2, ytop - 0.06),
+                     arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
+        xmax = ox + fw + (n_show - 1) * dx
+    axB.text(pitch * len(ACQ_TILES) - 0.3, ytop + 0.5 * fh, "…", fontsize=12, ha="left", va="center")
+    axB.text(-0.06, ytop + 0.5 * (fh + (n_show - 1) * dy), "250 fps", rotation=90, ha="right", va="center", fontsize=8)
+    axB.text(-0.06, fh2 / 2, "Projection", rotation=90, ha="right", va="center", fontsize=8)
+    L = 200 / PX_UM_RAW / p_.shape[1] * fw; xr = (len(ACQ_TILES) - 1) * pitch + 0.12 + L
+    axB.plot([xr - L, xr], [0.08, 0.08], color="white", lw=2, solid_capstyle="butt")
+    axB.text(xr - L / 2, 0.11, "200 µm", color="white", ha="center", va="bottom", fontsize=8)
+    axB.set_xlim(-0.2, pitch * len(ACQ_TILES) + 0.05); axB.set_ylim(-0.05, ytop + fh + (n_show - 1) * dy + 0.05); axB.set_aspect("equal")
 
     # b: registration of one tile against its neighbours (before / after)
     gR = gL[1].subgridspec(1, 2, width_ratios=[0.95, 1.2], wspace=0.08)
