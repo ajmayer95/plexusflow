@@ -88,8 +88,8 @@ def main():
     ys, xs = np.nonzero(organ); pad = 40
     ox0, ox1, oy0, oy1 = max(xs.min() - pad, 0), min(xs.max() + pad, Wm), max(ys.min() - pad, 0), min(ys.max() + pad, Hm)
 
-    fig = plt.figure(figsize=(7.5, 4.55))
-    gs = fig.add_gridspec(2, 4, height_ratios=[1.0, 0.92], hspace=0.12, wspace=0.08, left=0.03, right=0.985, top=0.95, bottom=0.11)
+    fig = plt.figure(figsize=(7.5, 4.3))
+    gs = fig.add_gridspec(2, 4, height_ratios=[1.0, 0.92], hspace=0.12, wspace=0.08, left=0.03, right=0.925, top=0.95, bottom=0.03)
     letter = lambda ax, l, dx=0.0: ax.text(dx, 1.03, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
     def frame(ax, on):
         ax.set_xticks([]); ax.set_yticks([])
@@ -118,7 +118,7 @@ def main():
         if k < 3:
             ax.annotate("", xy=(1.07, 0.5), xytext=(0.99, 0.5), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
     letter(top[0], "a")
-    scalebar(top[2], 1000, PX_UM, x_frac=0.32, y_frac=1.0, color=INK, halo=False)
+    scalebar(top[0], 1000, PX_UM, x_frac=0.22, y_frac=1.0, color=INK, halo=False)
 
     # b: matched local detail (probability, mask, graph) of the boxed region
     bot = []
@@ -133,9 +133,10 @@ def main():
             ax.add_collection(LineCollection([segs[i] - [cx0, cy0] for i in inside], colors=rcol(rad_um[inside]), linewidths=lw_of(rad_um[inside]) * 1.5))
         ax.set_xlim(0, cx1 - cx0); ax.set_ylim(cy1 - cy0, 0); ax.set_aspect("equal"); frame(ax, True)
     letter(bot[0], "b"); scalebar(bot[0], 200, PX_UM)
-    fig.canvas.draw(); pZ = bot[2].get_position()
-    cax = fig.add_axes([pZ.x0 + 0.1 * pZ.width, pZ.y0 - 0.035, 0.8 * pZ.width, 0.012])
-    cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax, orientation="horizontal"); cb.set_label("Radius (µm)", labelpad=1)
+    fig.canvas.draw(); pG = top[3].get_position()                      # vertical colorbar just right of the whole-organ graph
+    cax = fig.add_axes([pG.x1 + 0.006, pG.y0 + 0.2 * pG.height, 0.011, 0.6 * pG.height])
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax, ticks=[10, 20, 30, 40])
+    cb.set_label("Radius (µm)", labelpad=2); cb.outline.set_linewidth(0.5)
     cb.outline.set_linewidth(0.5)
 
     # c: tile 36's own frame with the globally derived graph mapped in
