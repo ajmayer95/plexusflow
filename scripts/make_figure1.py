@@ -1,8 +1,7 @@
 """Figure 1 — acquisition: the organ is recorded tile by tile, one high-speed movie per tile (PLOS, 7.5 in wide).
 
-  a  imaging setup: figures/fig1/setup_biorender.png (objective over the windowed egg; Created with BioRender.com) with a
-     callout to the top view of the plexus, covered by a 5 × 10 grid of overlapping fields of view scanned column by
-     column; without that file a plain drawn schematic is used
+  a  imaging setup: figures/fig1/setup.png (rendered from setup.svg: objective over the windowed egg, the scan across the
+     yolk-sac plexus; BioRender elements — Created with BioRender.com); without that file a plain drawn schematic is used
   b  one tile (default tile 36, the representative vessel's tile of Figs 3–4): a few consecutive frames of its 250 fps
      recording and the moving max-projection (frame − temporal median, max over time) that shows the perfused lumen
   c  acquisition order: tile centres joined in recording order (boustrophedon), coloured by elapsed acquisition time
@@ -150,34 +149,49 @@ def main():
     print(f"[fig1] tile {args.tile}: {T} frames {st.shape[1:]} at {um_rt:.1f} µm/px")
 
     fig = plt.figure(figsize=(7.5, 2.75))
-    gs = fig.add_gridspec(1, 3, width_ratios=[1.35, 1.15, 1.05], wspace=0.14, left=0.01, right=0.885, top=0.9, bottom=0.03)
-    # a
-    setup = out / "setup_biorender.png"
-    if setup.exists():                                    # BioRender setup + top-view callout (credit: Created with BioRender.com)
-        axA = draw_setup(fig, gs[0], plt.imread(str(setup)))
+    gs = fig.add_gridspec(1, 3, width_ratios=[0.62, 1.55, 1.05], wspace=0.1, left=0.01, right=0.885, top=0.9, bottom=0.03)
+    # a: imaging setup — figures/fig1/setup.png (Alex's drawing, from setup.svg; objective + BioRender egg, Created with
+    # BioRender.com); fallback: the plain drawn schematic
+    setup = out / "setup.png"
+    axA = fig.add_subplot(gs[0])
+    if setup.exists():
+        axA.imshow(plt.imread(str(setup)), interpolation="antialiased"); axA.axis("off")
     else:
-        axA = fig.add_subplot(gs[0]); draw_schematic(axA)
+        draw_schematic(axA)
     axA.text(0.0, 1.02, "a", transform=axA.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
-    # b: frames (offset deck) and the moving max-projection
-    gB = gs[1].subgridspec(1, 2, width_ratios=[1.0, 1.0], wspace=0.08)
-    axF = fig.add_subplot(gB[0]); axF.set_xlim(0, 1); axF.set_ylim(0, 1); axF.axis("off")
-    H_, W_ = st.shape[1:]; asp = H_ / W_; fw = 0.74; fh = fw * asp * (axF.bbox.width / axF.bbox.height)
-    lo, hi = np.percentile(st[0], 1), np.percentile(st[0], 99.5)
-    n_show = 4
-    for k in range(n_show)[::-1]:
-        x0, y0 = 0.02 + 0.075 * k, 0.97 - fh - 0.075 * k
-        axF.imshow(st[k * 3], cmap="gray", vmin=lo, vmax=hi, extent=(x0, x0 + fw, y0, y0 + fh), zorder=10 - k)
-        axF.add_patch(Rectangle((x0, y0), fw, fh, fc="none", ec="white", lw=0.5, zorder=10.5 - k))
-    axF.set_aspect("auto")
-    axF.set_title(f"{T} frames, 250 fps", fontsize=8, pad=2, loc="right")
-    axF.text(-0.3, 1.02, "b", transform=axF.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
-    axM = fig.add_subplot(gB[1])
-    axM.imshow(mip, cmap="magma", vmin=np.percentile(mip, 1), vmax=np.percentile(mip, 99.7), interpolation="nearest")
-    axM.set_xticks([]); axM.set_yticks([])
-    for s in axM.spines.values():
-        s.set_color(ACCENT); s.set_linewidth(1.0)
-    axM.set_title("max-projection", fontsize=8, pad=2)
-    scalebar(axM, um_rt, 200, "200 µm", x=0.08, y=0.08)
+
+    # b: the tile's recording as a receding stack of frames (time runs into the page) → max over time
+    axB = fig.add_subplot(gs[1]); axB.axis("off")
+    H_, W_ = st.shape[1:]; fw = 1.0; fh = fw * H_ / W_
+    n_show, dx, dy = 6, 0.13, 0.11
+    lo, hi = np.percentile(st[:20], 1), np.percentile(st[:20], 99.6)
+    for k in range(n_show)[::-1]:                                     # back (late) first, front (t = 0) last
+        x0, y0 = k * dx, k * dy
+        axB.add_patch(Rectangle((x0 + 0.025, y0 - 0.025), fw, fh, fc="0.2", ec="none", alpha=0.18, zorder=2 * (n_show - k)))   # shadow
+        axB.imshow(st[k * 6], cmap="gray", vmin=lo, vmax=hi, extent=(x0, x0 + fw, y0, y0 + fh), zorder=2 * (n_show - k) + 1,
+                   interpolation="antialiased")
+        axB.add_patch(Rectangle((x0, y0), fw, fh, fc="none", ec="white", lw=0.8, zorder=2 * (n_show - k) + 1.5))
+    axB.add_patch(Rectangle((0, 0), fw, fh, fc="none", ec=INK, lw=0.6, zorder=2 * n_show + 2))
+    # time axis along the stack diagonal
+    t0, t1 = np.array([fw + 0.06, -0.02]), np.array([fw + 0.06 + (n_show - 1) * dx + 0.06, (n_show - 1) * dy + 0.03])
+    axB.annotate("", xy=t1, xytext=t0, arrowprops=dict(arrowstyle="-|>", lw=0.8, color=INK, mutation_scale=7))
+    axB.text(*(t0 + t1) / 2 + np.array([0.08, -0.06]), "t", fontsize=8, style="italic", ha="left", va="top")
+    axB.text(0.5 * (fw + (n_show - 1) * dx), fh + (n_show - 1) * dy + 0.06, f"{T} frames, 250 fps", ha="center", va="bottom", fontsize=8)
+    # → max-projection
+    xm = fw + (n_show - 1) * dx + 0.42
+    axB.annotate("", xy=(xm - 0.04, fh / 2 + 0.25), xytext=(xm - 0.3, fh / 2 + 0.25),
+                 arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
+    axB.text(xm - 0.17, fh / 2 + 0.31, "max\nover t", ha="center", va="bottom", fontsize=8, linespacing=1.0)
+    ym = 0.25
+    axB.imshow(mip, cmap="magma", vmin=np.percentile(mip, 1), vmax=np.percentile(mip, 99.7), extent=(xm, xm + fw, ym, ym + fh),
+               interpolation="antialiased", zorder=3)
+    axB.add_patch(Rectangle((xm, ym), fw, fh, fc="none", ec=ACCENT, lw=1.0, zorder=4))
+    L = 200 / um_rt / W_ * fw
+    axB.plot([xm + 0.16, xm + 0.16 + L], [ym + 0.07, ym + 0.07], color="white", lw=2, solid_capstyle="butt", zorder=5)
+    axB.text(xm + 0.16 + L / 2, ym + 0.1, "200 µm", color="white", ha="center", va="bottom", fontsize=8, zorder=5)
+    axB.text(xm + fw / 2, ym + fh + 0.06, "max-projection", ha="center", va="bottom", fontsize=8)
+    axB.set_xlim(-0.05, xm + fw + 0.03); axB.set_ylim(-0.1, fh + (n_show - 1) * dy + 0.25); axB.set_aspect("equal")
+    axB.text(0.0, 1.02, "b", transform=axB.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
     # c: acquisition order
     axC = fig.add_subplot(gs[2])
     vis = np.ma.masked_equal(mos, 0)
