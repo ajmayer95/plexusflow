@@ -95,12 +95,13 @@ def draw_schematic(ax):
     nr, nc = 5, 10
     cols = np.linspace(0.16, 0.84, nc); rows = np.linspace(0.45, 0.25, nr)
     w, h = 1.3 * (cols[1] - cols[0]), 1.3 * (rows[0] - rows[1])
-    for yy in rows:
-        for xx in cols:
-            ax.add_patch(Rectangle((xx - w / 2, yy - h / 2), w, h, fc="none", ec="0.35", lw=0.35, alpha=0.9))
-    ax.add_patch(Rectangle((cols[6] - w / 2, rows[1] - h / 2), w, h, fc="none", ec=ACCENT, lw=1.1, zorder=4))
     path = np.array([(c, r) for j, c in enumerate(cols) for r in (rows if j % 2 == 0 else rows[::-1])])
-    ax.plot(*path.T, color=INK, lw=0.6, alpha=0.75, zorder=3)
+    # translucent fills coloured by acquisition order (same scale as c): overlaps read as darker bands
+    for k, (xx, yy) in enumerate(path):
+        ax.add_patch(Rectangle((xx - w / 2, yy - h / 2), w, h, fc=plt.cm.viridis(k / (len(path) - 1)), ec="white", lw=0.3,
+                               alpha=0.42, zorder=2))
+    ax.add_patch(Rectangle((cols[6] - w / 2, rows[1] - h / 2), w, h, fc="none", ec=ACCENT, lw=1.1, zorder=4))
+    ax.plot(*path.T, color="white", lw=0.6, alpha=0.9, zorder=3)
     ax.plot(*path[0], "o", ms=3.5, mfc="white", mec=INK, mew=0.7, zorder=5)
     ax.annotate("", xy=path[-1], xytext=path[-2], arrowprops=dict(arrowstyle="-|>", lw=0.6, color=INK, mutation_scale=6), zorder=5)
     ax.text(0.5, 0.06, "yolk-sac plexus, scanned\none field of view at a time", ha="center", va="center", fontsize=8, linespacing=1.05)
