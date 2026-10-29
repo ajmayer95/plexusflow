@@ -359,7 +359,10 @@ def order_panel(fig, ax, mos, positions):
     pos = load_tile_positions(str(positions))
     A = {t: np.asarray(e["affine_matrix"], float) for t, e in pos.items() if e.get("affine_matrix") is not None}
     tids = sorted(A); C = np.array([352.0, 320.0])                 # full-res tile centre (H/2, W/2)
-    ax.imshow(np.ma.masked_equal(mos, 0), cmap="gray", vmin=np.percentile(mos[mos > 0], 1), vmax=np.percentile(mos, 99.7), interpolation="antialiased")
+    from scipy import ndimage as _ndi
+    outside = ~_ndi.binary_fill_holes(mos > 0)                     # mask only the exterior; interior zeros stay (dark)
+    ax.imshow(np.ma.masked_where(outside, mos), cmap="gray", vmin=np.percentile(mos[mos > 0], 1), vmax=np.percentile(mos[mos > 0], 99.7),
+              interpolation="antialiased")
     for t in tids:
         q = (np.array([[0, 0], [0, 640], [704, 640], [704, 0], [0, 0]], float) @ A[t][:2, :2].T + A[t][:2, 2])[:, [1, 0]]
         ax.plot(*q.T, color="#e8c85a", lw=0.3, alpha=0.35)
