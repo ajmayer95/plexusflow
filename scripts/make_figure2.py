@@ -89,7 +89,7 @@ def main():
     ap.add_argument("--tile", type=int, default=36)
     ap.add_argument("--crop-um", type=float, default=650.0)
     ap.add_argument("--edge", type=int, nargs=2, default=[75489, 75638], help="crop centred on this vessel")
-    ap.add_argument("--center", type=float, nargs=2, default=None, help="crop centre (mosaic col, row); default: auto, inside --tile where fusion changes it most")
+    ap.add_argument("--center", type=float, nargs=2, default=[2800, 1300], help="crop centre (mosaic col, row) for b; pass none to auto-place inside --tile")
     ap.add_argument("--out-name", default="fig2")
     args = ap.parse_args()
     plos_style.apply()
@@ -152,7 +152,7 @@ def main():
     ox0, ox1, oy0, oy1 = max(xs.min() - pad, 0), min(xs.max() + pad, Wm), max(ys.min() - pad, 0), min(ys.max() + pad, Hm)
 
     fig = plt.figure(figsize=(7.5, 4.3))
-    gs = fig.add_gridspec(2, 4, height_ratios=[1.0, 0.92], hspace=0.12, wspace=0.08, left=0.03, right=0.925, top=0.95, bottom=0.03)
+    gs = fig.add_gridspec(2, 4, height_ratios=[1.0, 0.92], hspace=0.14, wspace=0.08, left=0.03, right=0.925, top=0.95, bottom=0.03)
     letter = lambda ax, l, dx=0.0: ax.text(dx, 1.03, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
     def frame(ax, on):
         ax.set_xticks([]); ax.set_yticks([])
@@ -174,7 +174,7 @@ def main():
             ax.imshow(np.where(mask, 0.25, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="antialiased")
         else:
             ax.add_collection(LineCollection(segs, colors=rcol(rad_um), linewidths=lw_of(rad_um) * 0.45))
-            ax.plot(tcx, tcy, color=INK, lw=0.8, ls=(0, (2.5, 1.5)), zorder=6)
+            ax.plot(tcx, tcy, color="#e0a800", lw=1.0, zorder=6)
         ax.add_patch(Rectangle((cx0, cy0), cx1 - cx0, cy1 - cy0, fill=False, ec=INK, lw=0.9, zorder=5))
         ax.set_xlim(ox0, ox1); ax.set_ylim(oy1, oy0); ax.set_aspect("equal"); frame(ax, False)
         ax.set_title(ttl, fontsize=8, pad=2)
@@ -183,31 +183,36 @@ def main():
     letter(top[0], "a")
     scalebar(top[0], 1000, PX_UM, x_frac=0.22, y_frac=1.0, color=INK, halo=False)
 
-    # b: the same region as recorded by the single tile, after fusion, and the extracted graph
-    bot = []
-    Tc = tile_on_grid(cy0, cy1, cx0, cx1); Fc = sub(mm)
-    for k, ttl in enumerate((f"Tile {args.tile}", "Fused mosaic", "Graph")):
-        ax = fig.add_subplot(gs[1, k]); bot.append(ax)
-        if k == 0:
-            ax.imshow(Tc, cmap="gray", vmin=np.nanpercentile(Tc, 1), vmax=np.nanpercentile(Tc, 99.5), interpolation="antialiased")
-        elif k == 1:
-            ax.imshow(Fc, cmap="gray", vmin=np.percentile(Fc, 1), vmax=np.percentile(Fc, 99.5), interpolation="antialiased")
-        else:
-            ax.imshow(np.where(sub(mask), 0.9, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
-            cl = [segs[i] - [cx0, cy0] for i in inside]
-            ax.add_collection(LineCollection(radius_ticks(cl, rad_um[inside] / PX_UM), colors="0.45", linewidths=0.5))
-            ax.add_collection(LineCollection(cl, colors="#c2185b", linewidths=0.9))
-        ax.set_xlim(0, cx1 - cx0); ax.set_ylim(cy1 - cy0, 0); ax.set_aspect("equal"); frame(ax, True)
-        ax.set_title(ttl, fontsize=8, pad=2)
-    letter(bot[0], "b"); scalebar(bot[0], 200, PX_UM)
-    fig.canvas.draw(); pG = top[3].get_position()                      # vertical colorbar just right of the whole-organ graph
-    cax = fig.add_axes([pG.x1 + 0.006, pG.y0 + 0.2 * pG.height, 0.011, 0.6 * pG.height])
-    cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax, ticks=[10, 20, 30, 40])
-    cb.set_label("Radius (µm)", labelpad=2); cb.outline.set_linewidth(0.5)
+    # bottom row: b graph close-up (radius bars) · c mosaic space around the tile · A⁻¹ · d the tile's own frame
+    gB = gs[1, :].subgridspec(1, 4, width_ratios=[1.0, 1.15, 0.22, 1.05], wspace=0.05)
+    axb = fig.add_subplot(gB[0])
+    axb.imshow(np.where(sub(mask), 0.9, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
+    cl = [segs[i] - [cx0, cy0] for i in inside]
+    axb.add_collection(LineCollection(radius_ticks(cl, rad_um[inside] / PX_UM), colors="0.45", linewidths=0.5))
+    axb.add_collection(LineCollection(cl, colors="#c2185b", linewidths=0.9))
+    axb.set_xlim(0, cx1 - cx0); axb.set_ylim(cy1 - cy0, 0); axb.set_aspect("equal"); frame(axb, True)
+    letter(axb, "b"); scalebar(axb, 200, PX_UM, color=INK, halo=False)
 
+    # c: mosaic space — fused image + graph around tile 36, its footprint as placed (rotated, scaled)
+    axm = fig.add_subplot(gB[1]); m_ = 0.18 * max(Ht, Wt) / ds
+    X0, X1, Y0, Y1 = tcx[:4].min() - m_, tcx[:4].max() + m_, tcy[:4].min() - m_, tcy[:4].max() + m_
+    r0, r1, c0, c1 = int(max(Y0, 0)), int(min(Y1, Hm)), int(max(X0, 0)), int(min(X1, Wm))
+    reg = mm[r0:r1, c0:c1]
+    axm.imshow(reg, cmap="gray", vmin=np.percentile(reg, 1), vmax=np.percentile(reg, 99.5), extent=(c0, c1, r1, r0), interpolation="antialiased")
+    near = [k for k, s_ in enumerate(segs) if ((s_[:, 0] > c0) & (s_[:, 0] < c1) & (s_[:, 1] > r0) & (s_[:, 1] < r1)).any()]
+    axm.add_collection(LineCollection([segs[k] for k in near], colors=rcol(rad_um[near]), linewidths=lw_of(rad_um[near]) * 0.9, alpha=0.95))
+    axm.plot(tcx, tcy, color="#ffd23f", lw=1.2, zorder=6)
+    axm.plot(tcx[0], tcy[0], "o", ms=4, color="#ffd23f", zorder=7)                         # tile origin corner, to read the rotation
+    axm.set_xlim(c0, c1); axm.set_ylim(r1, r0); axm.set_aspect("equal"); frame(axm, False)
+    axm.set_title("Mosaic space", fontsize=8, pad=2); letter(axm, "c"); scalebar(axm, 200, PX_UM)
 
-    # c: tile 36's own frame with the globally derived graph mapped in
-    axC = fig.add_subplot(gs[1, 3])
+    # arrow: the inverse of the tile's registration
+    axa = fig.add_subplot(gB[2]); axa.axis("off"); axa.set_xlim(0, 1); axa.set_ylim(0, 1)
+    axa.annotate("", xy=(0.95, 0.5), xytext=(0.05, 0.5), arrowprops=dict(arrowstyle="-|>", lw=1.0, color=INK, mutation_scale=10))
+    axa.text(0.5, 0.56, f"$A_{{{args.tile}}}^{{-1}}$", ha="center", va="bottom", fontsize=9)
+
+    # d: the tile's own frame (its recorded movie's projection) with the graph mapped in
+    axC = fig.add_subplot(gB[3])
     axC.imshow(ti, cmap="gray", vmin=np.percentile(ti, 1), vmax=np.percentile(ti, 99.5), interpolation="antialiased")
     loc, lr = [], []
     for q, r in zip(paths, rad_um):
@@ -216,11 +221,10 @@ def main():
             loc.append(rc[:, ::-1]); lr.append(r)
     lr = np.array(lr)
     axC.add_collection(LineCollection(loc, colors=rcol(lr), linewidths=lw_of(lr) * 1.2, alpha=0.95))
+    axC.plot([0, Wt, Wt, 0, 0], [0, 0, Ht, Ht, 0], color="#ffd23f", lw=2.4, zorder=6, clip_on=False)
+    axC.plot(0, 0, "o", ms=4, color="#ffd23f", zorder=7, clip_on=False)
     axC.set_xlim(0, Wt); axC.set_ylim(Ht, 0); axC.set_aspect("equal"); frame(axC, False)
-    scalebar(axC, 100, PX_UM); letter(axC, "c")
-    k_top = int(np.argmax(tcx[:4] - tcy[:4] * 0)); kb = int(np.argmax(tcy[:4]))
-    fig.add_artist(ConnectionPatch((tcx[kb], tcy[kb]), (0.5, 1.0), coordsA=top[3].transData, coordsB=axC.transAxes, color=INK, lw=0.6,
-                                   ls=(0, (2.5, 1.5)), arrowstyle="-|>", mutation_scale=7))
+    axC.set_title(f"Tile {args.tile} frame", fontsize=8, pad=2); letter(axC, "d"); scalebar(axC, 100, PX_UM)
     print(f"[fig2] tile {args.tile}: {len(loc)} edges mapped into its frame")
     plos_style.save(fig, _paths.FIGURES / "fig2" / args.out_name)
 
