@@ -36,6 +36,8 @@ import plos_style
 PX_UM_RAW = 1.7
 ACCENT = "#e8711a"
 INK = "#1a1a1a"
+import matplotlib.patheffects as _pe
+HALO = [_pe.withStroke(linewidth=1.6, foreground="black")]   # legible white scale bars on bright tissue
 N_ZOOM = 3
 ACQ_TILES = (1, 2, 3)              # panel a: the first three recorded tiles
 FORCE_SEAMS = ((18, 19),)           # tile 31: one zoom where 31, 18 and 19 all overlap
@@ -343,9 +345,9 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
             if row == 0 and len(zbs) > 1:
                 ax.text(0.05, 0.95, str(k + 1), transform=ax.transAxes, color="black", fontsize=8, fontweight="bold", ha="left", va="top",
                         bbox=dict(fc=ZC, ec="none", pad=0.6))
-    L = 100 / (PX_UM_RAW * ds); axs_ = axZ[1][-1]
-    axs_.plot([win * 0.06, win * 0.06 + L], [win * 0.92] * 2, color="white", lw=2, solid_capstyle="butt")
-    axs_.text(win * 0.06 + L / 2, win * 0.88, "100 µm", color="white", ha="center", va="bottom", fontsize=8)
+    L = 100 / (PX_UM_RAW * ds); axs_ = axZ[1][-1]; xe = win * 0.94
+    axs_.plot([xe - L, xe], [win * 0.92] * 2, color="white", lw=2, solid_capstyle="butt", path_effects=HALO)
+    axs_.text(xe, win * 0.89, "100 µm", color="white", ha="right", va="bottom", fontsize=8, path_effects=HALO)
     r = {}
     for key in ("rigid", "affine"):
         M, cv = m15[key]; oo = cv & (den > 0.5)
@@ -445,9 +447,9 @@ def main():
         axB.plot(xd, 0.5 * fh2, "o", ms=3.2, color=INK, zorder=50)
     axB.text(-0.06, ytop + 0.5 * (fh + (n_show - 1) * dy), "250 fps", rotation=90, ha="right", va="center", fontsize=8)
     axB.text(-0.06, fh2 / 2, "Projection", rotation=90, ha="right", va="center", fontsize=8)
-    L = 200 / PX_UM_RAW / p_.shape[1] * fw; xr = (len(ACQ_TILES) - 1) * pitch + 0.3 + L
-    axB.plot([xr - L, xr], [0.08, 0.08], color="white", lw=2, solid_capstyle="butt")
-    axB.text(xr - L / 2, 0.11, "200 µm", color="white", ha="center", va="bottom", fontsize=8)
+    L = 500 / PX_UM_RAW / p_.shape[1] * fw; xr = (len(ACQ_TILES) - 1) * pitch + fw - 0.06
+    axB.plot([xr - L, xr], [0.08, 0.08], color="white", lw=2, solid_capstyle="butt", path_effects=HALO)
+    axB.text(xr, 0.11, "500 µm", color="white", ha="right", va="bottom", fontsize=8, path_effects=HALO)
     axB.set_xlim(-0.2, (len(ACQ_TILES) - 1) * pitch + fw + (n_show - 1) * dx + 0.45); axB.set_ylim(-0.05, ytop + fh + (n_show - 1) * dy + 0.05); axB.set_aspect("equal")
 
     # b: registration of one tile against its neighbours (before / after)
