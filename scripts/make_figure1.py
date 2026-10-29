@@ -445,12 +445,13 @@ def main():
         xd = (len(ACQ_TILES) - 1) * pitch + fw + (n_show - 1) * dx + 0.1 + q * 0.11
         axB.plot(xd, ytop + 0.5 * fh, "o", ms=3.2, color=INK, zorder=50)
         axB.plot(xd, 0.5 * fh2, "o", ms=3.2, color=INK, zorder=50)
-    axB.text(-0.06, ytop + 0.5 * (fh + (n_show - 1) * dy), "250 fps, ~3 s", rotation=90, ha="right", va="center", fontsize=8)
+    axB.text(-0.06, ytop + 0.5 * (fh + (n_show - 1) * dy), "Movie", rotation=90, ha="right", va="center", fontsize=8)
+    axB.text(0.5 * (fw + (n_show - 1) * dx), ytop + fh + (n_show - 1) * dy + 0.05, "250 fps · ~3 s", ha="center", va="bottom", fontsize=8)
     axB.text(-0.06, fh2 / 2, "Projection", rotation=90, ha="right", va="center", fontsize=8)
     L = 500 / PX_UM_RAW / p_.shape[1] * fw; xr = (len(ACQ_TILES) - 1) * pitch + fw - 0.06
     axB.plot([xr - L, xr], [0.08, 0.08], color="white", lw=2, solid_capstyle="butt", path_effects=HALO)
     axB.text(xr, 0.11, "500 µm", color="white", ha="right", va="bottom", fontsize=8, path_effects=HALO)
-    axB.set_xlim(-0.2, (len(ACQ_TILES) - 1) * pitch + fw + (n_show - 1) * dx + 0.45); axB.set_ylim(-0.05, ytop + fh + (n_show - 1) * dy + 0.05); axB.set_aspect("equal")
+    axB.set_xlim(-0.2, (len(ACQ_TILES) - 1) * pitch + fw + (n_show - 1) * dx + 0.45); axB.set_ylim(-0.05, ytop + fh + (n_show - 1) * dy + 0.22); axB.set_aspect("equal")
 
     # b: registration of one tile against its neighbours (before / after)
     gR = gL[1].subgridspec(1, 2, width_ratios=[0.95, 1.2], wspace=0.08)
