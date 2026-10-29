@@ -89,7 +89,7 @@ def main():
     ap.add_argument("--tile", type=int, default=36)
     ap.add_argument("--crop-um", type=float, default=650.0)
     ap.add_argument("--edge", type=int, nargs=2, default=[75489, 75638], help="crop centred on this vessel")
-    ap.add_argument("--center", type=float, nargs=2, default=[2800, 1300], help="crop centre (mosaic col, row) instead of --edge")
+    ap.add_argument("--center", type=float, nargs=2, default=None, help="crop centre (mosaic col, row); default: auto, inside --tile where fusion changes it most")
     ap.add_argument("--out-name", default="fig2")
     args = ap.parse_args()
     plos_style.apply()
@@ -124,6 +124,30 @@ def main():
     Ht, Wt = ti.shape; ds = geom.downsample
     tc = np.array([[0, 0, 1], [0, Wt, 1], [Ht, Wt, 1], [Ht, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
     tcx, tcy = tc[:, 1] / ds - geom.x0, tc[:, 0] / ds - geom.y0
+    from scipy.ndimage import map_coordinates
+    def tile_on_grid(r0, r1, c0, c1):
+        """Tile projection resampled onto the fused-mosaic pixel grid for rows r0:r1, cols c0:c1 (nan outside the tile)."""
+        rr, cc = np.mgrid[r0:r1, c0:c1].astype(float)
+        hom = np.stack([(rr + geom.y0) * ds, (cc + geom.x0) * ds, np.ones_like(rr)], -1) @ tg.A_full_inv.T
+        v = map_coordinates(ti, [hom[..., 0], hom[..., 1]], order=1, cval=np.nan)
+        inside_ = (hom[..., 0] >= 0) & (hom[..., 0] <= Ht - 1) & (hom[..., 1] >= 0) & (hom[..., 1] <= Wt - 1)
+        return np.where(inside_, v, np.nan)
+    if args.center is None:                                  # auto: crop inside the tile, where fusion changes it most
+        hs = args.crop_um / PX_UM / 2; best = None
+        cy_, cx_ = np.mean(tcy[:4]), np.mean(tcx[:4])
+        for fy in np.linspace(-0.3, 0.3, 7):
+            for fx in np.linspace(-0.3, 0.3, 7):
+                yc, xc = cy_ + fy * Ht / ds, cx_ + fx * Wt / ds
+                r0, r1, c0, c1 = int(yc - hs), int(yc + hs), int(xc - hs), int(xc + hs)
+                T_ = tile_on_grid(r0, r1, c0, c1)
+                if np.isnan(T_).any():
+                    continue
+                F_ = mm[r0:r1, c0:c1]; d_ = 1 - np.corrcoef(T_.ravel(), F_.ravel())[0, 1]
+                if best is None or d_ > best[0]:
+                    best = (d_, r0, r1, c0, c1)
+        _, cy0, cy1, cx0, cx1 = best
+        print(f"[fig2] auto crop inside tile {args.tile}: rows {cy0}:{cy1}, cols {cx0}:{cx1} (tile vs fused 1 − r = {best[0]:.2f})")
+        inside = [k for k, s_ in enumerate(segs) if ((s_[:, 0] > cx0) & (s_[:, 0] < cx1) & (s_[:, 1] > cy0) & (s_[:, 1] < cy1)).any()]
     ys, xs = np.nonzero(organ); pad = 40
     ox0, ox1, oy0, oy1 = max(xs.min() - pad, 0), min(xs.max() + pad, Wm), max(ys.min() - pad, 0), min(ys.max() + pad, Hm)
 
@@ -159,20 +183,22 @@ def main():
     letter(top[0], "a")
     scalebar(top[0], 1000, PX_UM, x_frac=0.22, y_frac=1.0, color=INK, halo=False)
 
-    # b: matched local detail (probability, mask, graph) of the boxed region
+    # b: the same region as recorded by the single tile, after fusion, and the extracted graph
     bot = []
-    for k, ttl in enumerate(("Probability", "Mask", "Graph")):
+    Tc = tile_on_grid(cy0, cy1, cx0, cx1); Fc = sub(mm)
+    for k, ttl in enumerate((f"Tile {args.tile}", "Fused mosaic", "Graph")):
         ax = fig.add_subplot(gs[1, k]); bot.append(ax)
         if k == 0:
-            ax.imshow(sub(prob), cmap="magma", vmin=vpr[0], vmax=vpr[1], interpolation="antialiased")
+            ax.imshow(Tc, cmap="gray", vmin=np.nanpercentile(Tc, 1), vmax=np.nanpercentile(Tc, 99.5), interpolation="antialiased")
         elif k == 1:
-            ax.imshow(np.where(sub(mask), 0.25, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
+            ax.imshow(Fc, cmap="gray", vmin=np.percentile(Fc, 1), vmax=np.percentile(Fc, 99.5), interpolation="antialiased")
         else:
             ax.imshow(np.where(sub(mask), 0.9, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
             cl = [segs[i] - [cx0, cy0] for i in inside]
             ax.add_collection(LineCollection(radius_ticks(cl, rad_um[inside] / PX_UM), colors="0.45", linewidths=0.5))
             ax.add_collection(LineCollection(cl, colors="#c2185b", linewidths=0.9))
         ax.set_xlim(0, cx1 - cx0); ax.set_ylim(cy1 - cy0, 0); ax.set_aspect("equal"); frame(ax, True)
+        ax.set_title(ttl, fontsize=8, pad=2)
     letter(bot[0], "b"); scalebar(bot[0], 200, PX_UM)
     fig.canvas.draw(); pG = top[3].get_position()                      # vertical colorbar just right of the whole-organ graph
     cax = fig.add_axes([pG.x1 + 0.006, pG.y0 + 0.2 * pG.height, 0.011, 0.6 * pG.height])
