@@ -36,6 +36,8 @@ import plos_style
 PX_UM_RAW = 1.7
 ACCENT = "#e8711a"
 INK = "#1a1a1a"
+N_ZOOM = 3
+FORCE_SEAMS = (18,)                 # tile 31: one zoom on the 31 | 18 seam
 T15, ANCHORS = 15, (7, 14, 21, 17, 18, 16, 19, 20, 22)
 CORNERS = lambda H, W: np.array([[0, 0, 1], [H, 0, 1], [H, W, 1], [0, W, 1], [0, 0, 1]], float).T
 
@@ -285,8 +287,11 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
         for c_ in cand:
             if all(max(abs(c_[2][0] - z[2][0]), abs(c_[2][2] - z[2][2])) >= 1.5 * win for z in chosen):
                 chosen.append(c_)
-            if len(chosen) == 2:
+            if len(chosen) == N_ZOOM - len(FORCE_SEAMS):
                 break
+        for n in FORCE_SEAMS:                          # one zoom on a required seam: biggest rigid → affine gain there
+            pool = [c_ for c_ in pick(n) if all(max(abs(c_[2][0] - z[2][0]), abs(c_[2][2] - z[2][2])) >= win for z in chosen)]
+            chosen.append(max(pool, key=lambda c_: (c_[3][1] - c_[3][0]) + 0.3 * c_[3][1]))
     else:
         chosen = [max(pick(n), key=lambda c_: c_[1]) for n in zoom_with]
     for c_ in chosen:
@@ -414,9 +419,9 @@ def main():
     axB.set_xlim(-0.03, xs + fw + 0.03); axB.set_ylim(-0.25, fh + (n_show - 1) * dy + 0.12); axB.set_aspect("equal")
 
     # b: registration of one tile against its neighbours (before / after)
-    gR = gL[1].subgridspec(1, 2, width_ratios=[1.1, 1.0], wspace=0.1)
-    gZ = gR[1].subgridspec(4, 2, height_ratios=[0.3, 1, 1, 0.3], hspace=0.04, wspace=0.04)
-    axF = fig.add_subplot(gR[0]); axZ = [[fig.add_subplot(gZ[r + 1, c]) for c in range(2)] for r in range(2)]
+    gR = gL[1].subgridspec(1, 2, width_ratios=[0.95, 1.2], wspace=0.08)
+    gZ = gR[1].subgridspec(4, N_ZOOM, height_ratios=[0.45, 1, 1, 0.45], hspace=0.04, wspace=0.04)
+    axF = fig.add_subplot(gR[0]); axZ = [[fig.add_subplot(gZ[r + 1, c]) for c in range(N_ZOOM)] for r in range(2)]
     registration_panel(axF, axZ, P / "stitch" / "positions.json", P / "tiles" / "maxmed", tile=args.reg_tile, zoom_with=args.zoom_with, nb=args.reg_nb)
     letter(axF, "b", 0.0, 1.02)
 
