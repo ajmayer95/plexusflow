@@ -69,54 +69,69 @@ def main():
     hs = args.crop_um / PX_UM / 2; cx0, cx1, cy0, cy1 = int(vm[0] - hs), int(vm[0] + hs), int(vm[1] - hs), int(vm[1] + hs)
     print(f"[fig2] {G.number_of_edges():,} edges; crop centred on {e}")
 
-    fig = plt.figure(figsize=(7.5, 5.6))
-    gs = fig.add_gridspec(2, 1, height_ratios=[0.5, 1.0], hspace=0.1, left=0.02, right=0.98, top=0.965, bottom=0.02)
-    gA = gs[0].subgridspec(1, 4, wspace=0.12)
-    gB = gs[1].subgridspec(1, 2, width_ratios=[1.0, 1.0], wspace=0.16)
-    letter = lambda ax, l, dx=0.0: ax.text(dx, 1.02, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
+    from matplotlib.patches import ConnectionPatch
+    from scipy import ndimage as _ndi
+    organ = _ndi.binary_fill_holes(_ndi.binary_closing(mask, iterations=25))           # organ outline from the curated mask
+    geom = load_tile_geometry(StageConfig.load(P)); tg = geom.tiles[args.tile]
+    ti = tifffile.imread(str(P / "tiles" / "maxmed" / f"vid{args.tile}_maxmed.tif")).astype(float); ti = ti.mean(-1) if ti.ndim == 3 else ti
+    Ht, Wt = ti.shape; ds = geom.downsample
+    tc = np.array([[0, 0, 1], [0, Wt, 1], [Ht, Wt, 1], [Ht, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
+    tcx, tcy = tc[:, 1] / ds - geom.x0, tc[:, 0] / ds - geom.y0
+    ys, xs = np.nonzero(organ); pad = 40
+    ox0, ox1, oy0, oy1 = max(xs.min() - pad, 0), min(xs.max() + pad, Wm), max(ys.min() - pad, 0), min(ys.max() + pad, Hm)
 
-    # a: crop pipeline
+    fig = plt.figure(figsize=(7.5, 4.55))
+    gs = fig.add_gridspec(2, 4, height_ratios=[1.0, 0.92], hspace=0.12, wspace=0.08, left=0.03, right=0.985, top=0.95, bottom=0.11)
+    letter = lambda ax, l, dx=0.0: ax.text(dx, 1.03, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
+    def frame(ax, on):
+        ax.set_xticks([]); ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_visible(on); sp.set_color("0.6"); sp.set_linewidth(0.6)
     sub = lambda im: im[cy0:cy1, cx0:cx1]
-    inside = [k for k, s in enumerate(segs) if ((s[:, 0] > cx0) & (s[:, 0] < cx1) & (s[:, 1] > cy0) & (s[:, 1] < cy1)).any()]
-    for k, ttl in enumerate(("Projection", "Probability", "Mask", "Graph")):
-        ax = fig.add_subplot(gA[k])
+    inside = [k for k, s_ in enumerate(segs) if ((s_[:, 0] > cx0) & (s_[:, 0] < cx1) & (s_[:, 1] > cy0) & (s_[:, 1] < cy1)).any()]
+    vmm = np.percentile(mm[organ], (1, 99.5)); vpr = np.percentile(prob[organ], (1, 99.5))
+
+    # a: whole-organ stages
+    top = []
+    for k, ttl in enumerate(("Stitched mosaic", "Probability", "Mask", "Graph")):
+        ax = fig.add_subplot(gs[0, k]); top.append(ax)
         if k == 0:
-            im = sub(mm); ax.imshow(im, cmap="gray", vmin=np.percentile(im, 1), vmax=np.percentile(im, 99.5), interpolation="antialiased")
+            ax.imshow(np.ma.masked_where(~organ, mm), cmap="gray", vmin=vmm[0], vmax=vmm[1], interpolation="antialiased")
         elif k == 1:
-            im = sub(prob); ax.imshow(im, cmap="magma", vmin=np.percentile(im, 1), vmax=np.percentile(im, 99.5), interpolation="antialiased")
+            ax.imshow(np.ma.masked_where(~organ, prob), cmap="magma", vmin=vpr[0], vmax=vpr[1], interpolation="antialiased")
         elif k == 2:
+            ax.imshow(np.where(mask, 0.25, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="antialiased")
+        else:
+            ax.add_collection(LineCollection(segs, colors=rcol(rad_um), linewidths=lw_of(rad_um) * 0.45))
+            ax.plot(tcx, tcy, color=INK, lw=0.8, ls=(0, (2.5, 1.5)), zorder=6)
+        ax.add_patch(Rectangle((cx0, cy0), cx1 - cx0, cy1 - cy0, fill=False, ec=INK, lw=0.9, zorder=5))
+        ax.set_xlim(ox0, ox1); ax.set_ylim(oy1, oy0); ax.set_aspect("equal"); frame(ax, False)
+        ax.set_title(ttl, fontsize=8, pad=2)
+        if k < 3:
+            ax.annotate("", xy=(1.07, 0.5), xytext=(0.99, 0.5), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
+    letter(top[0], "a")
+    scalebar(top[2], 1000, PX_UM, x_frac=0.32, y_frac=1.0, color=INK, halo=False)
+
+    # b: matched local detail (probability, mask, graph) of the boxed region
+    bot = []
+    for k, ttl in enumerate(("Probability", "Mask", "Graph")):
+        ax = fig.add_subplot(gs[1, k]); bot.append(ax)
+        if k == 0:
+            ax.imshow(sub(prob), cmap="magma", vmin=vpr[0], vmax=vpr[1], interpolation="antialiased")
+        elif k == 1:
             ax.imshow(np.where(sub(mask), 0.25, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
         else:
             ax.imshow(np.where(sub(mask), 0.9, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
-            ax.add_collection(LineCollection([segs[i] - [cx0, cy0] for i in inside], colors=rcol(rad_um[inside]), linewidths=lw_of(rad_um[inside]) * 1.8))
-        ax.set_xlim(0, cx1 - cx0); ax.set_ylim(cy1 - cy0, 0); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
-        for sp in ax.spines.values():
-            sp.set_color("0.6"); sp.set_linewidth(0.6)
-        ax.set_title(ttl, fontsize=8, pad=2)
-        if k == 0:
-            letter(ax, "a", -0.02); scalebar(ax, 200, PX_UM)
-        if k < 3:
-            ax.annotate("", xy=(1.11, 0.5), xytext=(1.01, 0.5), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
-
-    # b: whole graph by radius
-    axB = fig.add_subplot(gB[0])
-    axB.add_collection(LineCollection(segs, colors=rcol(rad_um), linewidths=lw_of(rad_um) * 1.1))
-    axB.add_patch(Rectangle((cx0, cy0), cx1 - cx0, cy1 - cy0, fill=False, ec=INK, lw=0.8))
-    geom = load_tile_geometry(StageConfig.load(P)); tg = geom.tiles[args.tile]
-    Ht, Wt = tifffile.imread(str(P / "tiles" / "maxmed" / f"vid{args.tile}_maxmed.tif")).shape[:2]
-    corners = np.array([[0, 0, 1], [0, Wt, 1], [Ht, Wt, 1], [Ht, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
-    ds = geom.downsample; axB.plot(corners[:, 1] / ds - geom.x0, corners[:, 0] / ds - geom.y0, color=INK, lw=0.7, ls=(0, (3, 2)))
-    axB.set_xlim(0, Wm); axB.set_ylim(Hm, 0); axB.set_aspect("equal"); axB.axis("off")
-    scalebar(axB, 1000, PX_UM, x_frac=0.3, y_frac=0.98, color=INK, halo=False)
-    fig.canvas.draw(); pB = axB.get_position()
-    fig.text(pB.x0, pB.y1 + 0.005, "b", fontsize=12, fontweight="bold", va="bottom", ha="left")
-    cax = fig.add_axes([pB.x1 + 0.005, pB.y0 + 0.25 * pB.height, 0.012, 0.5 * pB.height])
-    cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax); cb.set_label("Radius (µm)", labelpad=2)
+            ax.add_collection(LineCollection([segs[i] - [cx0, cy0] for i in inside], colors=rcol(rad_um[inside]), linewidths=lw_of(rad_um[inside]) * 1.5))
+        ax.set_xlim(0, cx1 - cx0); ax.set_ylim(cy1 - cy0, 0); ax.set_aspect("equal"); frame(ax, True)
+    letter(bot[0], "b"); scalebar(bot[0], 200, PX_UM)
+    fig.canvas.draw(); pZ = bot[2].get_position()
+    cax = fig.add_axes([pZ.x0 + 0.1 * pZ.width, pZ.y0 - 0.035, 0.8 * pZ.width, 0.012])
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax, orientation="horizontal"); cb.set_label("Radius (µm)", labelpad=1)
     cb.outline.set_linewidth(0.5)
 
-    # c: graph in tile 36's own frame
-    axC = fig.add_subplot(gB[1])
-    ti = tifffile.imread(str(P / "tiles" / "maxmed" / f"vid{args.tile}_maxmed.tif")).astype(float); ti = ti.mean(-1) if ti.ndim == 3 else ti
+    # c: tile 36's own frame with the globally derived graph mapped in
+    axC = fig.add_subplot(gs[1, 3])
     axC.imshow(ti, cmap="gray", vmin=np.percentile(ti, 1), vmax=np.percentile(ti, 99.5), interpolation="antialiased")
     loc, lr = [], []
     for q, r in zip(paths, rad_um):
@@ -124,12 +139,12 @@ def main():
         if ((rc[:, 0] > -5) & (rc[:, 0] < Ht + 5) & (rc[:, 1] > -5) & (rc[:, 1] < Wt + 5)).any():
             loc.append(rc[:, ::-1]); lr.append(r)
     lr = np.array(lr)
-    axC.add_collection(LineCollection(loc, colors=rcol(lr), linewidths=lw_of(lr) * 1.6, alpha=0.95))
-    axC.set_xlim(0, Wt); axC.set_ylim(Ht, 0); axC.set_aspect("equal"); axC.set_xticks([]); axC.set_yticks([])
-    for sp in axC.spines.values():
-        sp.set_visible(False)
-    scalebar(axC, 100, PX_UM)
-    letter(axC, "c", 0.0)
+    axC.add_collection(LineCollection(loc, colors=rcol(lr), linewidths=lw_of(lr) * 1.2, alpha=0.95))
+    axC.set_xlim(0, Wt); axC.set_ylim(Ht, 0); axC.set_aspect("equal"); frame(axC, False)
+    scalebar(axC, 100, PX_UM); letter(axC, "c")
+    k_top = int(np.argmax(tcx[:4] - tcy[:4] * 0)); kb = int(np.argmax(tcy[:4]))
+    fig.add_artist(ConnectionPatch((tcx[kb], tcy[kb]), (0.5, 1.0), coordsA=top[3].transData, coordsB=axC.transAxes, color=INK, lw=0.6,
+                                   ls=(0, (2.5, 1.5)), arrowstyle="-|>", mutation_scale=7))
     print(f"[fig2] tile {args.tile}: {len(loc)} edges mapped into its frame")
     plos_style.save(fig, _paths.FIGURES / "fig2" / "fig2")
 
