@@ -35,7 +35,8 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.collections import LineCollection
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src")); sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import plos_style
 import plexusflow.paths as _paths
 from plexusflow.reconcile import carved_domain
 from plexusmech.ac.model import build_context, solve
@@ -65,9 +66,7 @@ def main():
     ap.add_argument('--tag', default=None, help='output name suffix: fig9alt_v3_<tag>')
     args = ap.parse_args()
 
-    plt.rcParams.update({'font.family': 'Arial', 'mathtext.fontset': 'custom', 'mathtext.rm': 'Arial', 'mathtext.it': 'Arial:italic',
-                         'font.size': 8, 'axes.linewidth': 0.6, 'xtick.major.width': 0.6, 'ytick.major.width': 0.6,
-                         'xtick.major.size': 2.5, 'ytick.major.size': 2.5})
+    plos_style.apply()
     G = _paths.load_graph()
     D = pickle.loads((_paths.RESULTS / 'dc_reconciled_v2.pkl').read_bytes())
     A = pickle.loads((_paths.RESULTS / f'{args.field}.pkl').read_bytes())
@@ -244,9 +243,7 @@ def main():
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     stem = 'fig9alt_v3' + (f'_{args.tag}' if args.tag else '')
-    plt.savefig(OUT_DIR / f'{stem}.png', dpi=300, facecolor='white')
-    plt.savefig(OUT_DIR / f'{stem}.pdf', facecolor='white')
-    plt.savefig(OUT_DIR / f'{stem}.tif', dpi=600, facecolor='white', pil_kwargs={'compression': 'tiff_lzw'})
+    plos_style.save(fig, OUT_DIR / stem)
     print(f"[fig9alt_v3] wrote {OUT_DIR / f'{stem}.png'}")
 
 
