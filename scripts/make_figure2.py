@@ -45,24 +45,44 @@ def scalebar(ax, um, px_um, x_frac=0.95, y_frac=0.93, color="white", halo=True):
                 ha="right", va="bottom", color=color, fontsize=8, **kw)
 
 
-def radius_ticks(paths_rc, radii_px, step_px=22.0):
-    """Perpendicular bars of length 2R along each centreline (one every step_px of arc), as segments for a LineCollection."""
-    out = []
-    for q, r in zip(paths_rc, radii_px):
-        if not np.isfinite(r) or len(q) < 2:
+def radius_ticks(paths_rc, radii_px, step_px=22.0, margin_px=3.0, end_gap=1.5):
+    """Perpendicular bars of length 2R along each centreline, placed so that no bar crosses (or comes within margin_px of)
+    another vessel's centreline or another bar.  Candidates every step_px/3 of arc, skipping end_gap·R near junctions;
+    greedy acceptance from each vessel's middle outwards, wider vessels first; bars on one vessel ≥ max(step_px, 2R) apart."""
+    from shapely.geometry import LineString
+    from shapely.strtree import STRtree
+    lines = [LineString(q) if len(q) >= 2 else None for q in paths_rc]
+    cand = []
+    for k, (q, r) in enumerate(zip(paths_rc, radii_px)):
+        if lines[k] is None or not np.isfinite(r) or r <= 0:
             continue
-        d = np.r_[0, np.cumsum(np.hypot(*np.diff(q, axis=0).T))]
-        if d[-1] < 0.6 * step_px:
+        d = np.r_[0, np.cumsum(np.hypot(*np.diff(q, axis=0).T))]; L = d[-1]
+        lo, hi = end_gap * r, L - end_gap * r
+        if hi <= lo:
             continue
-        for a in np.arange(0.5 * step_px if d[-1] > step_px else d[-1] / 2, d[-1], step_px):
+        mid = (lo + hi) / 2; pos = np.arange(lo, hi, step_px / 3.0)
+        for a in sorted(pos, key=lambda a: abs(a - mid)):
             i = min(np.searchsorted(d, a), len(q) - 1); i0 = max(i - 1, 0)
             t = q[i] - q[i0]; n_ = np.hypot(*t)
             if n_ == 0:
                 continue
-            t /= n_; nrm = np.array([-t[1], t[0]]); c = q[i0] + (a - d[i0]) * t
-            out.append([c - r * nrm, c + r * nrm])
-    return out
-
+            t = t / n_; nrm = np.array([-t[1], t[0]]); c = q[i0] + (a - d[i0]) * t
+            cand.append((-r, abs(a - mid), k, a, c - r * nrm, c + r * nrm))
+    cand.sort(key=lambda x: (x[0], x[1]))
+    tree = STRtree([l for l in lines if l is not None]); idx = [k for k, l in enumerate(lines) if l is not None]
+    kept, kept_geom, last = [], [], {}
+    for _, _, k, a, p0, p1 in cand:
+        r = np.hypot(*(p1 - p0)) / 2
+        if any(abs(a - b) < max(step_px, 2 * r) for b in last.get(k, [])):
+            continue
+        g = LineString([p0, p1]); gb = g.buffer(margin_px)
+        hit = [idx[j] for j in tree.query(gb)]
+        if any(h != k and lines[h].intersects(gb) for h in hit):
+            continue
+        if any(gb.intersects(o) for o in kept_geom):
+            continue
+        kept.append([p0, p1]); kept_geom.append(g); last.setdefault(k, []).append(a)
+    return kept
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
