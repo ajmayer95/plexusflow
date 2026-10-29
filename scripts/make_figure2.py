@@ -50,6 +50,8 @@ def main():
     ap.add_argument("--tile", type=int, default=36)
     ap.add_argument("--crop-um", type=float, default=650.0)
     ap.add_argument("--edge", type=int, nargs=2, default=[75489, 75638], help="crop centred on this vessel")
+    ap.add_argument("--center", type=float, nargs=2, default=None, help="crop centre (mosaic col, row) instead of --edge")
+    ap.add_argument("--out-name", default="fig2")
     args = ap.parse_args()
     plos_style.apply()
     P = _paths.STAGE; G = _paths.load_graph()
@@ -70,6 +72,8 @@ def main():
     rcol = lambda r: rcmap(rnorm(np.nan_to_num(r, nan=rnorm.vmin)))
     lw_of = lambda r: 0.2 + 1.0 * np.clip(np.nan_to_num(r / np.nanpercentile(rad_um, 98), nan=0.3), 0, 1)
     e = tuple(args.edge); ve = keys.index(e) if e in keys else keys.index(e[::-1]); vm = segs[ve][len(segs[ve]) // 2]
+    if args.center:
+        vm = np.array(args.center, float)
     hs = args.crop_um / PX_UM / 2; cx0, cx1, cy0, cy1 = int(vm[0] - hs), int(vm[0] + hs), int(vm[1] - hs), int(vm[1] + hs)
     print(f"[fig2] {G.number_of_edges():,} edges; crop centred on {e}")
 
@@ -150,7 +154,7 @@ def main():
     fig.add_artist(ConnectionPatch((tcx[kb], tcy[kb]), (0.5, 1.0), coordsA=top[3].transData, coordsB=axC.transAxes, color=INK, lw=0.6,
                                    ls=(0, (2.5, 1.5)), arrowstyle="-|>", mutation_scale=7))
     print(f"[fig2] tile {args.tile}: {len(loc)} edges mapped into its frame")
-    plos_style.save(fig, _paths.FIGURES / "fig2" / "fig2")
+    plos_style.save(fig, _paths.FIGURES / "fig2" / args.out_name)
 
 
 if __name__ == "__main__":
