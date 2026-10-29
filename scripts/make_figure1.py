@@ -201,6 +201,48 @@ def stitch_panel(ax, positions, tile_dir, ds=2):
     return dict(sx=sx, sy=sy, sh=sh, dth=dth)
 
 
+def registration_panel(axs, positions, tile_dir, ds=2, pad=0.08):
+    """Tile 15 against its already-placed neighbours, in their overlap: magenta = tile 15, green = neighbours (white where
+    they agree).  Left: tile 15 placed rigidly (neighbours' rotation, same centre, no scaling/shear); right: the stored
+    affine from the manual registration.  Same crop in both."""
+    _, affines = _load_positions_and_affines(positions, ds)
+    nb = (14, 16, 19, 20, 21)
+    tiles = {t: _load_tile(tile_dir / f"vid{t}_maxmed.tif", ds) for t in nb + (T15,)}
+    norm01 = lambda im: np.clip((im - np.percentile(im, 1)) / max(np.percentile(im, 99.5) - np.percentile(im, 1), 1e-9), 0, 1)
+    A15 = affines[T15]; H15, W15 = tiles[T15].shape; c = np.array([H15 / 2, W15 / 2])
+    R = affines[7][:2, :2]; Ar = np.eye(3); Ar[:2, :2] = R; Ar[:2, 2] = A15[:2, :2] @ c + A15[:2, 2] - R @ c
+    y0, y1, x0, x1 = compute_world_bbox({t: tiles[t].shape for t in nb + (T15,)}, {**{t: affines[t] for t in nb}, T15: A15}, pad=15)
+    Hc, Wc = y1 - y0, x1 - x0
+    num = np.zeros((Hc, Wc)); den = np.zeros((Hc, Wc))
+    for t in nb:
+        w = _warp_into_canvas(feather_kernel_from_tile(tiles[t].shape, 0.5), affines[t], (Hc, Wc), y0, x0)
+        num += _warp_into_canvas(norm01(tiles[t]), affines[t], (Hc, Wc), y0, x0) * w; den += w
+    G = np.where(den > 1e-6, num / np.maximum(den, 1e-6), np.nan)
+    # crop: the part of tile 15's footprint that the neighbours also cover
+    cov15 = _warp_into_canvas(np.ones_like(tiles[T15]), A15, (Hc, Wc), y0, x0) > 0.5
+    ov = (cov15 & np.isfinite(G)).astype(float)
+    # square window fully inside the overlap, as far from tile 15's centre as possible (the rigid error grows outward)
+    win = int(0.42 * min(H15, W15)); I = np.pad(ov.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    frac = (I[win:, win:] - I[:-win, win:] - I[win:, :-win] + I[:-win, :-win]) / win ** 2
+    ctr = (A15 @ [H15 / 2, W15 / 2, 1])[:2] - [y0, x0]
+    rr, cc_ = np.mgrid[0:frac.shape[0], 0:frac.shape[1]]
+    score = np.where(frac > 0.97, np.hypot(rr + win / 2 - ctr[0], cc_ + win / 2 - ctr[1]), -1)
+    r_, c_ = np.unravel_index(np.argmax(score), score.shape); box = (r_, r_ + win, c_, c_ + win)
+    for ax, A, lab in ((axs[0], Ar, "rigid"), (axs[1], A15, "affine")):
+        M = _warp_into_canvas(norm01(tiles[T15]), A, (Hc, Wc), y0, x0)
+        cov = _warp_into_canvas(np.ones_like(tiles[T15]), A, (Hc, Wc), y0, x0) > 0.5
+        g = np.nan_to_num(G); m = np.where(cov, M, 0)
+        rgb = np.dstack([m, g, m])[box[0]:box[1], box[2]:box[3]]
+        ax.imshow(np.clip(rgb * 1.15, 0, 1), interpolation="antialiased")
+        ax.set_xticks([]); ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_color("0.5"); sp.set_linewidth(0.6)
+        ax.set_title(lab, fontsize=8, pad=2)
+    L = 100 / (PX_UM_RAW * ds); n = box[1] - box[0]
+    axs[0].plot([0.07 * n, 0.07 * n + L], [0.93 * n] * 2, color="white", lw=2, solid_capstyle="butt")
+    axs[0].text(0.07 * n + L / 2, 0.90 * n, "100 µm", color="white", ha="center", va="bottom", fontsize=8)
+
+
 def order_panel(fig, ax, mos, positions):
     """Fused mosaic, all tile footprints, acquisition order as arrows coloured by tile index (archived make_figure2 F)."""
     from net3.edit.video_overlay import load_tile_positions
@@ -210,11 +252,13 @@ def order_panel(fig, ax, mos, positions):
     ax.imshow(np.ma.masked_equal(mos, 0), cmap="gray", vmin=np.percentile(mos[mos > 0], 1), vmax=np.percentile(mos, 99.7), interpolation="antialiased")
     for t in tids:
         q = (np.array([[0, 0], [0, 640], [704, 640], [704, 0], [0, 0]], float) @ A[t][:2, :2].T + A[t][:2, 2])[:, [1, 0]]
-        ax.plot(*q.T, color="#e8c85a", lw=0.4, alpha=0.6)
+        ax.plot(*q.T, color="#e8c85a", lw=0.3, alpha=0.35)
     pts = np.array([(A[t][:2, :2] @ C + A[t][:2, 2])[[1, 0]] for t in tids]); norm = Normalize(tids[0], tids[-1]); cmap = plt.cm.plasma
-    for i in range(len(tids) - 1):
-        ax.add_patch(FancyArrowPatch(pts[i], pts[i + 1], arrowstyle="-|>", mutation_scale=6, lw=1.0, color=cmap(norm(tids[i])), shrinkA=2, shrinkB=2))
-    ax.scatter(*pts.T, c=tids, cmap=cmap, norm=norm, s=6, zorder=5, edgecolor="white", linewidth=0.3)
+    lc = LineCollection(np.stack([pts[:-1], pts[1:]], 1), colors=cmap(norm(np.array(tids[:-1]))), linewidths=1.1, zorder=4)
+    ax.add_collection(lc)
+    for i in range(2, len(tids) - 1, 6):                        # a few direction arrowheads only
+        ax.add_patch(FancyArrowPatch(pts[i], (pts[i] + pts[i + 1]) / 2, arrowstyle="-|>", mutation_scale=8, lw=0, color=cmap(norm(tids[i])), zorder=5))
+    ax.scatter(*pts.T, c=tids, cmap=cmap, norm=norm, s=5, zorder=5, edgecolor="white", linewidth=0.25)
     ax.scatter(*pts[0], s=40, facecolor="none", edgecolor="white", linewidth=1.0, zorder=6)
     ax.set_xlim(0, mos.shape[1]); ax.set_ylim(mos.shape[0], 0); ax.set_aspect("equal"); ax.axis("off")
     return norm, cmap, len(tids)
@@ -231,58 +275,54 @@ def main():
     st = tifffile.imread(str(vids[args.tile])).astype(np.float32); T = st.shape[0]
     mm = tifffile.imread(str(P / "tiles" / "maxmed" / f"vid{args.tile}_maxmed.tif")).astype(float); mm = mm.mean(-1) if mm.ndim == 3 else mm
 
-    fig = plt.figure(figsize=(7.5, 6.4))
-    gs = fig.add_gridspec(2, 1, height_ratios=[0.78, 1.0], hspace=0.08, left=0.01, right=0.93, top=0.965, bottom=0.01)
-    gT = gs[0].subgridspec(1, 2, width_ratios=[0.42, 1.6], wspace=0.06); gB = gs[1].subgridspec(1, 2, width_ratios=[1.12, 1.0], wspace=0.04)
+    fig = plt.figure(figsize=(7.5, 4.4))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.0, 1.08], wspace=0.06, left=0.01, right=0.9, top=0.965, bottom=0.02)
+    gL = gs[0].subgridspec(2, 1, height_ratios=[1.0, 0.95], hspace=0.14)
     letter = lambda ax, l, dx=0.0, dy=1.01: ax.text(dx, dy, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
 
-    # a: setup
-    axA = fig.add_subplot(gT[0]); setup = out / "setup.png"
+    # a: setup → one tile's movie → projection
+    gA = gL[0].subgridspec(1, 2, width_ratios=[0.42, 1.0], wspace=0.0)
+    axA = fig.add_subplot(gA[0]); setup = out / "setup.png"
     if setup.exists():
         axA.imshow(plt.imread(str(setup)), interpolation="antialiased"); axA.axis("off")
     else:
         draw_schematic(axA)
     letter(axA, "a")
-
-    # b: one movie per tile (stacks) → max − median projection → background-filtered
-    axB = fig.add_subplot(gT[1]); axB.axis("off")
-    H_, W_ = st.shape[1:]; fw = 1.0; fh = fw * H_ / W_; n_show, dx, dy = 5, 0.12, 0.10
-    for j, t in enumerate((7, 21, args.tile)):                    # three tile stacks, the example tile in front
-        s_ = st if t == args.tile else tifffile.imread(str(vids[t])).astype(np.float32)
-        lo, hi = np.percentile(s_[:20], 1), np.percentile(s_[:20], 99.6); ox, oy = j * 0.42, (2 - j) * 0.30
-        for k in range(n_show)[::-1]:
-            x0, y0 = ox + k * dx, oy + k * dy; z = 10 * j + 2 * (n_show - k)
-            axB.add_patch(Rectangle((x0 + 0.02, y0 - 0.02), fw, fh, fc="0.2", ec="none", alpha=0.16, zorder=z))
-            axB.imshow(s_[k * 8], cmap="gray", vmin=lo, vmax=hi, extent=(x0, x0 + fw, y0, y0 + fh), zorder=z + 1, interpolation="antialiased")
-            axB.add_patch(Rectangle((x0, y0), fw, fh, fc="none", ec="white", lw=0.6, zorder=z + 1.5))
-    ex = 2 * 0.42; t0 = np.array([ex + fw + 0.05, -0.03]); t1 = t0 + [(n_show - 1) * dx + 0.06, (n_show - 1) * dy + 0.06]
+    axB = fig.add_subplot(gA[1]); axB.axis("off")
+    H_, W_ = st.shape[1:]; fw = 1.0; fh = fw * H_ / W_; n_show, dx, dy = 6, 0.09, 0.08
+    lo, hi = np.percentile(st[:20], 1), np.percentile(st[:20], 99.6)
+    for k in range(n_show)[::-1]:
+        x0, y0 = k * dx, k * dy; z = 2 * (n_show - k)
+        axB.add_patch(Rectangle((x0 + 0.02, y0 - 0.02), fw, fh, fc="0.2", ec="none", alpha=0.16, zorder=z))
+        axB.imshow(st[k * 8], cmap="gray", vmin=lo, vmax=hi, extent=(x0, x0 + fw, y0, y0 + fh), zorder=z + 1, interpolation="antialiased")
+        axB.add_patch(Rectangle((x0, y0), fw, fh, fc="none", ec="white", lw=0.6, zorder=z + 1.5))
+    t0 = np.array([fw + 0.04, -0.03]); t1 = t0 + [(n_show - 1) * dx + 0.05, (n_show - 1) * dy + 0.05]
     axB.annotate("", xy=t1, xytext=t0, arrowprops=dict(arrowstyle="-|>", lw=0.8, color=INK, mutation_scale=7))
-    axB.text(ex + fw + (n_show - 1) * dx + 0.12, -0.03, "250 fps", ha="left", va="bottom", fontsize=8)
-    # projection → filtered
-    xs = ex + fw + (n_show - 1) * dx + 0.55; fw2 = 1.0; fh2 = fw2 * mm.shape[0] / mm.shape[1]; y2 = 0.25
-    for j, (im, ttl) in enumerate(((mm, "Projection"), (hp_norm(mm), "Filtered"))):
-        xx = xs + j * (fw2 + 0.42)
-        axB.annotate("", xy=(xx - 0.05, y2 + fh2 / 2), xytext=(xx - 0.33, y2 + fh2 / 2), arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
-        lo, hi = np.percentile(im, (1, 99.5)); axB.imshow(im, cmap="gray", vmin=lo, vmax=hi, extent=(xx, xx + fw2, y2, y2 + fh2), interpolation="antialiased")
-        axB.add_patch(Rectangle((xx, y2), fw2, fh2, fc="none", ec="0.5", lw=0.6))
-        axB.text(xx + fw2 / 2, y2 + fh2 + 0.05, ttl, ha="center", va="bottom", fontsize=8, linespacing=1.0)
-        if j == 0:
-            L = 200 / PX_UM_RAW / mm.shape[1] * fw2
-            axB.plot([xx + 0.1, xx + 0.1 + L], [y2 + 0.07, y2 + 0.07], color="white", lw=2, solid_capstyle="butt")
-            axB.text(xx + 0.1 + L / 2, y2 + 0.1, "200 µm", color="white", ha="center", va="bottom", fontsize=8)
-    axB.set_xlim(-0.03, xs + 2 * fw2 + 0.45); axB.set_ylim(-0.1, fh + 0.9 + 0.35); axB.set_aspect("equal")
-    letter(axB, "b")
+    axB.text(t0[0] + 0.06, t0[1] - 0.02, "250 fps", ha="left", va="top", fontsize=8)
+    xs = fw + (n_show - 1) * dx + 0.42; fh2 = fw * mm.shape[0] / mm.shape[1]; y2 = (fh + (n_show - 1) * dy - fh2) / 2
+    axB.annotate("", xy=(xs - 0.04, y2 + fh2 / 2), xytext=(xs - 0.28, y2 + fh2 / 2), arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
+    lo, hi = np.percentile(mm, (1, 99.5)); axB.imshow(mm, cmap="gray", vmin=lo, vmax=hi, extent=(xs, xs + fw, y2, y2 + fh2), interpolation="antialiased")
+    axB.add_patch(Rectangle((xs, y2), fw, fh2, fc="none", ec="0.5", lw=0.6))
+    axB.text(xs + fw / 2, y2 + fh2 + 0.05, "Projection", ha="center", va="bottom", fontsize=8)
+    L = 200 / PX_UM_RAW / mm.shape[1] * fw
+    axB.plot([xs + fw - 0.2 - L, xs + fw - 0.2], [y2 + 0.08, y2 + 0.08], color="white", lw=2, solid_capstyle="butt")
+    axB.text(xs + fw - 0.2 - L / 2, y2 + 0.11, "200 µm", color="white", ha="center", va="bottom", fontsize=8)
+    axB.set_xlim(-0.03, xs + fw + 0.03); axB.set_ylim(-0.25, fh + (n_show - 1) * dy + 0.12); axB.set_aspect("equal")
 
-    # c: stitching one tile;  d: whole mosaic + acquisition order
-    axC = fig.add_subplot(gB[0]); stitch_panel(axC, P / "stitch" / "positions.json", P / "tiles" / "maxmed")
-    letter(axC, "c")
-    axD = fig.add_subplot(gB[1]); norm, cmap, nt = order_panel(fig, axD, mos, P / "stitch" / "positions.json")
+    # b: registration of one tile against its neighbours (before / after)
+    gR = gL[1].subgridspec(1, 2, wspace=0.05)
+    axR = [fig.add_subplot(gR[0]), fig.add_subplot(gR[1])]
+    registration_panel(axR, P / "stitch" / "positions.json", P / "tiles" / "maxmed")
+    letter(axR[0], "b", 0.0, 1.07)
+
+    # c: whole-organ mosaic + acquisition order
+    axD = fig.add_subplot(gs[1]); norm, cmap, nt = order_panel(fig, axD, mos, P / "stitch" / "positions.json")
     x0_, y0_ = mos.shape[1] * 0.03, mos.shape[0] * 0.975; Lm = 1000 / PX_UM_RAW
     axD.plot([x0_, x0_ + Lm], [y0_, y0_], color=INK, lw=2, solid_capstyle="butt")
     axD.annotate("1 mm", (x0_ + Lm / 2, y0_), xytext=(0, 2), textcoords="offset points", ha="center", va="bottom", fontsize=8)
     fig.canvas.draw(); pD = axD.get_position()
-    fig.text(pD.x0, pD.y1 + 0.004, "d", fontsize=12, fontweight="bold", va="bottom", ha="left")
-    cax = fig.add_axes([pD.x1 + 0.012, pD.y0 + 0.2 * pD.height, 0.012, 0.6 * pD.height])
+    fig.text(pD.x0, pD.y1 - 0.01, "c", fontsize=12, fontweight="bold", va="bottom", ha="left")
+    cax = fig.add_axes([pD.x1 + 0.012, pD.y0 + 0.25 * pD.height, 0.012, 0.5 * pD.height])
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax); cb.set_label("Acquisition order", labelpad=2); cb.outline.set_linewidth(0.5)
     plos_style.save(fig, out / "fig1")
 
