@@ -76,9 +76,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(); ap.add_argument("--f0-band", type=float, default=0.21, help="heart-rate band (fraction of the reference tile's); canonical 0.21 (tiles 7-9 included)")
     ap.add_argument("--tag", default="", help="output name suffix, e.g. _band21"); args = ap.parse_args(); BAND = args.f0_band
-    plt.rcParams.update({"font.family": "Arial", "mathtext.fontset": "custom", "mathtext.rm": "Arial", "mathtext.it": "Arial:italic",
-                         "mathtext.bf": "Arial:bold", "font.size": 8, "axes.labelsize": 9, "xtick.labelsize": 8, "ytick.labelsize": 8,
-                         "axes.linewidth": 0.6, "xtick.major.width": 0.6, "ytick.major.width": 0.6, "xtick.major.size": 2.5, "ytick.major.size": 2.5})
+    sys.path.insert(0, str(Path(__file__).resolve().parent)); import plos_style; plos_style.apply()
     G = _paths.load_graph(); dc = pickle.loads((_paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
     log("rebuilding the AC field (per-tile phasors and synchronisation pairs)")
     # synchronisation anchored on the dorsal aorta (same vessel in tiles 14 / 21 / 28 must agree; ρ ≥ 0.5 measurements, ×100),
@@ -143,7 +141,7 @@ def main():
     # top (quantitative): a heart rate vs acquisition time · b D distributions; bottom (concrete): c organ with vessels 1–4 · d their waveforms
     figR = plt.figure(figsize=(7.5, 5.6), facecolor="white")
     gR = figR.add_gridspec(2, 2, width_ratios=[1, 1.1], height_ratios=[0.58, 1], wspace=0.24, hspace=0.5,
-                           left=0.075, right=0.985, top=0.95, bottom=0.08)
+                           left=0.075, right=0.985, top=0.93, bottom=0.08)
     gRx = gR[1, 1].subgridspec(2, 2, wspace=0.1, hspace=0.55)
     GA, GT, GB7 = gR[0, 0], gR[0, 1], gR[1, 0]; GX = [gRx[0, 0], gRx[0, 1], gRx[1, 0], gRx[1, 1]]
     figT = plt.figure(figsize=(3.6, 2.9), facecolor="white")       # SI: clock-free Θ21 check (fig7_supp_theta21)
@@ -154,7 +152,7 @@ def main():
     # left column: a tile overlap network (left) with one highlighted pair, before/after alignment of that pair (right) ·
     # b validation histograms · right: c organ phase field
     figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
-    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.62, 1], wspace=0.1, left=0.05, right=0.98, top=0.95, bottom=0.14)
+    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.62, 1], wspace=0.1, left=0.05, right=0.98, top=0.95, bottom=0.165)
     gL = gS2[0].subgridspec(2, 1, height_ratios=[2.0, 0.95], hspace=0.38); GD, GC = gL[1], gS2[1]
     gA = gL[0].subgridspec(1, 2, width_ratios=[1, 0.85], wspace=0.15); GNET, GB = gA[0], gA[1]
     fig = figR
@@ -806,7 +804,7 @@ def main():
     axC.legend(handles=[_Pt(fc="white", ec="0.6", hatch="//", lw=0.5, label="transient — excluded (Fig. 7)"),
                         _Pt(fc="0.82", ec="none", label="no usable phase of the fundamental"),
                         _Pt(fc="none", ec="0.15", ls="--", lw=0.9, label="separately oriented block")],
-               loc="upper center", bbox_to_anchor=(0.5, -0.1), fontsize=8, frameon=False, handlelength=1.6, borderaxespad=0, labelspacing=0.25,
+               loc="upper center", bbox_to_anchor=(0.5, -0.135), fontsize=8, frameon=False, handlelength=1.6, borderaxespad=0, labelspacing=0.25,
                ncol=2, columnspacing=1.0)
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
     # tile centres; its connected components are the synchronization blocks; the dashed bridge = the inlet-symmetry constraint (β)
@@ -1027,14 +1025,14 @@ def main():
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     # supplement — held-out overlap prediction (fig7_supp_heldout)
-    fs = plt.figure(figsize=(2.6, 2.6), facecolor="white"); axP = fs.add_axes([0.24, 0.22, 0.72, 0.72]); axP.set_aspect("equal")
+    fs = plt.figure(figsize=(2.7, 2.7), facecolor="white"); axP = fs.add_axes([0.24, 0.22, 0.72, 0.72]); axP.set_aspect("equal")
     axP.plot([-200, 200], [-200, 200], color="0.6", lw=0.7, ls="--", zorder=1)
     axP.scatter(obs, pred, s=4 + 18 * np.sqrt(nn / nn.max()), color="0.25", alpha=0.75, lw=0, zorder=3)
     axP.set_xlim(-200, 200); axP.set_ylim(-200, 200); axP.set_xticks([-180, 0, 180]); axP.set_yticks([-180, 0, 180])
     axP.set_xlabel("tile-pair offset measured\nfrom shared vessels (deg)"); axP.set_ylabel("predicted with pair held out (deg)", labelpad=0)
     axP.spines[["top", "right"]].set_visible(False)
     axP.text(0.03, 0.97, f"{len(obs)} tile pairs\nmedian error {np.median(res):.0f}°", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
-    fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.png", dpi=300, facecolor="white"); fs.savefig(OUT_DIR / f"fig7_supp_heldout{args.tag}.pdf", facecolor="white")
+    plos_style.save(fs, OUT_DIR / f"fig7_supp_heldout{args.tag}")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     # SI fig8_supp_phase_rho: repeat-vessel aligned phase difference vs the weaker recording's coherence (retained tiles)
     PR_ = []
@@ -1060,18 +1058,16 @@ def main():
     axPR.set_xscale("log"); axPR.set_ylim(0, 120); axPR.set_yticks([0, 30, 60, 90, 120])
     axPR.set_xlabel("coherence of the weaker recording, ρ", fontsize=7.5); axPR.set_ylabel("repeat-vessel phase difference,\naligned (deg)", fontsize=7.5)
     axPR.tick_params(labelsize=7); axPR.spines[["top", "right"]].set_visible(False)
-    figP.savefig(OUT_DIR / f"fig8_supp_phase_rho{args.tag}.png", dpi=300, facecolor="white"); figP.savefig(OUT_DIR / f"fig8_supp_phase_rho{args.tag}.pdf", facecolor="white")
-    figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.png", dpi=300, facecolor="white"); figB.savefig(OUT_DIR / f"fig8_supp_block{args.tag}.pdf", facecolor="white")
-    figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.png", dpi=300, facecolor="white"); figSM.savefig(OUT_DIR / f"fig7_supp_shape_map{args.tag}.pdf", facecolor="white")
+    plos_style.save(figP, OUT_DIR / f"fig8_supp_phase_rho{args.tag}")
+    plos_style.save(figB, OUT_DIR / f"fig8_supp_block{args.tag}")
+    plos_style.save(figSM, OUT_DIR / f"fig7_supp_shape_map{args.tag}")
     def _plos_min_font(f_, lo=8.0):
         """PLOS Comp Biol: figure text 8–12 pt — raise every smaller text element (labels, ticks, legends, annotations) to `lo`."""
         for t_ in f_.findobj(matplotlib.text.Text):
             if t_.get_text() and t_.get_fontsize() < lo:
                 t_.set_fontsize(lo)
     for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync"), (figD, "fig7_supp_detection"), (figT, "fig7_supp_theta21")):
-        _plos_min_font(f_)
-        f_.savefig(OUT_DIR / f"{nm_}{args.tag}.png", dpi=300, facecolor="white"); f_.savefig(OUT_DIR / f"{nm_}{args.tag}.pdf", facecolor="white")
-        f_.savefig(OUT_DIR / f"{nm_}{args.tag}.tif", dpi=600, facecolor="white", pil_kwargs={"compression": "tiff_lzw"})
+        plos_style.save(f_, OUT_DIR / f"{nm_}{args.tag}")
         log(f"wrote {OUT_DIR / f'{nm_}{args.tag}.png'}")
 
 
