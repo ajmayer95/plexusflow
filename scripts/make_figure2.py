@@ -45,6 +45,25 @@ def scalebar(ax, um, px_um, x_frac=0.95, y_frac=0.93, color="white", halo=True):
                 ha="right", va="bottom", color=color, fontsize=8, **kw)
 
 
+def radius_ticks(paths_rc, radii_px, step_px=22.0):
+    """Perpendicular bars of length 2R along each centreline (one every step_px of arc), as segments for a LineCollection."""
+    out = []
+    for q, r in zip(paths_rc, radii_px):
+        if not np.isfinite(r) or len(q) < 2:
+            continue
+        d = np.r_[0, np.cumsum(np.hypot(*np.diff(q, axis=0).T))]
+        if d[-1] < 0.6 * step_px:
+            continue
+        for a in np.arange(0.5 * step_px if d[-1] > step_px else d[-1] / 2, d[-1], step_px):
+            i = min(np.searchsorted(d, a), len(q) - 1); i0 = max(i - 1, 0)
+            t = q[i] - q[i0]; n_ = np.hypot(*t)
+            if n_ == 0:
+                continue
+            t /= n_; nrm = np.array([-t[1], t[0]]); c = q[i0] + (a - d[i0]) * t
+            out.append([c - r * nrm, c + r * nrm])
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tile", type=int, default=36)
@@ -130,14 +149,16 @@ def main():
             ax.imshow(np.where(sub(mask), 0.25, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
         else:
             ax.imshow(np.where(sub(mask), 0.9, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
-            ax.add_collection(LineCollection([segs[i] - [cx0, cy0] for i in inside], colors=rcol(rad_um[inside]), linewidths=lw_of(rad_um[inside]) * 1.5))
+            cl = [segs[i] - [cx0, cy0] for i in inside]
+            ax.add_collection(LineCollection(radius_ticks(cl, rad_um[inside] / PX_UM), colors="0.45", linewidths=0.5))
+            ax.add_collection(LineCollection(cl, colors="#c2185b", linewidths=0.9))
         ax.set_xlim(0, cx1 - cx0); ax.set_ylim(cy1 - cy0, 0); ax.set_aspect("equal"); frame(ax, True)
     letter(bot[0], "b"); scalebar(bot[0], 200, PX_UM)
     fig.canvas.draw(); pG = top[3].get_position()                      # vertical colorbar just right of the whole-organ graph
     cax = fig.add_axes([pG.x1 + 0.006, pG.y0 + 0.2 * pG.height, 0.011, 0.6 * pG.height])
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax, ticks=[10, 20, 30, 40])
     cb.set_label("Radius (µm)", labelpad=2); cb.outline.set_linewidth(0.5)
-    cb.outline.set_linewidth(0.5)
+
 
     # c: tile 36's own frame with the globally derived graph mapped in
     axC = fig.add_subplot(gs[1, 3])
