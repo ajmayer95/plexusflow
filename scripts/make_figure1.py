@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
 from matplotlib.patches import Rectangle, Polygon, Ellipse, FancyArrowPatch, Arc
-from scipy.ndimage import gaussian_filter, affine_transform, maximum_filter
+from scipy.ndimage import gaussian_filter, affine_transform, maximum_filter, laplace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src")); sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plexusflow.paths as _paths
@@ -262,18 +262,20 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
     def pick(nbr):
         ov = (m15["affine"][1] & m15["rigid"][1] & (cov[nbr] if nbr in cov else np.any([cov[t] for t in nb], axis=0))).astype(float)
         I = np.pad(ov.cumsum(0).cumsum(1), ((1, 0), (1, 0))); frac = (I[win:, win:] - I[:-win, win:] - I[win:, :-win] + I[:-win, :-win]) / win ** 2
-        thr = 0.98 if (frac >= 0.98).any() else 0.9 * frac.max(); best, zb, rz = -9, None, None
-        for r_ in range(0, frac.shape[0], max(win // 6, 1)):
-            for c_ in range(0, frac.shape[1], max(win // 6, 1)):
+        thr = 0.98 if (frac >= 0.98).any() else 0.9 * frac.max(); cand = []
+        for r_ in range(0, frac.shape[0], max(win // 8, 1)):
+            for c_ in range(0, frac.shape[1], max(win // 8, 1)):
                 if frac[r_, c_] < thr:
                     continue
-                g = G[r_:r_ + win, c_:c_ + win].ravel()
-                ra = np.corrcoef(m15["affine"][0][r_:r_ + win, c_:c_ + win].ravel(), g)[0, 1]
-                rg = np.corrcoef(m15["rigid"][0][r_:r_ + win, c_:c_ + win].ravel(), g)[0, 1]
-                sc = (ra - rg) + 0.5 * ra
-                if np.isfinite(sc) and sc > best:
-                    best, zb, rz = sc, (r_, r_ + win, c_, c_ + win), (rg, ra)
-        print(f"[fig1] zoom on {tile}|{nbr}: local r rigid {rz[0]:.2f} → affine {rz[1]:.2f}")
+                g = G[r_:r_ + win, c_:c_ + win]; a_ = m15["affine"][0][r_:r_ + win, c_:c_ + win]
+                ra = np.corrcoef(a_.ravel(), g.ravel())[0, 1]
+                rg = np.corrcoef(m15["rigid"][0][r_:r_ + win, c_:c_ + win].ravel(), g.ravel())[0, 1]
+                sharp = min(np.mean(laplace(gaussian_filter(g, 1.0)) ** 2), np.mean(laplace(gaussian_filter(a_, 1.0)) ** 2))
+                if np.isfinite(ra) and np.isfinite(rg):
+                    cand.append((sharp, (ra - rg) + 0.5 * ra, (r_, r_ + win, c_, c_ + win), (rg, ra)))
+        sh_cut = np.percentile([c_[0] for c_ in cand], 70)            # only the sharpest 30 % of windows
+        sharp, _, zb, rz = max((c_ for c_ in cand if c_[0] >= sh_cut), key=lambda c_: c_[1])
+        print(f"[fig1] zoom on {tile}|{nbr}: local r rigid {rz[0]:.2f} → affine {rz[1]:.2f} (sharpness pct ≥ 70)")
         return zb
     zbs = [pick(n) for n in (zoom_with or (None,))]
     # full view (stored placement)
@@ -348,7 +350,7 @@ def main():
     ap.add_argument("--tile", type=int, default=36, help="tile whose movie is shown in a")
     ap.add_argument("--reg-tile", type=int, default=15, help="tile shown registered against its neighbours in b")
     ap.add_argument("--reg-nb", type=int, nargs="+", default=[20, 19, 16, 14], help="its (fixed, rigid) neighbours")
-    ap.add_argument("--zoom-with", type=int, nargs="+", default=[19, 16], help="zoom on the overlap with these neighbours")
+    ap.add_argument("--zoom-with", type=int, nargs="+", default=[20, 16], help="zoom on the overlap with these neighbours")
     ap.add_argument("--out-name", default="fig1")
     args = ap.parse_args()
     plos_style.apply()
