@@ -305,18 +305,21 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
     for t in nb + (T15,):
         w = (A15 if t == T15 else affines[t]) @ CORNERS(*tiles[t].shape)
         axF.plot(w[1] - x0, w[0] - y0, color="#ff66ff" if t == T15 else "#7dff7d", lw=0.6, alpha=0.9)
-        axF.text(w[1, :-1].mean() - x0, w[0, :-1].mean() - y0, str(t), color="white", fontsize=8, fontweight="bold", ha="center", va="center",
-                 bbox=dict(fc="black", ec="none", alpha=0.55, boxstyle="round,pad=0.15"))
+        cw = w[:2, :-1].mean(1); c31 = (A15 @ [H15 / 2, W15 / 2, 1])[:2]
+        pos_ = cw if t == T15 else cw + 0.45 * (cw - c31) / max(np.hypot(*(cw - c31)), 1) * min(tiles[t].shape)
+        axF.text(pos_[1] - x0, pos_[0] - y0, str(t), color="white", fontsize=8, fontweight="bold", ha="center", va="center",
+                 bbox=dict(fc="black", ec="none", alpha=0.55, boxstyle="round,pad=0.15"), zorder=8)
     wr, wa = Ar @ CORNERS(H15, W15), A15 @ CORNERS(H15, W15)
     # best-rigid footprint dashed, affine footprint (solid magenta outline above)
     axF.plot(wr[1] - x0, wr[0] - y0, color="white", lw=0.9, ls=(0, (3, 2)), zorder=6)
     disp = np.hypot(*(wa[:2, :4] - wr[:2, :4])) * ds * PX_UM_RAW
     print(f"[fig1] tile {tile} corner displacement rigid → affine: {np.round(disp, 0)} µm")
+    ZC = "#ffd23f"                                                 # zoom boxes: yellow, numbered inside their corner
     for k, zb in enumerate(zbs):
-        axF.add_patch(Rectangle((zb[2], zb[0]), win, win, fill=False, ec="white", lw=1.0))
+        axF.add_patch(Rectangle((zb[2], zb[0]), win, win, fill=False, ec=ZC, lw=1.1, zorder=9))
         if len(zbs) > 1:
-            axF.text(zb[3] + 6, zb[1], str(k + 1), color="white", fontsize=8, fontweight="bold", ha="left", va="bottom",
-                     bbox=dict(fc="black", ec="none", alpha=0.6, pad=0.8))
+            axF.text(zb[2] + 0.08 * win, zb[0] + 0.1 * win, str(k + 1), color="black", fontsize=8, fontweight="bold", ha="left", va="top",
+                     bbox=dict(fc=ZC, ec="none", pad=0.6), zorder=10)
     axF.set_xticks([]); axF.set_yticks([]); [sp.set_visible(False) for sp in axF.spines.values()]
     for k, zb in enumerate(zbs):
         sub = gaussian_filter(G[zb[0]:zb[1], zb[2]:zb[3]], 2.5); pk = (sub == maximum_filter(sub, int(win * 0.18))) & (sub > np.percentile(sub, 96))
@@ -331,15 +334,14 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
         for row, key in enumerate(("rigid", "affine")):
             ax = axZ[row][k]
             ax.imshow(rgb(*m15[key])[zb[0]:zb[1], zb[2]:zb[3]], interpolation="antialiased")
-            for q in lm:
-                ax.plot(q[1], q[0], marker="o", ms=7, mfc="none", mec="white", mew=0.8)
             ax.set_xticks([]); ax.set_yticks([])
             for sp in ax.spines.values():
-                sp.set_color("white"); sp.set_linewidth(1.0)
+                sp.set_color(ZC); sp.set_linewidth(1.1)
             if k == 0:
                 ax.text(-0.06, 0.5, key, transform=ax.transAxes, rotation=90, ha="center", va="center", fontsize=8)
             if row == 0 and len(zbs) > 1:
-                ax.text(0.04, 0.96, str(k + 1), transform=ax.transAxes, color="white", fontsize=8, fontweight="bold", ha="left", va="top")
+                ax.text(0.05, 0.95, str(k + 1), transform=ax.transAxes, color="black", fontsize=8, fontweight="bold", ha="left", va="top",
+                        bbox=dict(fc=ZC, ec="none", pad=0.6))
     L = 100 / (PX_UM_RAW * ds); axs_ = axZ[1][-1]
     axs_.plot([win * 0.06, win * 0.06 + L], [win * 0.92] * 2, color="white", lw=2, solid_capstyle="butt")
     axs_.text(win * 0.06 + L / 2, win * 0.88, "100 µm", color="white", ha="center", va="bottom", fontsize=8)
