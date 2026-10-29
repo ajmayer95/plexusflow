@@ -274,10 +274,24 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
                 if np.isfinite(ra) and np.isfinite(rg):
                     cand.append((sharp, (ra - rg) + 0.5 * ra, (r_, r_ + win, c_, c_ + win), (rg, ra)))
         sh_cut = np.percentile([c_[0] for c_ in cand], 70)            # only the sharpest 30 % of windows
-        sharp, _, zb, rz = max((c_ for c_ in cand if c_[0] >= sh_cut), key=lambda c_: c_[1])
-        print(f"[fig1] zoom on {tile}|{nbr}: local r rigid {rz[0]:.2f} → affine {rz[1]:.2f} (sharpness pct ≥ 70)")
-        return zb
-    zbs = [pick(n) for n in (zoom_with or (None,))]
+        return [c_ for c_ in cand if c_[0] >= sh_cut]
+    if not zoom_with or list(zoom_with) == [0]:
+        # automatic: the two best non-overlapping sharp windows anywhere in the overlaps, ranked by rigid → affine gain
+        Ainv = np.linalg.inv(A15)
+        def disp(zb):                                   # rigid vs affine position of the window centre's tile-31 point (canvas px)
+            q = Ainv @ [(zb[0] + zb[1]) / 2 + y0, (zb[2] + zb[3]) / 2 + x0, 1]
+            return float(np.hypot(*((Ar @ q)[:2] - (A15 @ q)[:2])))
+        cand = sorted([c_ for n in nb for c_ in pick(n) if c_[3][1] > 0.45], key=lambda c_: -disp(c_[2])); chosen = []
+        for c_ in cand:
+            if all(max(abs(c_[2][0] - z[2][0]), abs(c_[2][2] - z[2][2])) >= 1.5 * win for z in chosen):
+                chosen.append(c_)
+            if len(chosen) == 2:
+                break
+    else:
+        chosen = [max(pick(n), key=lambda c_: c_[1]) for n in zoom_with]
+    for c_ in chosen:
+        print(f"[fig1] zoom: local r rigid {c_[3][0]:.2f} → affine {c_[3][1]:.2f}" + (f", offset {disp(c_[2]) * ds * PX_UM_RAW:.0f} µm" if 'disp' in dir() else ""))
+    zbs = [c_[2] for c_ in chosen]
     # full view (stored placement)
     axF.imshow(rgb(*m15["affine"]), interpolation="antialiased")
     for t in nb + (T15,):
@@ -285,6 +299,19 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
         axF.plot(w[1] - x0, w[0] - y0, color="#ff66ff" if t == T15 else "#7dff7d", lw=0.6, alpha=0.9)
         axF.text(w[1, :-1].mean() - x0, w[0, :-1].mean() - y0, str(t), color="white", fontsize=8, fontweight="bold", ha="center", va="center",
                  bbox=dict(fc="black", ec="none", alpha=0.55, boxstyle="round,pad=0.15"))
+    wr, wa = Ar @ CORNERS(H15, W15), A15 @ CORNERS(H15, W15)
+    # what the affine adds beyond the best rigid: displacement of a 5 × 5 grid of tile points (true scale)
+    EXAG = 5.0                                                   # arrows drawn 5× their true length (state in caption)
+    for gy in np.linspace(0.15, 0.85, 4) * H15:
+        for gx in np.linspace(0.15, 0.85, 4) * W15:
+            a_, b_ = (Ar @ [gy, gx, 1])[:2] - [y0, x0], (A15 @ [gy, gx, 1])[:2] - [y0, x0]
+            b_ = a_ + EXAG * (b_ - a_)
+            axF.add_patch(FancyArrowPatch(a_[::-1], b_[::-1], arrowstyle="-|>", mutation_scale=7, color="#ffe14d", lw=1.1, zorder=7,
+                                          shrinkA=0, shrinkB=0))
+            axF.plot(a_[1], a_[0], "o", ms=1.8, color="#ffe14d", zorder=7)
+    axF.text(0.98, 0.03, f"rigid → affine (×{EXAG:.0f})", transform=axF.transAxes, color="#ffe14d", fontsize=8, ha="right", va="bottom")
+    disp = np.hypot(*(wa[:2, :4] - wr[:2, :4])) * ds * PX_UM_RAW
+    print(f"[fig1] tile {tile} corner displacement rigid → affine: {np.round(disp, 0)} µm")
     for k, zb in enumerate(zbs):
         axF.add_patch(Rectangle((zb[2], zb[0]), win, win, fill=False, ec="white", lw=1.0))
         if len(zbs) > 1:
@@ -348,9 +375,9 @@ def order_panel(fig, ax, mos, positions):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tile", type=int, default=36, help="tile whose movie is shown in a")
-    ap.add_argument("--reg-tile", type=int, default=15, help="tile shown registered against its neighbours in b")
-    ap.add_argument("--reg-nb", type=int, nargs="+", default=[20, 19, 16, 14], help="its (fixed, rigid) neighbours")
-    ap.add_argument("--zoom-with", type=int, nargs="+", default=[20, 16], help="zoom on the overlap with these neighbours")
+    ap.add_argument("--reg-tile", type=int, default=31, help="tile shown registered against its neighbours in b")
+    ap.add_argument("--reg-nb", type=int, nargs="+", default=[18, 19, 32, 33], help="its (fixed, rigid) neighbours")
+    ap.add_argument("--zoom-with", type=int, nargs="+", default=[0], help="zoom on the overlap with these neighbours")
     ap.add_argument("--out-name", default="fig1")
     args = ap.parse_args()
     plos_style.apply()
