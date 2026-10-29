@@ -201,46 +201,85 @@ def stitch_panel(ax, positions, tile_dir, ds=2):
     return dict(sx=sx, sy=sy, sh=sh, dth=dth)
 
 
-def registration_panel(axs, positions, tile_dir, ds=2, pad=0.08):
-    """Tile 15 against its already-placed neighbours, in their overlap: magenta = tile 15, green = neighbours (white where
-    they agree).  Left: tile 15 placed rigidly (neighbours' rotation, same centre, no scaling/shear); right: the stored
-    affine from the manual registration.  Same crop in both."""
+def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=280.0, n_lm=3):
+    """Tile 15 and its neighbours.  axF: full footprints at the stored placement (magenta = tile 15, green = neighbours,
+    white = agreement), tile outlines + numbers, zoom box on the 15 | 19–20 overlap.  axZ = (rigid, affine): that zoom with
+    tile 15 placed rigidly (own rotation, neighbours' scale, same centre) vs by the stored affine; stars = vessel junctions
+    of the neighbours (illustrative — the manual registration stored no point correspondences)."""
     _, affines = _load_positions_and_affines(positions, ds)
-    nb = (14, 16, 19, 20, 21)
+    T15 = tile                                                     # (name kept from the tile-15 version)
+    cen = {t: (A @ [176.0 * 2 / ds, 160.0 * 2 / ds, 1])[:2] for t, A in affines.items()}
+    nb = tuple(t for t in sorted(affines, key=lambda u: np.hypot(*(cen[u] - cen[tile]))) if t != tile
+               and np.hypot(*(cen[t] - cen[tile])) < 0.85 * 704 / ds)[:5]
     tiles = {t: _load_tile(tile_dir / f"vid{t}_maxmed.tif", ds) for t in nb + (T15,)}
-    norm01 = lambda im: np.clip((im - np.percentile(im, 1)) / max(np.percentile(im, 99.5) - np.percentile(im, 1), 1e-9), 0, 1)
+    def norm01(im):
+        x = im - gaussian_filter(im, 40.0 / ds); lo, hi = np.percentile(x, (2, 99.7))
+        return np.clip((x - lo) / max(hi - lo, 1e-9), 0, 1)
     A15 = affines[T15]; H15, W15 = tiles[T15].shape; c = np.array([H15 / 2, W15 / 2])
-    R = affines[7][:2, :2]; Ar = np.eye(3); Ar[:2, :2] = R; Ar[:2, 2] = A15[:2, :2] @ c + A15[:2, 2] - R @ c
-    y0, y1, x0, x1 = compute_world_bbox({t: tiles[t].shape for t in nb + (T15,)}, {**{t: affines[t] for t in nb}, T15: A15}, pad=15)
-    Hc, Wc = y1 - y0, x1 - x0
-    num = np.zeros((Hc, Wc)); den = np.zeros((Hc, Wc))
+    U, S, Vt = np.linalg.svd(A15[:2, :2]); s_nb = np.median([np.sqrt(abs(np.linalg.det(affines[u][:2, :2]))) for u in nb])
+    Rp = (U @ Vt) * s_nb; Ar = np.eye(3); Ar[:2, :2] = Rp; Ar[:2, 2] = A15[:2, :2] @ c + A15[:2, 2] - Rp @ c
+    y0, y1, x0, x1 = compute_world_bbox({t: tiles[t].shape for t in nb + (T15,)}, {**{t: affines[t] for t in nb}, T15: A15}, pad=10)
+    sh = (y1 - y0, x1 - x0); num = np.zeros(sh); den = np.zeros(sh); cov = {}
     for t in nb:
-        w = _warp_into_canvas(feather_kernel_from_tile(tiles[t].shape, 0.5), affines[t], (Hc, Wc), y0, x0)
-        num += _warp_into_canvas(norm01(tiles[t]), affines[t], (Hc, Wc), y0, x0) * w; den += w
-    G = np.where(den > 1e-6, num / np.maximum(den, 1e-6), np.nan)
-    # crop: the part of tile 15's footprint that the neighbours also cover
-    cov15 = _warp_into_canvas(np.ones_like(tiles[T15]), A15, (Hc, Wc), y0, x0) > 0.5
-    ov = (cov15 & np.isfinite(G)).astype(float)
-    # square window fully inside the overlap, as far from tile 15's centre as possible (the rigid error grows outward)
-    win = int(0.42 * min(H15, W15)); I = np.pad(ov.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
-    frac = (I[win:, win:] - I[:-win, win:] - I[win:, :-win] + I[:-win, :-win]) / win ** 2
-    ctr = (A15 @ [H15 / 2, W15 / 2, 1])[:2] - [y0, x0]
-    rr, cc_ = np.mgrid[0:frac.shape[0], 0:frac.shape[1]]
-    score = np.where(frac > 0.97, np.hypot(rr + win / 2 - ctr[0], cc_ + win / 2 - ctr[1]), -1)
-    r_, c_ = np.unravel_index(np.argmax(score), score.shape); box = (r_, r_ + win, c_, c_ + win)
-    for ax, A, lab in ((axs[0], Ar, "rigid"), (axs[1], A15, "affine")):
-        M = _warp_into_canvas(norm01(tiles[T15]), A, (Hc, Wc), y0, x0)
-        cov = _warp_into_canvas(np.ones_like(tiles[T15]), A, (Hc, Wc), y0, x0) > 0.5
-        g = np.nan_to_num(G); m = np.where(cov, M, 0)
-        rgb = np.dstack([m, g, m])[box[0]:box[1], box[2]:box[3]]
-        ax.imshow(np.clip(rgb * 1.15, 0, 1), interpolation="antialiased")
+        cov[t] = _warp_into_canvas(np.ones_like(tiles[t]), affines[t], sh, y0, x0) > 0.5
+        w = _warp_into_canvas(feather_kernel_from_tile(tiles[t].shape, 0.5), affines[t], sh, y0, x0)
+        num += _warp_into_canvas(norm01(tiles[t]), affines[t], sh, y0, x0) * w; den += w
+    G = np.where(den > 1e-6, num / np.maximum(den, 1e-6), 0.0)
+    m15 = {k: (_warp_into_canvas(norm01(tiles[T15]), A, sh, y0, x0), _warp_into_canvas(np.ones_like(tiles[T15]), A, sh, y0, x0) > 0.5)
+           for k, A in (("rigid", Ar), ("affine", A15))}
+    rgb = lambda M, cv: np.clip(np.dstack([M * cv, G, M * cv]), 0, 1)
+    # zoom: square window inside the 15 ∩ (19 ∪ 20) overlap, farthest from tile 15's centre (rigid error grows outward)
+    win = int(zoom_um / (PX_UM_RAW * ds)); ov = (m15["affine"][1] & m15["rigid"][1] & np.any([cov[t] for t in nb], axis=0)).astype(float)
+    I = np.pad(ov.cumsum(0).cumsum(1), ((1, 0), (1, 0))); frac = (I[win:, win:] - I[:-win, win:] - I[win:, :-win] + I[:-win, :-win]) / win ** 2
+    # among windows fully in the overlap, the one where the affine raises local agreement most (and ends well aligned)
+    best, zb = -9, None
+    for r_ in range(0, frac.shape[0], max(win // 6, 1)):
+        for c_ in range(0, frac.shape[1], max(win // 6, 1)):
+            if frac[r_, c_] < 0.98:
+                continue
+            g = G[r_:r_ + win, c_:c_ + win].ravel()
+            ra = np.corrcoef(m15["affine"][0][r_:r_ + win, c_:c_ + win].ravel(), g)[0, 1]
+            rg = np.corrcoef(m15["rigid"][0][r_:r_ + win, c_:c_ + win].ravel(), g)[0, 1]
+            sc = (ra - rg) + 0.5 * ra
+            if np.isfinite(sc) and sc > best:
+                best, zb, rz = sc, (r_, r_ + win, c_, c_ + win), (rg, ra)
+    print(f"[fig1] zoom window local r rigid {rz[0]:.2f} → affine {rz[1]:.2f}")
+    # full view (stored placement)
+    axF.imshow(rgb(*m15["affine"]), interpolation="antialiased")
+    for t in nb + (T15,):
+        w = (A15 if t == T15 else affines[t]) @ CORNERS(*tiles[t].shape)
+        axF.plot(w[1] - x0, w[0] - y0, color="#ff66ff" if t == T15 else "#7dff7d", lw=0.6, alpha=0.9)
+        axF.text(w[1, :-1].mean() - x0, w[0, :-1].mean() - y0, str(t), color="white", fontsize=8, fontweight="bold", ha="center", va="center",
+                 bbox=dict(fc="black", ec="none", alpha=0.55, boxstyle="round,pad=0.15"))
+    axF.add_patch(Rectangle((zb[2], zb[0]), win, win, fill=False, ec="white", lw=1.0))
+    axF.set_xticks([]); axF.set_yticks([]); [sp.set_visible(False) for sp in axF.spines.values()]
+    # landmarks: bright junctions of the neighbours' image inside the zoom
+    sub = gaussian_filter(G[zb[0]:zb[1], zb[2]:zb[3]], 2.5); pk = (sub == maximum_filter(sub, int(win * 0.18))) & (sub > np.percentile(sub, 96))
+    m = int(win * 0.15); pk[:m] = pk[-m:] = False; pk[:, :m] = pk[:, -m:] = False
+    ys, xs = np.nonzero(pk); o = np.argsort(-sub[ys, xs]); lm = []
+    for k_ in o:
+        q = np.array([ys[k_], xs[k_]], float)
+        if all(np.hypot(*(q - z)) > 0.3 * win for z in lm):
+            lm.append(q)
+        if len(lm) == n_lm:
+            break
+    for ax, key in zip(axZ, ("rigid", "affine")):
+        ax.imshow(rgb(*m15[key])[zb[0]:zb[1], zb[2]:zb[3]], interpolation="antialiased")
+        for q in lm:
+            ax.plot(q[1], q[0], marker="o", ms=7, mfc="none", mec="white", mew=0.8)
         ax.set_xticks([]); ax.set_yticks([])
         for sp in ax.spines.values():
-            sp.set_color("0.5"); sp.set_linewidth(0.6)
-        ax.set_title(lab, fontsize=8, pad=2)
-    L = 100 / (PX_UM_RAW * ds); n = box[1] - box[0]
-    axs[0].plot([0.07 * n, 0.07 * n + L], [0.93 * n] * 2, color="white", lw=2, solid_capstyle="butt")
-    axs[0].text(0.07 * n + L / 2, 0.90 * n, "100 µm", color="white", ha="center", va="bottom", fontsize=8)
+            sp.set_color("white"); sp.set_linewidth(1.0)
+        ax.text(0.03, 0.96, key, transform=ax.transAxes, color="white", fontsize=8, ha="left", va="top")
+    L = 100 / (PX_UM_RAW * ds)
+    axZ[1].plot([win * 0.95 - L, win * 0.95], [win * 0.92] * 2, color="white", lw=2, solid_capstyle="butt")
+    axZ[1].text(win * 0.95 - L / 2, win * 0.88, "100 µm", color="white", ha="center", va="bottom", fontsize=8)
+    r = {}
+    for key in ("rigid", "affine"):
+        M, cv = m15[key]; oo = cv & (den > 0.5)
+        r[key] = np.corrcoef(M[oo], G[oo])[0, 1]
+    print(f"[fig1] tile {tile} vs {nb}: overlap r rigid {r['rigid']:.2f} → affine {r['affine']:.2f}")
+    return zb
 
 
 def order_panel(fig, ax, mos, positions):
@@ -266,7 +305,9 @@ def order_panel(fig, ax, mos, positions):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--tile", type=int, default=36, help="front tile of the stacks in b")
+    ap.add_argument("--tile", type=int, default=36, help="tile whose movie is shown in a")
+    ap.add_argument("--reg-tile", type=int, default=36, help="tile shown registered against its neighbours in b")
+    ap.add_argument("--out-name", default="fig1")
     args = ap.parse_args()
     plos_style.apply()
     cfg = StageConfig.load(_paths.STAGE); P = _paths.STAGE; out = _paths.FIGURES / "fig1"
@@ -277,7 +318,7 @@ def main():
 
     fig = plt.figure(figsize=(7.5, 4.4))
     gs = fig.add_gridspec(1, 2, width_ratios=[1.0, 1.08], wspace=0.06, left=0.01, right=0.9, top=0.965, bottom=0.02)
-    gL = gs[0].subgridspec(2, 1, height_ratios=[1.0, 0.95], hspace=0.14)
+    gL = gs[0].subgridspec(2, 1, height_ratios=[0.85, 1.1], hspace=0.12)
     letter = lambda ax, l, dx=0.0, dy=1.01: ax.text(dx, dy, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
 
     # a: setup → one tile's movie → projection
@@ -310,10 +351,11 @@ def main():
     axB.set_xlim(-0.03, xs + fw + 0.03); axB.set_ylim(-0.25, fh + (n_show - 1) * dy + 0.12); axB.set_aspect("equal")
 
     # b: registration of one tile against its neighbours (before / after)
-    gR = gL[1].subgridspec(1, 2, wspace=0.05)
-    axR = [fig.add_subplot(gR[0]), fig.add_subplot(gR[1])]
-    registration_panel(axR, P / "stitch" / "positions.json", P / "tiles" / "maxmed")
-    letter(axR[0], "b", 0.0, 1.07)
+    gR = gL[1].subgridspec(1, 2, width_ratios=[1.35, 0.62], wspace=0.05)
+    gZ = gR[1].subgridspec(2, 1, hspace=0.06)
+    axF = fig.add_subplot(gR[0]); axZ = [fig.add_subplot(gZ[0]), fig.add_subplot(gZ[1])]
+    registration_panel(axF, axZ, P / "stitch" / "positions.json", P / "tiles" / "maxmed", tile=args.reg_tile)
+    letter(axF, "b", 0.0, 1.02)
 
     # c: whole-organ mosaic + acquisition order
     axD = fig.add_subplot(gs[1]); norm, cmap, nt = order_panel(fig, axD, mos, P / "stitch" / "positions.json")
@@ -324,7 +366,7 @@ def main():
     fig.text(pD.x0, pD.y1 - 0.01, "c", fontsize=12, fontweight="bold", va="bottom", ha="left")
     cax = fig.add_axes([pD.x1 + 0.012, pD.y0 + 0.25 * pD.height, 0.012, 0.5 * pD.height])
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax); cb.set_label("Acquisition order", labelpad=2); cb.outline.set_linewidth(0.5)
-    plos_style.save(fig, out / "fig1")
+    plos_style.save(fig, out / args.out_name)
 
 
 if __name__ == "__main__":
