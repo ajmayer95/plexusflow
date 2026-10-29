@@ -415,30 +415,40 @@ def main():
     letter(axA, "a")
     axB = fig.add_subplot(gA[1]); axB.axis("off")
     # the first three tiles: each one 250 fps movie (stack, top) projected down to its max − median image (bottom)
-    H_, W_ = st.shape[1:]; fw = 1.0; fh = fw * H_ / W_; n_show, dx, dy = 5, 0.07, 0.06; pitch = 1.42
+    H_, W_ = st.shape[1:]; fw = 1.0; fh = fw * H_ / W_; n_show, dx, dy = 8, 0.04, 0.035; pitch = 1.42
     ytop = fh + 0.55; xmax = 0
     for j, t in enumerate(ACQ_TILES):
         s_ = tifffile.imread(str(next(Path(cfg.videos_realtime_dir).glob(f"*loc{t}_realtime.tif")))).astype(np.float32)
         p_ = tifffile.imread(str(P / "tiles" / "maxmed" / f"vid{t}_maxmed.tif")).astype(float); p_ = p_.mean(-1) if p_.ndim == 3 else p_
-        lo, hi = np.percentile(s_[:20], 1), np.percentile(s_[:20], 99.6); ox = j * pitch
+        # display: flat-field each frame by the smoothed temporal mean (removes vignetting / haze), then stretch
+        flat = gaussian_filter(s_.mean(0), 25) + 1e-6
+        fr = [gaussian_filter(s_[k * 5] / flat, 0.6) for k in range(n_show)]
+        lo, hi = np.percentile(fr[0], 2), np.percentile(fr[0], 99.7); ox = j * pitch
         for k in range(n_show)[::-1]:
             x0, y0 = ox + k * dx, ytop + k * dy; z = 2 * (n_show - k)
-            axB.add_patch(Rectangle((x0 + 0.02, y0 - 0.02), fw, fh, fc="0.2", ec="none", alpha=0.16, zorder=z))
-            axB.imshow(s_[k * 8], cmap="gray", vmin=lo, vmax=hi, extent=(x0, x0 + fw, y0, y0 + fh), zorder=z + 1, interpolation="antialiased")
-            axB.add_patch(Rectangle((x0, y0), fw, fh, fc="none", ec="white", lw=0.5, zorder=z + 1.5))
+            dim = 1.0 - 0.45 * k / (n_show - 1)                                         # frames further back are dimmer
+            axB.imshow(dim * np.clip((fr[k] - lo) / (hi - lo), 0, 1) ** 0.85, cmap="gray", vmin=0, vmax=1, extent=(x0, x0 + fw, y0, y0 + fh),
+                       zorder=z + 1, interpolation="antialiased")
+            axB.add_patch(Rectangle((x0, y0), fw, fh, fc="none", ec="0.15" if k else INK, lw=0.35 if k else 0.7, zorder=z + 1.5))
+        b0, b1 = (ox, ytop), (ox + (n_show - 1) * dx, ytop + (n_show - 1) * dy)
+        for cx, cy in ((0, fh), (fw, fh), (fw, 0)):                                     # depth edges front → back corner
+            axB.plot([b0[0] + cx, b1[0] + cx], [b0[1] + cy, b1[1] + cy], color=INK, lw=0.6, zorder=2 * n_show + 3)
         fh2 = fw * p_.shape[0] / p_.shape[1]; lo, hi = np.percentile(p_, (1, 99.5))
         axB.imshow(p_, cmap="gray", vmin=lo, vmax=hi, extent=(ox, ox + fw, 0, fh2), interpolation="antialiased")
         axB.add_patch(Rectangle((ox, 0), fw, fh2, fc="none", ec="0.5", lw=0.6))
         axB.annotate("", xy=(ox + fw / 2, fh2 + 0.04), xytext=(ox + fw / 2, ytop - 0.06),
                      arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
         xmax = ox + fw + (n_show - 1) * dx
-    axB.text(pitch * len(ACQ_TILES) - 0.3, ytop + 0.5 * fh, "…", fontsize=12, ha="left", va="center")
+    for q in range(3):                                            # "more tiles" ellipsis
+        xd = (len(ACQ_TILES) - 1) * pitch + fw + (n_show - 1) * dx + 0.1 + q * 0.11
+        axB.plot(xd, ytop + 0.5 * fh, "o", ms=3.2, color=INK, zorder=50)
+        axB.plot(xd, 0.5 * fh2, "o", ms=3.2, color=INK, zorder=50)
     axB.text(-0.06, ytop + 0.5 * (fh + (n_show - 1) * dy), "250 fps", rotation=90, ha="right", va="center", fontsize=8)
     axB.text(-0.06, fh2 / 2, "Projection", rotation=90, ha="right", va="center", fontsize=8)
-    L = 200 / PX_UM_RAW / p_.shape[1] * fw; xr = (len(ACQ_TILES) - 1) * pitch + 0.12 + L
+    L = 200 / PX_UM_RAW / p_.shape[1] * fw; xr = (len(ACQ_TILES) - 1) * pitch + 0.3 + L
     axB.plot([xr - L, xr], [0.08, 0.08], color="white", lw=2, solid_capstyle="butt")
     axB.text(xr - L / 2, 0.11, "200 µm", color="white", ha="center", va="bottom", fontsize=8)
-    axB.set_xlim(-0.2, pitch * len(ACQ_TILES) + 0.05); axB.set_ylim(-0.05, ytop + fh + (n_show - 1) * dy + 0.05); axB.set_aspect("equal")
+    axB.set_xlim(-0.2, (len(ACQ_TILES) - 1) * pitch + fw + (n_show - 1) * dx + 0.45); axB.set_ylim(-0.05, ytop + fh + (n_show - 1) * dy + 0.05); axB.set_aspect("equal")
 
     # b: registration of one tile against its neighbours (before / after)
     gR = gL[1].subgridspec(1, 2, width_ratios=[0.95, 1.2], wspace=0.08)
