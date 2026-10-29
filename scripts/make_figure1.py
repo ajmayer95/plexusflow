@@ -201,7 +201,7 @@ def stitch_panel(ax, positions, tile_dir, ds=2):
     return dict(sx=sx, sy=sy, sh=sh, dth=dth)
 
 
-def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=280.0, n_lm=3):
+def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=280.0, n_lm=3, zoom_with=None):
     """Tile 15 and its neighbours.  axF: full footprints at the stored placement (magenta = tile 15, green = neighbours,
     white = agreement), tile outlines + numbers, zoom box on the 15 | 19–20 overlap.  axZ = (rigid, affine): that zoom with
     tile 15 placed rigidly (own rotation, neighbours' scale, same centre) vs by the stored affine; stars = vessel junctions
@@ -229,13 +229,14 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
            for k, A in (("rigid", Ar), ("affine", A15))}
     rgb = lambda M, cv: np.clip(np.dstack([M * cv, G, M * cv]), 0, 1)
     # zoom: square window inside the 15 ∩ (19 ∪ 20) overlap, farthest from tile 15's centre (rigid error grows outward)
-    win = int(zoom_um / (PX_UM_RAW * ds)); ov = (m15["affine"][1] & m15["rigid"][1] & np.any([cov[t] for t in nb], axis=0)).astype(float)
+    win = int(zoom_um / (PX_UM_RAW * ds)); ov = (m15["affine"][1] & m15["rigid"][1] & (cov[zoom_with] if zoom_with in cov else np.any([cov[t] for t in nb], axis=0))).astype(float)
     I = np.pad(ov.cumsum(0).cumsum(1), ((1, 0), (1, 0))); frac = (I[win:, win:] - I[:-win, win:] - I[win:, :-win] + I[:-win, :-win]) / win ** 2
     # among windows fully in the overlap, the one where the affine raises local agreement most (and ends well aligned)
     best, zb = -9, None
+    thr = 0.98 if (frac >= 0.98).any() else 0.9 * frac.max()          # narrow overlaps: take the best-covered windows
     for r_ in range(0, frac.shape[0], max(win // 6, 1)):
         for c_ in range(0, frac.shape[1], max(win // 6, 1)):
-            if frac[r_, c_] < 0.98:
+            if frac[r_, c_] < thr:
                 continue
             g = G[r_:r_ + win, c_:c_ + win].ravel()
             ra = np.corrcoef(m15["affine"][0][r_:r_ + win, c_:c_ + win].ravel(), g)[0, 1]
@@ -307,6 +308,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tile", type=int, default=36, help="tile whose movie is shown in a")
     ap.add_argument("--reg-tile", type=int, default=36, help="tile shown registered against its neighbours in b")
+    ap.add_argument("--zoom-with", type=int, default=None, help="zoom on the overlap with this neighbour")
     ap.add_argument("--out-name", default="fig1")
     args = ap.parse_args()
     plos_style.apply()
@@ -354,7 +356,7 @@ def main():
     gR = gL[1].subgridspec(1, 2, width_ratios=[1.35, 0.62], wspace=0.05)
     gZ = gR[1].subgridspec(2, 1, hspace=0.06)
     axF = fig.add_subplot(gR[0]); axZ = [fig.add_subplot(gZ[0]), fig.add_subplot(gZ[1])]
-    registration_panel(axF, axZ, P / "stitch" / "positions.json", P / "tiles" / "maxmed", tile=args.reg_tile)
+    registration_panel(axF, axZ, P / "stitch" / "positions.json", P / "tiles" / "maxmed", tile=args.reg_tile, zoom_with=args.zoom_with)
     letter(axF, "b", 0.0, 1.02)
 
     # c: whole-organ mosaic + acquisition order
