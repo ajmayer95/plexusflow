@@ -300,16 +300,8 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
         axF.text(w[1, :-1].mean() - x0, w[0, :-1].mean() - y0, str(t), color="white", fontsize=8, fontweight="bold", ha="center", va="center",
                  bbox=dict(fc="black", ec="none", alpha=0.55, boxstyle="round,pad=0.15"))
     wr, wa = Ar @ CORNERS(H15, W15), A15 @ CORNERS(H15, W15)
-    # what the affine adds beyond the best rigid: displacement of a 5 × 5 grid of tile points (true scale)
-    EXAG = 5.0                                                   # arrows drawn 5× their true length (state in caption)
-    for gy in np.linspace(0.15, 0.85, 4) * H15:
-        for gx in np.linspace(0.15, 0.85, 4) * W15:
-            a_, b_ = (Ar @ [gy, gx, 1])[:2] - [y0, x0], (A15 @ [gy, gx, 1])[:2] - [y0, x0]
-            b_ = a_ + EXAG * (b_ - a_)
-            axF.add_patch(FancyArrowPatch(a_[::-1], b_[::-1], arrowstyle="-|>", mutation_scale=7, color="#ffe14d", lw=1.1, zorder=7,
-                                          shrinkA=0, shrinkB=0))
-            axF.plot(a_[1], a_[0], "o", ms=1.8, color="#ffe14d", zorder=7)
-    axF.text(0.98, 0.03, f"rigid → affine (×{EXAG:.0f})", transform=axF.transAxes, color="#ffe14d", fontsize=8, ha="right", va="bottom")
+    # best-rigid footprint dashed, affine footprint (solid magenta outline above)
+    axF.plot(wr[1] - x0, wr[0] - y0, color="white", lw=0.9, ls=(0, (3, 2)), zorder=6)
     disp = np.hypot(*(wa[:2, :4] - wr[:2, :4])) * ds * PX_UM_RAW
     print(f"[fig1] tile {tile} corner displacement rigid → affine: {np.round(disp, 0)} µm")
     for k, zb in enumerate(zbs):
