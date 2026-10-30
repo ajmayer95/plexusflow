@@ -1,7 +1,8 @@
 """Figure 3 — measuring flow in one vessel of one tile (PLOS, 7.5 in wide).
 
 The representative vessel (edge 75489–75638) in its own tile (36), the tile of Fig 2c:
-  a  time-mean optical flow (arrows) around the vessel; centreline from the mapped graph; cross-sections (kept: white)
+  a  one representative raw frame (closest to the movie median) with the time-mean optical flow (arrows, centred on their
+     sample points), the centreline from the mapped graph and every 5th cross-section
   b  axial-speed profiles across five cross-sections and their Poiseuille fits v(ρ) = v_CL (1 − ρ²/R_s²)
   c  per-cross-section mean flux Q̄_s = (π/2) R_s² v_CL,s along the vessel (radius R_s on the right axis); the vessel's mean
      flow is their median (Kloosterman et al. 2014)
@@ -36,6 +37,7 @@ HCOL = ["#1f4e8c", "#d95f02", "#7570b3"]
 KW = dict(dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="median_band", median_lo=0.5, median_hi=1.5, R_slice_lo=0.5,
           R_slice_hi=2.0, min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0)
 UMS = PX_SIZE_UM / FRAME_DT_S
+RAW_DIR = Path("/Users/amayer/Desktop/ImageData/21Somites/emb1")
 HALO = [pe.withStroke(linewidth=1.6, foreground="black")]
 
 
@@ -62,7 +64,12 @@ def main():
     letter = lambda ax, l, dx=-0.18, dy=1.08: ax.text(dx, dy, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
 
     # a: vessel in its tile, time-mean OF, cross-sections
-    img = tifffile.imread(str(P / "tiles" / "maxmed" / f"vid{TILE}_maxmed.tif")).astype(float); img = img.mean(-1) if img.ndim == 3 else img
+    # a single representative raw frame (full resolution, same grid as the tile projection): the frame closest to the
+    # movie's per-pixel median, among every 10th frame
+    raw = sorted((RAW_DIR / f"10x 250fps loc{TILE}_C001H001S0001").glob(f"10x 250fps loc{TILE}_C001H001S0001*.tif"))
+    stack = np.stack([tifffile.imread(str(f_)).astype(float) for f_ in raw[::10]]); med = np.median(stack, axis=0)
+    k_rep = int(np.argmin([np.mean((fr_ - med) ** 2) for fr_ in stack])); img = stack[k_rep]; img = img.mean(-1) if img.ndim == 3 else img
+    print(f"[fig3] a: raw frame {10 * k_rep + 1} of {len(raw)} (closest to the movie median)")
     _, tan, nrm = _centerline_geometry(cl); clt = cl + off
     lo, hi = clt.min(0) - 2.2 * R0, clt.max(0) + 2.2 * R0; ctr = (lo + hi) / 2; h_ = (hi - lo).max() / 2
     axA = fig.add_subplot(gT[0])
@@ -71,7 +78,7 @@ def main():
     for i in range(0, len(cl), 5):                            # every 5th cross-section drawn (all are fitted)
         a_, b_ = clt[i] - R0 * 1.3 * nrm[i], clt[i] + R0 * 1.3 * nrm[i]
         axA.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white" if valid[i] else "0.6", lw=0.5, alpha=0.75, zorder=2)
-    axA.plot(clt[:, 1], clt[:, 0], color=VCOL, lw=1.0, zorder=5)
+    axA.plot(clt[:, 1], clt[:, 0], color=VCOL, lw=1.0, zorder=5)            # arrows (zorder 6) centred on their sample points
     Pq, Uq = [], []
     for i in range(5, len(cl) - 4, 12):                       # sparse along the vessel, dense across it (shows the profile)
         for s_ in np.linspace(-0.75, 0.75, 5):
@@ -82,7 +89,7 @@ def main():
     gap = np.median(np.hypot(*np.diff(cl, axis=0).T)) * 12      # px between arrow rows along the vessel
     k_ = 0.85 * gap / np.percentile(np.linalg.norm(Uq, axis=1), 98)   # longest arrow fits between rows: lengths show the profile
     axA.quiver(Pq[:, 1], Pq[:, 0], Uq[:, 0] * k_, Uq[:, 1] * k_, angles="xy", scale_units="xy", scale=1, color="white", edgecolor=INK,
-               linewidth=0.3, width=0.009, headwidth=3.5, headlength=3.5, headaxislength=3, zorder=4)
+               linewidth=0.3, width=0.009, headwidth=3.5, headlength=3.5, headaxislength=3, pivot="middle", zorder=6)
     sel = np.flatnonzero(valid); picks = sel[np.linspace(2, len(sel) - 3, 5).astype(int)]
     for j, i in enumerate(picks):
         p = clt[i] + R0 * 1.9 * nrm[i]
