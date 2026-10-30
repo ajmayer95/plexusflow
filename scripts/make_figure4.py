@@ -3,9 +3,9 @@
 Two tiles; in each, two vessels A and B recorded in the same movie (one clock), joined by a flow-directed path:
   a  outbound from the dorsal aorta (tile 27): relative pulsatility |H1|/Q̄ decreases A → B
   b  return toward the vitelline vein (tile 13): relative pulsatility increases A → B
-Top: the tile (max − median motion projection) with A, B and the connecting path; centre: whole-organ locator.
+Top: the tile (max − median motion projection) with A, B and the flow-directed path between them.
 Bottom: one cardiac cycle of each vessel from its 3-harmonic fit, (Q(φ) − Q̄)/Q̄, in its own mean-flow direction
-(no cross-tile synchronisation or model involved).  Annotations: |H1|/Q̄ for A and B, and the fundamental's phase
+(no cross-tile synchronisation or model involved).  Annotations: relative first-harmonic amplitude |H1|/|Q̄| for A and B, and the fundamental's phase
 difference Δφ1 = arg H1,B − arg H1,A.
 
 Ported from PerTileFlow/scripts/make_figure5_two_regions.py (old Fig 5); harmonic bars dropped.
@@ -110,8 +110,8 @@ def main():
     shapes = {i: tile_video_shape(cfg, i) for i in cfg.discover_raw_tile_ids()}
     geom = load_tile_geometry(cfg, video_shapes={k: v for k, v in shapes.items() if v is not None})
 
-    fig = plt.figure(figsize=(7.5, 5.1))
-    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 0.62], hspace=0.16, wspace=0.42, left=0.08, right=0.985, top=0.93, bottom=0.08)
+    fig = plt.figure(figsize=(5.2, 4.6))                     # text-column width; no organ locator
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 0.72], hspace=0.2, wspace=0.34, left=0.11, right=0.985, top=0.93, bottom=0.09)
     ph = np.linspace(0, 1, 400); axs = []
     for j, (R, letter) in enumerate(zip(REGIONS, "ab")):
         t = R["tile"]; f0 = float(tf0[t])
@@ -130,13 +130,9 @@ def main():
         axW.set_ylabel(r"$(Q - \bar Q)\,/\,\bar Q$", labelpad=1)
         if j == 0:
             axW.legend(loc="upper right", frameon=False, borderaxespad=0.1, handlelength=1.4)
-        axW.text(0.02, 0.03, rf"PI$_1$: {pi['A']:.2f} → {pi['B']:.2f}" + "\n" + rf"$\Delta\varphi_1$ = {dphi:+.0f}°", transform=axW.transAxes,
+        axW.text(0.02, 0.03, rf"$|H_1|/|\bar Q|$: {pi['A']:.2f} → {pi['B']:.2f}" + "\n" + rf"$\Delta\varphi_1$ = {dphi:+.0f}°", transform=axW.transAxes,
                  ha="left", va="bottom", fontsize=8, linespacing=1.3)
-        print(f"[fig4] tile {t}: PI1 A {pi['A']:.2f} → B {pi['B']:.2f} (×{pi['B'] / pi['A']:.2f}), Δφ1 {dphi:+.0f}°")
-    # small organ locator, centred between the two tile panels
-    fig.canvas.draw(); p0, p1 = axs[0].get_position(), axs[1].get_position()
-    w_ = (p1.x0 - p0.x1) * 0.95; axL = fig.add_axes([(p0.x1 + p1.x0) / 2 - w_ / 2, p0.y0 + 0.3 * p0.height, w_, 0.45 * p0.height])
-    locator(axL, geom)
+        print(f"[fig4] tile {t}: |H1|/Q̄ A {pi['A']:.2f} → B {pi['B']:.2f} (×{pi['B'] / pi['A']:.2f}), Δφ1 {dphi:+.0f}°")
     plos_style.save(fig, _paths.FIGURES / "fig4" / "fig4")
 
 
