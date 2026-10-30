@@ -68,9 +68,9 @@ def main():
     axA = fig.add_subplot(gT[0])
     axA.imshow(img, cmap="gray", vmin=np.percentile(img, 1), vmax=np.percentile(img, 99.7), interpolation="nearest")
     axA.set_xlim(ctr[1] - h_, ctr[1] + h_); axA.set_ylim(ctr[0] + h_, ctr[0] - h_); axA.set_xticks([]); axA.set_yticks([])
-    for i in range(len(cl)):
+    for i in range(0, len(cl), 5):                            # every 5th cross-section drawn (all are fitted)
         a_, b_ = clt[i] - R0 * 1.3 * nrm[i], clt[i] + R0 * 1.3 * nrm[i]
-        axA.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white" if valid[i] else "0.6", lw=0.4, alpha=0.8, zorder=2)
+        axA.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white" if valid[i] else "0.6", lw=0.5, alpha=0.75, zorder=2)
     axA.plot(clt[:, 1], clt[:, 0], color=VCOL, lw=1.0, zorder=5)
     Pq, Uq = [], []
     for i in range(3, len(cl) - 2, 10):                       # sparse along the vessel, dense across it (shows the profile)
