@@ -71,16 +71,18 @@ def main():
     for i in range(len(cl)):
         a_, b_ = clt[i] - R0 * 1.3 * nrm[i], clt[i] + R0 * 1.3 * nrm[i]
         axA.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white" if valid[i] else "0.6", lw=0.4, alpha=0.8, zorder=2)
-    axA.plot(clt[:, 1], clt[:, 0], color=VCOL, lw=1.2, zorder=3)
+    axA.plot(clt[:, 1], clt[:, 0], color=VCOL, lw=1.0, zorder=5)
     Pq, Uq = [], []
-    for i in range(1, len(cl), 4):
-        for s_ in (-0.45, 0.45):
+    for i in range(3, len(cl) - 2, 10):                       # sparse along the vessel, dense across it (shows the profile)
+        for s_ in np.linspace(-0.8, 0.8, 7):
             p = cl[i] + s_ * R0 * nrm[i]; r_, c_ = int(round(p[0])), int(round(p[1]))
             if 0 <= r_ < vf.shape[0] and 0 <= c_ < vf.shape[1]:
                 Pq.append(p + off); Uq.append(vf[r_, c_])
-    Pq, Uq = np.array(Pq), np.array(Uq); k_ = 0.8 * R0 / np.percentile(np.linalg.norm(Uq, axis=1), 90)
+    Pq, Uq = np.array(Pq), np.array(Uq)
+    gap = np.median(np.hypot(*np.diff(cl, axis=0).T)) * 10      # px between arrow rows along the vessel
+    k_ = 0.85 * gap / np.percentile(np.linalg.norm(Uq, axis=1), 98)   # longest arrow fits between rows: lengths show the profile
     axA.quiver(Pq[:, 1], Pq[:, 0], Uq[:, 0] * k_, Uq[:, 1] * k_, angles="xy", scale_units="xy", scale=1, color="white", edgecolor=INK,
-               linewidth=0.3, width=0.012, headwidth=3.5, headlength=3.5, headaxislength=3, zorder=4)
+               linewidth=0.3, width=0.009, headwidth=3.5, headlength=3.5, headaxislength=3, zorder=4)
     sel = np.flatnonzero(valid); picks = sel[np.linspace(2, len(sel) - 3, 5).astype(int)]
     for j, i in enumerate(picks):
         p = clt[i] + R0 * 1.9 * nrm[i]
