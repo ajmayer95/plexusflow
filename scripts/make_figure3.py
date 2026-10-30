@@ -127,6 +127,22 @@ def main():
     axD.spines[["top", "right"]].set_visible(False)
     axD.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, borderaxespad=0.2, handlelength=1.5)
     letter(axD, "d", -0.1)
+    # inset: the per-frame fit — one parabola of FIXED (segmented) radius whose amplitude v_CL(t) follows the waveform.
+    # Reconstructed from stored quantities only: v_CL(t)/<v_CL> = Q(t)/Q̄ (no raw points shown).
+    R_seg = float(G.edges[EDGE].get("radius") or np.nan) * PX_SIZE_UM
+    beat = (t >= 1.0 / f0) & (t < 2.0 / f0); tb = t[beat]; Qm = model(tb)
+    t_lo, t_hi = tb[np.argmin(Qm)], tb[np.argmax(Qm)]
+    for tt_, col in ((t_lo, "#7fb3d5"), (t_hi, "#c0392b")):
+        axD.plot(tt_, model(np.array([tt_]))[0], "o", ms=4, color=col, mec="white", mew=0.5, zorder=6)
+    yl = axD.get_ylim(); axD.set_ylim(yl[0], yl[0] + 1.65 * (yl[1] - yl[0])); axD.set_yticks([0.2, 0.4, 0.6])     # headroom: inset + equation above the trace
+    axI = axD.inset_axes([0.66, 0.66, 0.22, 0.3]); rr = np.linspace(-R_seg, R_seg, 100)
+    for tt_, col in ((t_lo, "#7fb3d5"), (t_hi, "#c0392b")):
+        axI.plot(rr, model(np.array([tt_]))[0] / a0 * (1 - (rr / R_seg) ** 2), color=col, lw=1.1)
+    axI.set_xlim(-1.1 * R_seg, 1.1 * R_seg); axI.set_ylim(0, None); axI.set_xticks([-round(R_seg), 0, round(R_seg)])
+    axI.set_xlabel("ρ (µm)", labelpad=0); axI.set_ylabel(r"$v/\langle v_{\rm CL}\rangle$", labelpad=1)
+    axI.tick_params(length=2, pad=1); axI.spines[["top", "right"]].set_visible(False)
+    axD.text(0.03, 0.9, r"$Q(t) = \bar Q\,v_{\rm CL}(t)\,/\,\langle v_{\rm CL}\rangle$", transform=axD.transAxes, ha="left", va="top", fontsize=8,
+             bbox=dict(fc="white", ec="none", alpha=0.85, pad=1))
 
     # e: folded beats + harmonic components
     gE = gB[1].subgridspec(2, 1, height_ratios=[1.6, 1.0], hspace=0.32)
