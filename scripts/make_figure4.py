@@ -30,8 +30,8 @@ from plexusflow.analyze.geometry import load_tile_geometry, tile_video_shape, gr
 from plexusflow.reconcile.harmonics import phasors, FS
 import plos_style
 
-REGIONS = [dict(tile=27, A=(55662, 56258), B=(58221, 58246), title="Outbound from dorsal aorta", col="#00838f"),
-           dict(tile=13, A=(57078, 57118), B=(53492, 53651), title="Return toward vitelline vein", col="#7b3f99")]
+REGIONS = [dict(tile=27, A=(74413, 74421), B=(75268, 75296), title="Arterial-side path", col="#00838f"),
+           dict(tile=13, A=(57078, 57118), B=(53492, 53651), title="Venous-return path", col="#7b3f99")]
 COL_A, COL_B, PATHCOL, INK = "#2166ac", "#d73027", "#f0ad00", "#1a1a1a"
 PX_UM = 1.7
 
@@ -70,12 +70,12 @@ def tile_panel(ax, G, cfg, geom, R):
         p = np.asarray(G.edges[look[(a, b)]]["path"], float); ap = np.array([G.nodes[a]["x"], G.nodes[a]["y"]])
         if np.linalg.norm(p[-1] - ap) < np.linalg.norm(p[0] - ap):
             p = p[::-1]
-        rc = graph_to_tile_batch(p, geom, t) / ds; pts.append(rc); ax.plot(rc[:, 1], rc[:, 0], color=PATHCOL, lw=1.6, zorder=3)
+        rc = graph_to_tile_batch(p, geom, t) / ds; pts.append(rc); ax.plot(rc[:, 1], rc[:, 0], color=PATHCOL, lw=2.2, zorder=3)
     if pts:
         allp = np.vstack(pts)
-        for f in (0.35, 0.7):                                     # two direction arrowheads along the path
+        for f in (0.3, 0.55, 0.8):                                     # two direction arrowheads along the path
             i = int(f * (len(allp) - 1)); a_, b_ = allp[max(i - 2, 0)], allp[min(i + 2, len(allp) - 1)]
-            ax.add_patch(FancyArrowPatch(a_[::-1], b_[::-1], arrowstyle="-|>", mutation_scale=9, color=PATHCOL, lw=0, zorder=4))
+            ax.add_patch(FancyArrowPatch(a_[::-1], b_[::-1], arrowstyle="-|>", mutation_scale=11, color=INK, lw=0.8, zorder=4))
     for e, col, nm in ((R["A"], COL_A, "A"), (R["B"], COL_B, "B")):
         rc = graph_to_tile_batch(np.asarray(G.edges[e]["path"], float), geom, t) / ds
         ax.plot(rc[:, 1], rc[:, 0], color="white", lw=3.4, zorder=5); ax.plot(rc[:, 1], rc[:, 0], color=col, lw=2.0, zorder=6)
@@ -110,31 +110,33 @@ def main():
     shapes = {i: tile_video_shape(cfg, i) for i in cfg.discover_raw_tile_ids()}
     geom = load_tile_geometry(cfg, video_shapes={k: v for k, v in shapes.items() if v is not None})
 
-    fig = plt.figure(figsize=(7.5, 5.0))
-    gs = fig.add_gridspec(2, 3, width_ratios=[1.0, 0.55, 1.0], height_ratios=[1.0, 0.82], hspace=0.3, wspace=0.12,
-                          left=0.08, right=0.985, top=0.9, bottom=0.09)
-    axL = fig.add_subplot(gs[0, 1]); locator(axL, geom)
-    ph = np.linspace(0, 1, 400)
+    fig = plt.figure(figsize=(7.5, 5.1))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 0.62], hspace=0.16, wspace=0.42, left=0.08, right=0.985, top=0.93, bottom=0.08)
+    ph = np.linspace(0, 1, 400); axs = []
     for j, (R, letter) in enumerate(zip(REGIONS, "ab")):
-        col = 0 if j == 0 else 2; t = R["tile"]; f0 = float(tf0[t])
-        axT = fig.add_subplot(gs[0, col]); tile_panel(axT, G, cfg, geom, R)
-        axT.set_title(R["title"], fontsize=9, color=R["col"], pad=3)
-        axT.text(-0.04, 1.1, letter, transform=axT.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
-        axW = fig.add_subplot(gs[1, col]); pi, h1 = {}, {}
+        t = R["tile"]; f0 = float(tf0[t])
+        axT = fig.add_subplot(gs[0, j]); tile_panel(axT, G, cfg, geom, R); axs.append(axT)
+        axT.set_title(R["title"], fontsize=9, pad=3)
+        axT.text(-0.08, 1.03, letter, transform=axT.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
+        axW = fig.add_subplot(gs[1, j]); pi, h1 = {}, {}
         for e, c_, nm in ((R["A"], COL_A, "A"), (R["B"], COL_B, "B")):
             qb, H = flow_frame(meas(G, e, t), f0)
             w = sum((H[k - 1] * np.exp(2j * np.pi * k * ph)).real for k in (1, 2, 3)) / qb
             axW.plot(ph, w, color=c_, lw=1.4, label=f"Vessel {nm}")
             pi[nm] = abs(H[0]) / qb; h1[nm] = H[0]
         dphi = np.degrees(np.angle(h1["B"] * np.conj(h1["A"])))
-        axW.axhline(0, color="0.8", lw=0.5); axW.set_xlim(0, 1); axW.set_xticks([0, 0.5, 1])
+        axW.axhline(0, color="0.8", lw=0.5); axW.set_xlim(0, 1); axW.set_xticks([0, 0.5, 1]); axW.set_ylim(-1.25, 0.75)
         axW.set_xlabel("Cardiac phase", labelpad=1); axW.spines[["top", "right"]].set_visible(False)
+        axW.set_ylabel(r"$(Q - \bar Q)\,/\,\bar Q$", labelpad=1)
         if j == 0:
-            axW.set_ylabel(r"$(Q - \bar Q)\,/\,\bar Q$", labelpad=1)
-        axW.legend(loc="upper right", frameon=False, borderaxespad=0.1, handlelength=1.4)
-        axW.text(0.02, 0.03, rf"$|H_1|/\bar Q$:  {pi['A']:.2f} → {pi['B']:.2f}" + "\n" + rf"$\Delta\varphi_1$ = {dphi:+.0f}°", transform=axW.transAxes,
+            axW.legend(loc="upper right", frameon=False, borderaxespad=0.1, handlelength=1.4)
+        axW.text(0.02, 0.03, rf"PI$_1$: {pi['A']:.2f} → {pi['B']:.2f}" + "\n" + rf"$\Delta\varphi_1$ = {dphi:+.0f}°", transform=axW.transAxes,
                  ha="left", va="bottom", fontsize=8, linespacing=1.3)
-        print(f"[fig4] tile {t}: |H1|/Q̄ A {pi['A']:.2f} → B {pi['B']:.2f} (×{pi['B'] / pi['A']:.2f}), Δφ1 {dphi:+.0f}°")
+        print(f"[fig4] tile {t}: PI1 A {pi['A']:.2f} → B {pi['B']:.2f} (×{pi['B'] / pi['A']:.2f}), Δφ1 {dphi:+.0f}°")
+    # small organ locator, centred between the two tile panels
+    fig.canvas.draw(); p0, p1 = axs[0].get_position(), axs[1].get_position()
+    w_ = (p1.x0 - p0.x1) * 0.95; axL = fig.add_axes([(p0.x1 + p1.x0) / 2 - w_ / 2, p0.y0 + 0.3 * p0.height, w_, 0.45 * p0.height])
+    locator(axL, geom)
     plos_style.save(fig, _paths.FIGURES / "fig4" / "fig4")
 
 
