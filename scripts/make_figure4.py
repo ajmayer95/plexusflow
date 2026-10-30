@@ -1,117 +1,140 @@
-"""Figure 4 — the pulsatile flux of one vessel and how it is summarised (PLOS, 7.5 in wide).
+"""Figure 4 — pulsatility changes between vessels recorded simultaneously (PLOS, 7.5 in wide).
 
-  a  Q(t) of the representative vessel (edge 75489–75638, tile 36; Figs 3c–e): the ridge Poiseuille trace scaled to the
-     vessel's Kloosterman mean, 250 fps, with its harmonic model Q̂(t) = Q̄ + Σ_k Re(H_k e^{2πik f0 t}), k = 1..3
-  b  its power spectrum: peaks at the tile heart rate f0 and its multiples above a broadband floor
-  c  every recorded beat folded on the cardiac phase (grey) against the model, and the model split into the
-     fundamental, 2nd and 3rd harmonics
-  d  harmonic coherence ρ (variance explained by the three harmonics) of every Kloosterman-valid measurement; the dashed
-     line is the detection level of the fundamental (F test, p = 0.01, at the median trace length); this vessel marked
+Two tiles; in each, two vessels A and B recorded in the same movie (one clock), joined by a flow-directed path:
+  a  outbound from the dorsal aorta (tile 27): relative pulsatility |H1|/Q̄ decreases A → B
+  b  return toward the vitelline vein (tile 13): relative pulsatility increases A → B
+Top: the tile (max − median motion projection) with A, B and the connecting path; centre: whole-organ locator.
+Bottom: one cardiac cycle of each vessel from its 3-harmonic fit, (Q(φ) − Q̄)/Q̄, in its own mean-flow direction
+(no cross-tile synchronisation or model involved).  Annotations: |H1|/Q̄ for A and B, and the fundamental's phase
+difference Δφ1 = arg H1,B − arg H1,A.
 
-Inputs: the canonical graph (measurements_piv Q_t, tile_f0_piv).  Writes figures/fig4/fig4.{png,pdf,tif}.
+Ported from PerTileFlow/scripts/make_figure5_two_regions.py (old Fig 5); harmonic bars dropped.
+Writes figures/fig4/fig4.{png,pdf,tif}.
 """
 from __future__ import annotations
-import sys, argparse
+import sys
 from pathlib import Path
 
 import numpy as np
+import networkx as nx
+import tifffile
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scipy.signal import periodogram
-from scipy.optimize import brentq
+from matplotlib.patches import FancyArrowPatch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src")); sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plexusflow.paths as _paths
-from plexusflow.reconcile.harmonics import phasors, coherence, FS
-from plexusflow.ac.field import detect_p
+from plexusflow.config import StageConfig
+from plexusflow.analyze.geometry import load_tile_geometry, tile_video_shape, graph_to_tile_batch
+from plexusflow.reconcile.harmonics import phasors, FS
 import plos_style
 
-EDGE, TILE = (75489, 75638), 36
-INK, MEAS, MODEL = "#1a1a1a", "#2ca02c", "#1f4e8c"
-HCOL = ["#1f4e8c", "#d95f02", "#7570b3"]
-HNAME = ["fundamental", "2nd harmonic", "3rd harmonic"]
+REGIONS = [dict(tile=27, A=(55662, 56258), B=(58221, 58246), title="Outbound from dorsal aorta", col="#00838f"),
+           dict(tile=13, A=(57078, 57118), B=(53492, 53651), title="Return toward vitelline vein", col="#7b3f99")]
+COL_A, COL_B, PATHCOL, INK = "#2166ac", "#d73027", "#f0ad00", "#1a1a1a"
+PX_UM = 1.7
+
+
+def meas(G, e, tile):
+    return next(m for m in G.edges[e]["measurements_piv"] if int(m["tile_id"]) == tile)
+
+
+def flow_frame(m, f0):
+    """Q̄ > 0 and harmonics in the vessel's own mean-flow direction (DC sign flipped first)."""
+    q = np.asarray(m["Q_t"], float); a0, H = phasors(q, f0); s = np.sign(a0) or 1.0
+    return abs(a0), H * s
+
+
+def tile_panel(ax, G, cfg, geom, R):
+    t = R["tile"]; ds = float(cfg.videos_realtime_spatial_ds)
+    v = tifffile.imread(str(next(Path(cfg.videos_realtime_dir).glob(f"*loc{t}_realtime.tif")))).astype(np.float32)
+    med = np.median(v, 0); mot = np.clip(v.max(0) - med, 0, None); img = mot if mot.std() > med.std() else med
+    lo, hi = np.percentile(img, (1, 99)); ax.imshow(np.clip((img - lo) / max(hi - lo, 1e-6), 0, 1) ** 0.65, cmap="gray", vmin=0, vmax=1)
+    # flow-directed path A → B among this tile's measured vessels
+    D = nx.DiGraph(); U = nx.Graph(); look = {}
+    for u, w, d in G.edges(data=True):
+        for m in d.get("measurements_piv") or []:
+            if int(m.get("tile_id", -1)) == t:
+                D.add_edge(int(m["flow_from"]), int(m["flow_to"])); U.add_edge(u, w)
+                look[(int(m["flow_from"]), int(m["flow_to"]))] = (u, w); look[(u, w)] = look[(w, u)] = (u, w)
+    mA, mB = meas(G, R["A"], t), meas(G, R["B"], t)
+    try:
+        nodes = nx.shortest_path(D, int(mA["flow_to"]), int(mB["flow_from"]))
+    except (nx.NetworkXNoPath, nx.NodeNotFound):                  # no flow-consistent route: shortest graph route
+        cands = [nx.shortest_path(U, a, b) for a in R["A"] for b in R["B"] if nx.has_path(U, a, b)]
+        nodes = min(cands, key=len) if cands else []
+        print(f"[fig4] tile {t}: no flow-directed A→B route; showing the shortest graph route ({len(nodes)} nodes)")
+    pts = []
+    for a, b in zip(nodes[:-1], nodes[1:]):
+        p = np.asarray(G.edges[look[(a, b)]]["path"], float); ap = np.array([G.nodes[a]["x"], G.nodes[a]["y"]])
+        if np.linalg.norm(p[-1] - ap) < np.linalg.norm(p[0] - ap):
+            p = p[::-1]
+        rc = graph_to_tile_batch(p, geom, t) / ds; pts.append(rc); ax.plot(rc[:, 1], rc[:, 0], color=PATHCOL, lw=1.6, zorder=3)
+    if pts:
+        allp = np.vstack(pts)
+        for f in (0.35, 0.7):                                     # two direction arrowheads along the path
+            i = int(f * (len(allp) - 1)); a_, b_ = allp[max(i - 2, 0)], allp[min(i + 2, len(allp) - 1)]
+            ax.add_patch(FancyArrowPatch(a_[::-1], b_[::-1], arrowstyle="-|>", mutation_scale=9, color=PATHCOL, lw=0, zorder=4))
+    for e, col, nm in ((R["A"], COL_A, "A"), (R["B"], COL_B, "B")):
+        rc = graph_to_tile_batch(np.asarray(G.edges[e]["path"], float), geom, t) / ds
+        ax.plot(rc[:, 1], rc[:, 0], color="white", lw=3.4, zorder=5); ax.plot(rc[:, 1], rc[:, 0], color=col, lw=2.0, zorder=6)
+        mid = rc[len(rc) // 2]
+        ax.annotate(nm, (mid[1], mid[0]), xytext=(7, -9 if mid[0] < 0.4 * img.shape[0] else 7), textcoords="offset points", color=col,
+                    fontsize=9, fontweight="bold", bbox=dict(fc="white", ec="none", alpha=0.9, pad=1), zorder=7)
+    L = 200 / (PX_UM * ds); W, H = img.shape[1], img.shape[0]
+    ax.plot([0.95 * W - L, 0.95 * W], [0.11 * H] * 2, color="white", lw=2, solid_capstyle="butt")
+    ax.text(0.95 * W, 0.08 * H, "200 µm", color="white", ha="right", va="bottom", fontsize=8)
+    ax.set_xlim(0, W); ax.set_ylim(H, 0); ax.set_xticks([]); ax.set_yticks([])
+    for s in ax.spines.values():
+        s.set_color(R["col"]); s.set_linewidth(1.5)
+
+
+def locator(ax, geom):
+    mos = tifffile.imread(str(_paths.STAGE / "fuse" / "organ_fusion.tif")).astype(float)
+    from scipy import ndimage as ndi
+    out = ~ndi.binary_fill_holes(mos > 0)
+    ax.imshow(np.ma.masked_where(out, mos), cmap="gray", vmin=np.percentile(mos[~out], 1), vmax=np.percentile(mos[~out], 99.5))
+    for R in REGIONS:
+        tg = geom.tiles[R["tile"]]; Hr, Wr = tg.video_shape
+        fp = np.array([[0, 0, 1], [0, Wr, 1], [Hr, Wr, 1], [Hr, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
+        fp = fp[:, :2] / geom.downsample - [geom.y0, geom.x0]
+        ax.plot(fp[:, 1], fp[:, 0], color=R["col"], lw=1.4)
+    ys, xs = np.nonzero(~out); ax.set_xlim(xs.min() - 30, xs.max() + 30); ax.set_ylim(ys.max() + 30, ys.min() - 30)
+    ax.set_aspect("equal"); ax.axis("off")
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.parse_args()
     plos_style.apply()
-    G = _paths.load_graph(); tf0 = G.graph["tile_f0_piv"]
-    m = next(x for x in G.edges[EDGE]["measurements_piv"] if x["tile_id"] == TILE)
-    q = np.asarray(m["Q_t"], float); f0 = float(tf0[TILE]); t = np.arange(len(q)) / FS
-    a0, H = phasors(q, f0); rho_v = coherence(q, f0)
-    model = lambda tt, ks=(1, 2, 3): a0 * (0 in ks) + sum((H[k - 1] * np.exp(2j * np.pi * k * f0 * tt)).real for k in ks if k > 0)
-    print(f"[fig4] vessel {EDGE} tile {TILE}: f0 {f0:.2f} Hz, Q̄ {a0:.3f} nL/s, |H| {np.round(np.abs(H), 3)}, ρ {rho_v:.3f}, {len(q)} samples")
+    P = _paths.STAGE; G = _paths.load_graph(); tf0 = G.graph["tile_f0_piv"]; cfg = StageConfig.load(P)
+    shapes = {i: tile_video_shape(cfg, i) for i in cfg.discover_raw_tile_ids()}
+    geom = load_tile_geometry(cfg, video_shapes={k: v for k, v in shapes.items() if v is not None})
 
-    # organ-wide coherence of every Kloosterman-valid measurement (at its tile's f0)
-    rhos, ns = [], []
-    for u, v, d in G.edges(data=True):
-        for x in d.get("measurements_piv") or []:
-            if (x.get("quality") or {}).get("kl_ok") and x.get("Q_t") is not None and tf0.get(x["tile_id"]):
-                qq = np.asarray(x["Q_t"], float); r = coherence(qq, float(tf0[x["tile_id"]]))
-                if np.isfinite(r):
-                    rhos.append(r); ns.append(int(np.isfinite(qq).sum()))
-    rhos, ns = np.array(rhos), np.array(ns); n_med = int(np.median(ns))
-    rho_det = brentq(lambda r: detect_p(r, n_med) - 0.01, 1e-6, 0.5)
-    det = np.mean([detect_p(r, n) < 0.01 for r, n in zip(rhos, ns)])
-    print(f"[fig4] {len(rhos)} measurements; median ρ {np.median(rhos):.2f}; detection ρ* {rho_det:.3f} (n {n_med}); detected {100 * det:.0f}%")
-
-    fig = plt.figure(figsize=(7.5, 4.9))
-    gs = fig.add_gridspec(2, 2, width_ratios=[1.75, 1.0], height_ratios=[1.0, 1.1], hspace=0.55, wspace=0.3,
-                          left=0.085, right=0.985, top=0.93, bottom=0.1)
-    letter = lambda ax, l, dx=-0.1: ax.text(dx, 1.04, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
-
-    # a: trace + model
-    axA = fig.add_subplot(gs[0, 0])
-    axA.plot(t, q, color=MEAS, lw=0.7, label="measured Q(t)")
-    tt = np.linspace(0, t[-1], 2000); axA.plot(tt, model(tt, (0, 1, 2, 3)), color=MODEL, lw=1.2, label="harmonic model (k ≤ 3)")
-    axA.axhline(a0, color="0.4", lw=0.7, ls="--"); axA.text(0.012 * t[-1], a0, f"Q̄ = {a0:.2f} nL/s", va="bottom", ha="left", fontsize=8, color="0.3", bbox=dict(fc="white", ec="none", pad=0.5, alpha=0.8))
-    axA.set_xlim(0, t[-1]); axA.set_xlabel("time (s)", labelpad=1); axA.set_ylabel("flux Q (nL/s)", labelpad=1)
-    axA.spines[["top", "right"]].set_visible(False)
-    axA.legend(loc="upper left", frameon=False, ncol=2, borderaxespad=0, bbox_to_anchor=(0.0, 1.16), handlelength=1.6, columnspacing=1.0)
-    letter(axA, "a", -0.08)
-
-    # b: spectrum
-    axB = fig.add_subplot(gs[0, 1])
-    fr, pw = periodogram(q - a0, fs=FS, window="hann", detrend=False)
-    axB.semilogy(fr, pw, color=INK, lw=0.7)
-    for k in (1, 2, 3):
-        axB.axvline(k * f0, color=HCOL[k - 1], lw=0.8, ls=":", zorder=0)
-        axB.text(k * f0, pw.max() * 3, f"{k}f$_0$", color=HCOL[k - 1], ha="center", va="bottom", fontsize=8)
-    axB.set_xlim(0, 15); axB.set_xticks([0, 5, 10, 15]); axB.set_ylim(pw[fr > 0.3].min() * 0.5, pw.max() * 12)
-    axB.set_xlabel("frequency (Hz)", labelpad=1); axB.set_ylabel("power (nL²/s²/Hz)", labelpad=1)
-    axB.spines[["top", "right"]].set_visible(False); letter(axB, "b", -0.3)
-
-    # c: beats folded on phase + harmonic components
-    gc = gs[1, 0].subgridspec(1, 2, width_ratios=[1, 1], wspace=0.35)
-    axC = fig.add_subplot(gc[0]); ph = (t * f0) % 1.0; cyc = np.floor(t * f0).astype(int)
-    for c in np.unique(cyc):
-        s_ = cyc == c
-        if s_.sum() > 0.9 * FS / f0:
-            axC.plot(ph[s_], q[s_], color="0.6", lw=0.5, alpha=0.8)
-    pp = np.linspace(0, 1, 300); axC.plot(pp, model(pp / f0, (0, 1, 2, 3)), color=MODEL, lw=1.4)
-    axC.set_xlim(0, 1); axC.set_xlabel("cardiac phase (cycles)", labelpad=1); axC.set_ylabel("flux Q (nL/s)", labelpad=1)
-    axC.spines[["top", "right"]].set_visible(False)
-    axC.text(0.98, 0.97, f"{len([c for c in np.unique(cyc) if (cyc == c).sum() > 0.9 * FS / f0])} beats", transform=axC.transAxes, ha="right", va="top", fontsize=8, color="0.35")
-    letter(axC, "c", -0.32)
-    axK = fig.add_subplot(gc[1])
-    for k in (1, 2, 3):
-        axK.plot(pp, model(pp / f0, (k,)), color=HCOL[k - 1], lw=1.1, label=f"{HNAME[k - 1]}  {abs(H[k - 1]):.2f}")
-    axK.axhline(0, color="0.8", lw=0.5); axK.set_xlim(0, 1); axK.set_xlabel("cardiac phase (cycles)", labelpad=1)
-    axK.set_ylabel("component (nL/s)", labelpad=1); axK.spines[["top", "right"]].set_visible(False)
-    axK.legend(loc="upper center", frameon=False, borderaxespad=0, bbox_to_anchor=(0.5, 1.3), handlelength=1.2, labelspacing=0.15)
-
-    # d: organ-wide coherence
-    axD = fig.add_subplot(gs[1, 1])
-    bins = np.logspace(-3, 0, 40); axD.hist(np.clip(rhos, 1e-3, 1), bins=bins, color="#9ab7d3", edgecolor="white", lw=0.3)
-    axD.set_xscale("log"); axD.axvline(rho_det, color=INK, lw=0.8, ls="--")
-    axD.text(rho_det * 1.25, axD.get_ylim()[1] * 0.95, f"detection\nlevel", ha="left", va="top", fontsize=8, linespacing=1.0)
-    axD.annotate("this vessel", (rho_v, 0), xytext=(rho_v * 0.75, axD.get_ylim()[1] * 0.55), ha="right", fontsize=8, color=MEAS,
-                 arrowprops=dict(arrowstyle="-|>", color=MEAS, lw=0.8, mutation_scale=7))
-    axD.set_xlabel("harmonic coherence ρ", labelpad=1); axD.set_ylabel("measurements", labelpad=1)
-    axD.text(0.02, 0.97, f"n = {len(rhos):,}\n{100 * det:.0f}% detected", transform=axD.transAxes, ha="left", va="top", fontsize=8)
-    axD.spines[["top", "right"]].set_visible(False); letter(axD, "d", -0.3)
+    fig = plt.figure(figsize=(7.5, 5.0))
+    gs = fig.add_gridspec(2, 3, width_ratios=[1.0, 0.55, 1.0], height_ratios=[1.0, 0.82], hspace=0.3, wspace=0.12,
+                          left=0.08, right=0.985, top=0.9, bottom=0.09)
+    axL = fig.add_subplot(gs[0, 1]); locator(axL, geom)
+    ph = np.linspace(0, 1, 400)
+    for j, (R, letter) in enumerate(zip(REGIONS, "ab")):
+        col = 0 if j == 0 else 2; t = R["tile"]; f0 = float(tf0[t])
+        axT = fig.add_subplot(gs[0, col]); tile_panel(axT, G, cfg, geom, R)
+        axT.set_title(R["title"], fontsize=9, color=R["col"], pad=3)
+        axT.text(-0.04, 1.1, letter, transform=axT.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
+        axW = fig.add_subplot(gs[1, col]); pi, h1 = {}, {}
+        for e, c_, nm in ((R["A"], COL_A, "A"), (R["B"], COL_B, "B")):
+            qb, H = flow_frame(meas(G, e, t), f0)
+            w = sum((H[k - 1] * np.exp(2j * np.pi * k * ph)).real for k in (1, 2, 3)) / qb
+            axW.plot(ph, w, color=c_, lw=1.4, label=f"Vessel {nm}")
+            pi[nm] = abs(H[0]) / qb; h1[nm] = H[0]
+        dphi = np.degrees(np.angle(h1["B"] * np.conj(h1["A"])))
+        axW.axhline(0, color="0.8", lw=0.5); axW.set_xlim(0, 1); axW.set_xticks([0, 0.5, 1])
+        axW.set_xlabel("Cardiac phase", labelpad=1); axW.spines[["top", "right"]].set_visible(False)
+        if j == 0:
+            axW.set_ylabel(r"$(Q - \bar Q)\,/\,\bar Q$", labelpad=1)
+        axW.legend(loc="upper right", frameon=False, borderaxespad=0.1, handlelength=1.4)
+        axW.text(0.02, 0.03, rf"$|H_1|/\bar Q$:  {pi['A']:.2f} → {pi['B']:.2f}" + "\n" + rf"$\Delta\varphi_1$ = {dphi:+.0f}°", transform=axW.transAxes,
+                 ha="left", va="bottom", fontsize=8, linespacing=1.3)
+        print(f"[fig4] tile {t}: |H1|/Q̄ A {pi['A']:.2f} → B {pi['B']:.2f} (×{pi['B'] / pi['A']:.2f}), Δφ1 {dphi:+.0f}°")
     plos_style.save(fig, _paths.FIGURES / "fig4" / "fig4")
 
 
