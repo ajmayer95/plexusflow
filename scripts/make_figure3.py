@@ -56,10 +56,10 @@ def main():
           f"|H| {np.round(np.abs(H), 3)}")
 
     fig = plt.figure(figsize=(7.5, 5.3))
-    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.85], hspace=0.42, left=0.07, right=0.94, top=0.95, bottom=0.08)
+    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.85], hspace=0.42, left=0.07, right=0.985, top=0.93, bottom=0.08)
     gT = gs[0].subgridspec(1, 3, width_ratios=[1.0, 1.05, 1.15], wspace=0.42)
     gB = gs[1].subgridspec(1, 2, width_ratios=[1.75, 1.0], wspace=0.28)
-    letter = lambda ax, l, dx=-0.18, dy=1.03: ax.text(dx, dy, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
+    letter = lambda ax, l, dx=-0.18, dy=1.08: ax.text(dx, dy, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
 
     # a: vessel in its tile, time-mean OF, cross-sections
     img = tifffile.imread(str(P / "tiles" / "maxmed" / f"vid{TILE}_maxmed.tif")).astype(float); img = img.mean(-1) if img.ndim == 3 else img
@@ -73,13 +73,13 @@ def main():
         axA.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white" if valid[i] else "0.6", lw=0.5, alpha=0.75, zorder=2)
     axA.plot(clt[:, 1], clt[:, 0], color=VCOL, lw=1.0, zorder=5)
     Pq, Uq = [], []
-    for i in range(3, len(cl) - 2, 10):                       # sparse along the vessel, dense across it (shows the profile)
-        for s_ in np.linspace(-0.8, 0.8, 7):
+    for i in range(5, len(cl) - 4, 12):                       # sparse along the vessel, dense across it (shows the profile)
+        for s_ in np.linspace(-0.75, 0.75, 5):
             p = cl[i] + s_ * R0 * nrm[i]; r_, c_ = int(round(p[0])), int(round(p[1]))
             if 0 <= r_ < vf.shape[0] and 0 <= c_ < vf.shape[1]:
                 Pq.append(p + off); Uq.append(vf[r_, c_])
     Pq, Uq = np.array(Pq), np.array(Uq)
-    gap = np.median(np.hypot(*np.diff(cl, axis=0).T)) * 10      # px between arrow rows along the vessel
+    gap = np.median(np.hypot(*np.diff(cl, axis=0).T)) * 12      # px between arrow rows along the vessel
     k_ = 0.85 * gap / np.percentile(np.linalg.norm(Uq, axis=1), 98)   # longest arrow fits between rows: lengths show the profile
     axA.quiver(Pq[:, 1], Pq[:, 0], Uq[:, 0] * k_, Uq[:, 1] * k_, angles="xy", scale_units="xy", scale=1, color="white", edgecolor=INK,
                linewidth=0.3, width=0.009, headwidth=3.5, headlength=3.5, headaxislength=3, zorder=4)
@@ -90,7 +90,7 @@ def main():
     x0, x1 = axA.get_xlim(); y0, y1 = axA.get_ylim(); L = 20 / PX_SIZE_UM; xe = x0 + 0.95 * (x1 - x0); ya = y0 + 0.07 * (y1 - y0)
     axA.plot([xe - L, xe], [ya, ya], color="white", lw=2, solid_capstyle="butt", path_effects=HALO)
     axA.annotate("20 µm", (xe, ya), xytext=(0, 2), textcoords="offset points", ha="right", va="bottom", color="white", fontsize=8, path_effects=HALO)
-    axA.set_title("Time-mean optical flow", fontsize=8, pad=2); letter(axA, "a", -0.04)
+    letter(axA, "a", -0.04)
 
     # b: profiles + Poiseuille fits
     axB = fig.add_subplot(gT[1]); rho = np.asarray(res["rho"], float) * PX_SIZE_UM; prof = np.asarray(res["per_slice_profiles"], float) * UMS
@@ -102,10 +102,10 @@ def main():
         rr = np.linspace(-Rs[i], Rs[i], 100)
         axB.plot(rr + offs[i], vcl[i] * (1 - (rr / Rs[i]) ** 2) + y0_, color="#2b70b4", lw=1.0, zorder=2)
         axB.axhline(y0_, color="0.88", lw=0.4, zorder=1)
-        axB.text(rho.max() * 1.02, y0_ + 0.12 * step, str(j + 1), fontsize=8, fontweight="bold", va="bottom")
-    axB.set_xlabel("Radial position (µm)", labelpad=1); axB.set_ylabel("Axial speed (µm/s)", labelpad=1)
+        axB.text(rho.max() * 1.02, y0_ + 0.08 * step, str(j + 1), fontsize=8, color="0.35", va="bottom")
+    axB.set_xlabel("Radial position (µm)", labelpad=1); axB.set_ylabel("Axial speed (µm/s, offset)", labelpad=1)
     axB.set_yticks([0, step]); axB.set_yticklabels(["0", f"{step:.0f}"]); axB.spines[["top", "right"]].set_visible(False)
-    axB.plot([], [], "o", ms=2.5, color=INK, label="Optical flow"); axB.plot([], [], color="#2b70b4", lw=1.0, label="Poiseuille fit")
+    axB.plot([], [], "o", ms=2.5, color=INK, label="Optical flow"); axB.plot([], [], color="#2b70b4", lw=1.0, label="Parabolic fit")
     axB.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, borderaxespad=0.2, handlelength=1.2, columnspacing=0.8)
     letter(axB, "b", -0.3)
 
@@ -113,20 +113,16 @@ def main():
     axC = fig.add_subplot(gT[2])
     axC.plot(arc[valid], Qs[valid], "o-", ms=2.0, lw=0.6, color=INK, zorder=3, label="Cross-sections")
     axC.axhline(Qbar, color=VCOL, lw=1.0, ls="--", zorder=2, label=f"Median {Qbar:.2f} nL/s")
-    axC.set_ylim(0, np.nanmax(Qs[valid]) * 1.35); axC.set_xlabel("Distance along vessel (µm)", labelpad=1)
-    axC.set_ylabel("Mean flux (nL/s)", labelpad=1); axC.spines[["top"]].set_visible(False)
-    axC2 = axC.twinx(); axC2.plot(arc[valid], Rs[valid], color="0.55", lw=0.8, ls=":")
-    axC2.set_ylabel("Radius (µm)", color="0.45", labelpad=2); axC2.tick_params(colors="0.45"); axC2.set_ylim(0, np.nanmax(Rs[valid]) * 1.6)
-    axC2.spines[["top"]].set_visible(False)
-    axC.plot([], [], color="0.55", lw=0.8, ls=":", label="Radius")
+    axC.set_ylim(0, np.nanmax(Qs[valid]) * 1.3); axC.set_xlabel("Distance along vessel (µm)", labelpad=1)
+    axC.set_ylabel("Mean flux (nL/s)", labelpad=1); axC.spines[["top", "right"]].set_visible(False)
     axC.legend(loc="lower center", frameon=False, borderaxespad=0.2, handlelength=1.5, labelspacing=0.2)
     letter(axC, "c", -0.3)
 
     # d: Q(t) + harmonic model
     axD = fig.add_subplot(gB[0])
-    axD.plot(t, q, color=MEAS, lw=0.7, label="Measured")
+    axD.plot(t, q, color=MEAS, lw=0.5, label="Measured")
     tt = np.linspace(0, t[-1], 2000); axD.plot(tt, model(tt), color=MODEL, lw=1.1, label="Harmonic model")
-    axD.axhline(a0, color="0.45", lw=0.6, ls="--")
+    axD.axhline(a0, color="0.7", lw=0.5, ls="--")
     axD.set_xlim(0, t[-1]); axD.set_xlabel("Time (s)", labelpad=1); axD.set_ylabel("Flux (nL/s)", labelpad=1)
     axD.spines[["top", "right"]].set_visible(False)
     axD.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, borderaxespad=0.2, handlelength=1.5)
@@ -135,13 +131,14 @@ def main():
     # e: folded beats + harmonic components
     gE = gB[1].subgridspec(2, 1, height_ratios=[1.6, 1.0], hspace=0.32)
     axE = fig.add_subplot(gE[0]); ph = (t * f0) % 1.0; cyc = np.floor(t * f0).astype(int); nb = 0
-    for c in np.unique(cyc):
-        s_ = cyc == c
-        if s_.sum() > 0.9 * FS / f0:
-            axE.plot(ph[s_], q[s_], color="0.65", lw=0.5); nb += 1
+    full = [c for c in np.unique(cyc) if (cyc == c).sum() > 0.9 * FS / f0]; nb = len(full)
+    bins_ = np.linspace(0, 1, 41); sel_ = np.isin(cyc, full); idx_ = np.clip(np.digitize(ph[sel_], bins_) - 1, 0, 39)
+    mu = np.array([q[sel_][idx_ == b].mean() for b in range(40)]); sd = np.array([q[sel_][idx_ == b].std() for b in range(40)])
+    bc_ = 0.5 * (bins_[:-1] + bins_[1:])
+    axE.fill_between(bc_, mu - sd, mu + sd, color="0.85", lw=0); axE.plot(bc_, mu, "o", ms=1.8, color=MEAS, mew=0)
     pp = np.linspace(0, 1, 300); axE.plot(pp, model(pp / f0), color=MODEL, lw=1.3)
     axE.set_xlim(0, 1); axE.tick_params(labelbottom=False); axE.set_ylabel("Flux (nL/s)", labelpad=1); axE.spines[["top", "right"]].set_visible(False)
-    axE.text(0.03, 0.04, f"{nb} beats", transform=axE.transAxes, ha="left", va="bottom", fontsize=8, color="0.35")
+    axE.text(0.03, 0.04, f"mean ± s.d., {nb} beats", transform=axE.transAxes, ha="left", va="bottom", fontsize=8, color="0.35")
     letter(axE, "e", -0.3, 1.05)
     axK = fig.add_subplot(gE[1], sharex=axE)
     for k, nm in zip((1, 2, 3), ("Fundamental", "2nd", "3rd")):
