@@ -151,8 +151,8 @@ def main():
     ys, xs = np.nonzero(organ); pad = 40
     ox0, ox1, oy0, oy1 = max(xs.min() - pad, 0), min(xs.max() + pad, Wm), max(ys.min() - pad, 0), min(ys.max() + pad, Hm)
 
-    fig = plt.figure(figsize=(7.5, 4.3))
-    gs = fig.add_gridspec(2, 4, height_ratios=[1.0, 0.92], hspace=0.14, wspace=0.08, left=0.03, right=0.925, top=0.95, bottom=0.03)
+    fig = plt.figure(figsize=(5.2, 3.9))                       # PLOS text-column width
+    gs = fig.add_gridspec(2, 4, height_ratios=[0.72, 1.0], hspace=0.12, wspace=0.1, left=0.03, right=0.9, top=0.93, bottom=0.02)
     letter = lambda ax, l, dx=0.0: ax.text(dx, 1.03, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
     def frame(ax, on):
         ax.set_xticks([]); ax.set_yticks([])
@@ -175,23 +175,19 @@ def main():
         else:
             ax.add_collection(LineCollection(segs, colors=rcol(rad_um), linewidths=lw_of(rad_um) * 0.45))
             ax.plot(tcx, tcy, color="#e0a800", lw=1.0, zorder=6)
-        ax.add_patch(Rectangle((cx0, cy0), cx1 - cx0, cy1 - cy0, fill=False, ec=INK, lw=0.9, zorder=5))
         ax.set_xlim(ox0, ox1); ax.set_ylim(oy1, oy0); ax.set_aspect("equal"); frame(ax, False)
         ax.set_title(ttl, fontsize=8, pad=2)
         if k < 3:
             ax.annotate("", xy=(1.06, 0.5), xytext=(1.0, 0.5), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.7, color=INK, mutation_scale=6))
-    letter(top[0], "a")
+    letter(top[0], "a", -0.12)
+    fig.canvas.draw(); pG = top[3].get_position()                      # compact radius colorbar right of the whole-organ graph
+    cax = fig.add_axes([pG.x1 + 0.012, pG.y0 + 0.12 * pG.height, 0.014, 0.76 * pG.height])
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax, ticks=[10, 20, 30, 40])
+    cb.set_label("Radius (µm)", labelpad=1); cb.outline.set_linewidth(0.5)
     scalebar(top[0], 1000, PX_UM, x_frac=0.22, y_frac=1.0, color=INK, halo=False)
 
     # bottom row: b graph close-up (radius bars) · c mosaic space around the tile · A⁻¹ · d the tile's own frame
-    gB = gs[1, :].subgridspec(1, 4, width_ratios=[0.62, 1.2, 0.24, 1.1], wspace=0.07)
-    axb = fig.add_subplot(gB[0])
-    axb.imshow(np.where(sub(mask), 0.9, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
-    cl = [segs[i] - [cx0, cy0] for i in inside]
-    axb.add_collection(LineCollection(radius_ticks(cl, rad_um[inside] / PX_UM), colors="0.3", linewidths=0.5))
-    axb.add_collection(LineCollection(cl, colors=rcol(rad_um[inside]), linewidths=1.1))
-    axb.set_xlim(0, cx1 - cx0); axb.set_ylim(cy1 - cy0, 0); axb.set_aspect("equal"); frame(axb, True)
-    scalebar(axb, 100, PX_UM, color=INK, halo=False)                  # unlettered vectorization detail (box in a)
+    gB = gs[1, :].subgridspec(1, 4, width_ratios=[0.0001, 1.2, 0.2, 1.1], wspace=0.05)
 
     # c: mosaic space — fused image + graph around tile 36, its footprint as placed (rotated, scaled)
     axm = fig.add_subplot(gB[1]); m_ = 0.18 * max(Ht, Wt) / ds
