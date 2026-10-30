@@ -179,7 +179,7 @@ def main():
         ax.set_xlim(ox0, ox1); ax.set_ylim(oy1, oy0); ax.set_aspect("equal"); frame(ax, False)
         ax.set_title(ttl, fontsize=8, pad=2)
         if k < 3:
-            ax.annotate("", xy=(1.07, 0.5), xytext=(0.99, 0.5), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
+            ax.annotate("", xy=(1.06, 0.5), xytext=(1.0, 0.5), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.7, color=INK, mutation_scale=6))
     letter(top[0], "a")
     scalebar(top[0], 1000, PX_UM, x_frac=0.22, y_frac=1.0, color=INK, halo=False)
 
@@ -188,8 +188,8 @@ def main():
     axb = fig.add_subplot(gB[0])
     axb.imshow(np.where(sub(mask), 0.9, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
     cl = [segs[i] - [cx0, cy0] for i in inside]
-    axb.add_collection(LineCollection(radius_ticks(cl, rad_um[inside] / PX_UM), colors="0.45", linewidths=0.5))
-    axb.add_collection(LineCollection(cl, colors="#c2185b", linewidths=0.9))
+    axb.add_collection(LineCollection(radius_ticks(cl, rad_um[inside] / PX_UM), colors="0.3", linewidths=0.5))
+    axb.add_collection(LineCollection(cl, colors=rcol(rad_um[inside]), linewidths=1.1))
     axb.set_xlim(0, cx1 - cx0); axb.set_ylim(cy1 - cy0, 0); axb.set_aspect("equal"); frame(axb, True)
     letter(axb, "b"); scalebar(axb, 200, PX_UM, color=INK, halo=False)
 
@@ -200,11 +200,11 @@ def main():
     reg = mm[r0:r1, c0:c1]
     axm.imshow(reg, cmap="gray", vmin=np.percentile(reg, 1), vmax=np.percentile(reg, 99.5), extent=(c0, c1, r1, r0), interpolation="antialiased")
     near = [k for k, s_ in enumerate(segs) if ((s_[:, 0] > c0) & (s_[:, 0] < c1) & (s_[:, 1] > r0) & (s_[:, 1] < r1)).any()]
-    axm.add_collection(LineCollection([segs[k] for k in near], colors=rcol(rad_um[near]), linewidths=lw_of(rad_um[near]) * 0.9, alpha=0.95))
+    axm.add_collection(LineCollection([segs[k] for k in near], colors="white", linewidths=0.35, alpha=0.45))
     axm.plot(tcx, tcy, color="#ffd23f", lw=1.2, zorder=6)
     axm.plot(tcx[0], tcy[0], "o", ms=4, color="#ffd23f", zorder=7)                         # tile origin corner, to read the rotation
     axm.set_xlim(c0, c1); axm.set_ylim(r1, r0); axm.set_aspect("equal"); frame(axm, False)
-    axm.set_title("Mosaic space", fontsize=8, pad=2); letter(axm, "c"); scalebar(axm, 200, PX_UM)
+    axm.set_title("Mosaic frame", fontsize=8, pad=2); letter(axm, "c"); scalebar(axm, 200, PX_UM)
 
     # arrow: the inverse of the tile's registration
     axa = fig.add_subplot(gB[2]); axa.axis("off"); axa.set_xlim(0, 1); axa.set_ylim(0, 1)
@@ -220,11 +220,17 @@ def main():
         if ((rc[:, 0] > -5) & (rc[:, 0] < Ht + 5) & (rc[:, 1] > -5) & (rc[:, 1] < Wt + 5)).any():
             loc.append(rc[:, ::-1]); lr.append(r)
     lr = np.array(lr)
-    axC.add_collection(LineCollection(loc, colors=rcol(lr), linewidths=lw_of(lr) * 1.2, alpha=0.95))
-    axC.plot([0, Wt, Wt, 0, 0], [0, 0, Ht, Ht, 0], color="#ffd23f", lw=2.4, zorder=6, clip_on=False)
+    from plexusflow.analyze.geometry import warp_mask_to_tile
+    if getattr(tg, "video_shape", None) is None or tuple(tg.video_shape) != (Ht, Wt):
+        tg.video_shape = (Ht, Wt)
+    mt = warp_mask_to_tile(mask, geom, args.tile)                      # the tile-level vessel mask used for flow
+    ov = np.zeros((Ht, Wt, 4)); ov[mt] = (0.0, 0.78, 1.0, 0.35)
+    axC.imshow(ov, interpolation="nearest", zorder=3)
+    axC.add_collection(LineCollection(loc, colors="#ffd23f", linewidths=0.5, alpha=0.95, zorder=4))
+    axC.plot([0, Wt, Wt, 0, 0], [0, 0, Ht, Ht, 0], color="#ffd23f", lw=0.9, zorder=6, clip_on=False)
     axC.plot(0, 0, "o", ms=4, color="#ffd23f", zorder=7, clip_on=False)
     axC.set_xlim(0, Wt); axC.set_ylim(Ht, 0); axC.set_aspect("equal"); frame(axC, False)
-    axC.set_title(f"Tile {args.tile} frame", fontsize=8, pad=2); letter(axC, "d"); scalebar(axC, 100, PX_UM)
+    axC.set_title("Tile frame", fontsize=8, pad=2); letter(axC, "d"); scalebar(axC, 100, PX_UM)
     print(f"[fig2] tile {args.tile}: {len(loc)} edges mapped into its frame")
     plos_style.save(fig, _paths.FIGURES / "fig2" / args.out_name)
 
