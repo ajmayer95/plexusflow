@@ -78,7 +78,7 @@ def main():
     for i in range(0, len(cl), 5):                            # every 5th cross-section drawn (all are fitted)
         a_, b_ = clt[i] - R0 * 1.3 * nrm[i], clt[i] + R0 * 1.3 * nrm[i]
         axA.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white" if valid[i] else "0.6", lw=0.5, alpha=0.75, zorder=2)
-    axA.plot(clt[:, 1], clt[:, 0], color=VCOL, lw=1.0, zorder=5)            # arrows (zorder 6) centred on their sample points
+    axA.plot(clt[:, 1], clt[:, 0], color=VCOL, lw=2.6, alpha=0.6, solid_capstyle="round", zorder=5)   # wide translucent centreline under the arrows
     Pq, Uq = [], []
     for i in range(5, len(cl) - 4, 12):                       # sparse along the vessel, dense across it (shows the profile)
         for s_ in np.linspace(-0.75, 0.75, 5):
