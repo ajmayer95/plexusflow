@@ -1,4 +1,4 @@
-"""Effective vascular domain.  a: anatomical schematic (figures/fig5/anatomy.png, from Alex's anatomy.svg).  b: the domain on the mosaic: retained (carved) network vs excluded vessels, and the effective boundaries —
+"""Figure 5 — effective vascular domain.  a: anatomical schematic (figures/fig5/anatomy.png, from Alex's anatomy.svg).  b: the domain on the mosaic: retained (carved) network vs excluded vessels, and the effective boundaries —
 arterial cut vertices grouped as A1 (left) / A2 (right) and the vitelline-vein outlets V1 / V2.
 
 Writes figures/fig_domain/fig_domain.{png,pdf,tif}.
@@ -92,7 +92,7 @@ def main():
     cv = np.array([Pv[:, 0].mean(), (Pv[:, 1].min() + Pda[:, 1].max()) / 2 + 40]); half_v = 0.62 * (Pda[:, 1].max() + 120 - Pv[:, 1].min())
     axB = fig.add_subplot(gs[1, 1]); crop(axB, ca, half_a, True, False, 200, show_exc=False); axB.set_title("Effective arterial boundaries", fontsize=9, pad=3)
     axC = fig.add_subplot(gs[0, 1]); crop(axC, cv, half_v, False, True, 100, show_exc=False); draw_da(axC); axC.set_title("True boundaries", fontsize=9, pad=3)
-    plos_style.save(fig, _paths.FIGURES / "fig_domain" / "fig_domain")
+    plos_style.save(fig, _paths.FIGURES / "fig5" / "fig5")
 
 
 if __name__ == "__main__":
