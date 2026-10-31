@@ -113,16 +113,14 @@ def main():
         for n in G.graph['boundary']['V']:
             ax.plot(*nxy[n], 's', color='#2b35a8', ms=4, mec='white', mew=0.5, zorder=6)
 
-    def field(ax, Q, faint_unimaged):
-        cols, lws = [], []
-        for c in range(len(idx)):
-            col = cAB(nAB(min(max(abs(Q[c]), vmin), vmax)))
-            if faint_unimaged and not imaged[c]:
-                col = (*col[:3], 0.35); lws.append(0.2)
-            else:
-                lws.append(0.45)
-            cols.append(col)
-        ax.add_collection(LineCollection(segs, colors=cols, linewidths=lws, zorder=3))
+    resolved = np.abs(Qp) > 2 * D['sigma']                     # direction determined: |Q'| > 2σ_e (Fig 6 noise model)
+    print(f"[fig7] direction resolved for {resolved.sum()} of {len(Qp)} vessels (|Q'| > 2σ)")
+    def field(ax, Q, mask_unresolved):
+        und = ~resolved if mask_unresolved else np.zeros(len(Q), bool)
+        ax.add_collection(LineCollection([segs[c] for c in np.flatnonzero(und)], colors=[(0.6, 0.6, 0.6, 0.5)], linewidths=0.25, zorder=2))
+        keep = np.flatnonzero(~und)
+        ax.add_collection(LineCollection([segs[c] for c in keep], colors=[cAB(nAB(min(max(abs(Q[c]), vmin), vmax))) for c in keep],
+                                         linewidths=0.5, zorder=3))
 
     fig = plt.figure(figsize=(7.5, 6.6), facecolor='white')
     gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.8], hspace=0.04, left=0.06, right=0.9, top=0.97, bottom=0.08)
@@ -134,6 +132,8 @@ def main():
     # a
     axA = fig.add_subplot(gT[0]); bg(axA); field(axA, Qp, True); markers(axA)
     letter(axA, 'a', "Reference field Q′")
+    axA.plot([], [], color=(0.6, 0.6, 0.6), lw=1.2, label='direction undetermined (|Q′| < 2σ)')
+    axA.legend(loc='lower right', fontsize=8, frameon=False, borderaxespad=0, handlelength=1.4)
 
     # b
     axB = fig.add_subplot(gT[1]); bg(axB); field(axB, Qs, False); markers(axB)
@@ -157,8 +157,10 @@ def main():
     axC = fig.add_subplot(gBm[0]); bg(axC)
     m = imaged & (np.abs(Qp) > 1e-12) & (np.abs(Qs) > 1e-12)
     E = np.log10(np.abs(Qs) / np.maximum(np.abs(Qp), 1e-12))
-    axC.add_collection(LineCollection([segs[c] for c in np.flatnonzero(m)],
-                                      colors=[cC(nC(E[c])) for c in np.flatnonzero(m)], linewidths=0.5, zorder=3))
+    mr = m & (np.abs(Qp) > 2 * D['sigma'])
+    axC.add_collection(LineCollection([segs[c] for c in np.flatnonzero(~mr)], colors=[(0.6, 0.6, 0.6, 0.5)], linewidths=0.25, zorder=2))
+    axC.add_collection(LineCollection([segs[c] for c in np.flatnonzero(mr)],
+                                      colors=[cC(nC(E[c])) for c in np.flatnonzero(mr)], linewidths=0.5, zorder=3))
     q_floor = max(vmin * 3, 3e-3)
     # noise level = each vessel's calibrated measurement uncertainty σ_e = sqrt((c_e y_e)² + σ0²) (Fig 6b); a direction is only
     # judged where the reconciled flow is clearly above it, |Q'| > 2σ_e
