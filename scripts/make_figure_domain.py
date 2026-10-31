@@ -23,7 +23,7 @@ import matplotlib.patheffects as pe
 HALO = [pe.withStroke(linewidth=2.2, foreground="white")]
 
 PX_UM = 1.7
-RET, EXC, ART, VEN, INK = "#e3342f", "#9a9a9a", "#d7191c", "#1f5fd1", "#1a1a1a"
+RET, EXC, ART, VEN, INK = "#5f5f5f", "#9a9a9a", "#d40000", "#2b35a8", "#1a1a1a"
 
 
 def main():
@@ -50,7 +50,7 @@ def main():
         if show_A:
             for s_, lab, dx in (("L", "A$_1$", -1), ("R", "A$_2$", 1)):
                 P_ = np.array([xy(n) for n, s in zip(inj, side) if s == s_])
-                ax.scatter(*P_.T, s=16, color="white", edgecolor=ART, linewidth=0.9, zorder=5)
+                ax.scatter(*P_.T, s=18, color=ART, edgecolor="white", linewidth=0.5, zorder=5)
                 ax.text(P_[:, 0].min() - 25 if dx < 0 else P_[:, 0].max() + 25, P_[:, 1].mean(), lab, ha="right" if dx < 0 else "left", va="center",
                         fontsize=9, fontweight="bold", color=ART, path_effects=HALO, zorder=6)
         if show_V:
@@ -65,11 +65,11 @@ def main():
         ax.plot([xe - L, xe], [ya, ya], color="white", lw=2, solid_capstyle="butt", path_effects=[pe.withStroke(linewidth=3.2, foreground="black")])
         ax.text(xe, ya - 0.04 * half, f"{sb_um:g} µm", color="white", ha="right", va="bottom", fontsize=8, path_effects=[pe.withStroke(linewidth=1.6, foreground="black")])
     da_stubs = [seg(e) for n in dom["DA"] for e in G.edges(n) if e not in keep and e[::-1] not in keep]
-    def draw_da(ax):                                               # the dorsal aorta (excluded arterial stubs), in arterial red
-        ax.add_collection(LineCollection(da_stubs, colors=ART, linewidths=3.0, alpha=0.95, zorder=4, capstyle="round"))
-        top = min(da_stubs, key=lambda q: q[:, 1].min()); i = int(np.argmin(top[:, 1]))
-        ax.text(np.mean([q[:, 0].mean() for q in da_stubs]), min(q[:, 1].min() for q in da_stubs) + 60, "DA", ha="center", va="top",
-                fontsize=9, fontweight="bold", color=ART, path_effects=HALO, zorder=6)
+    def draw_da(ax):                                               # dorsal-aorta termini (the DA nodes), labelled in arterial red
+        for n, lab, dx in zip(dom["DA"], ("DA$_1$", "DA$_2$"), (-1, 1)):
+            p_ = xy(n); ax.scatter(*p_, s=40, color=ART, edgecolor="white", linewidth=0.6, zorder=6)
+            ax.text(p_[0] + dx * 22, p_[1] + 10, lab, ha="right" if dx < 0 else "left", va="center", fontsize=9, fontweight="bold",
+                    color=ART, path_effects=HALO, zorder=6)
     fig = plt.figure(figsize=(7.5, 3.2))
     gs = fig.add_gridspec(1, 3, width_ratios=[0.8, 1.0, 1.0], wspace=0.06, left=0.01, right=0.99, top=0.9, bottom=0.02)
     axA = fig.add_subplot(gs[0]); sch = _paths.FIGURES / "fig5" / "anatomy.png"     # Alex's drawing (figures/fig5/anatomy.svg)
@@ -79,7 +79,7 @@ def main():
     half_a = 0.62 * max(np.ptp(Pa[:, 0]), np.ptp(Pa[:, 1])); ca = Pa.mean(0)
     Pda = np.array([xy(n) for n in dom["DA"]])                       # dorsal-aorta stub ends sit just below the veins
     cv = np.array([Pv[:, 0].mean(), (Pv[:, 1].min() + Pda[:, 1].max()) / 2 + 40]); half_v = 0.62 * (Pda[:, 1].max() + 120 - Pv[:, 1].min())
-    axB = fig.add_subplot(gs[1]); crop(axB, ca, half_a, True, False, 200); axB.set_title("Arterial cuts", fontsize=9, pad=3)
+    axB = fig.add_subplot(gs[1]); crop(axB, ca, half_a, True, False, 200, show_exc=False); axB.set_title("Arterial cuts", fontsize=9, pad=3)
     axC = fig.add_subplot(gs[2]); crop(axC, cv, half_v, False, True, 100, show_exc=False, net_col=VEN); draw_da(axC); axC.set_title("Venous outlets", fontsize=9, pad=3)
     for ax_, l_ in ((axA, "a"), (axB, "b"), (axC, "c")):
         ax_.text(0.0, 1.03, l_, transform=ax_.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
