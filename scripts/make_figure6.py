@@ -32,7 +32,7 @@ ST = P.STAGE
 _ap = argparse.ArgumentParser(description="Fig 6v5 (DC reliability and reconciliation)")
 _ap.add_argument("--variant", choices=("two", "three"), default="three", help="two maps + junction chart, or three (adds the correction map)")
 VARIANT = _ap.parse_args().variant
-OUT = P.FIGURES / "fig6v5" / f"fig6v5_{VARIANT}"
+OUT = P.FIGURES / "fig6" / ("fig6" if VARIANT == "three" else f"fig6_{VARIANT}")
 REL_LIM, Z_S, Q_FLOOR_PCT = 0.5, 5.0, 10          # correction colour range ±50 %; junction-circle area per z²
 TILE, NODE = 30, 28329
 HIGH, LOW = (28304, 28329), (35992, 36030)
@@ -187,8 +187,7 @@ def main():
     for k, (e, lab, colr) in enumerate(((HIGH, "High quality", COL[0]), (LOW, "Low quality", LOWCOL))):
         ax = fig.add_subplot(ga[k]); x = ex[e]; draw_measurement(ax, img, x["ki"], colr, x["valid"])
         n = len(x["valid"])
-        ax.text(0.5, -0.05, lab, transform=ax.transAxes, ha="center", va="top", fontsize=8, fontweight="bold", color=INK)
-        ax.text(0.5, -0.15, f"c = {x['c']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=8, fontweight="bold", color=colr)
+        ax.text(0.5, -0.04, f"c = {x['c']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=8, fontweight="bold", color=colr)
         if k == 0:
             ax.text(-0.02, 1.03, "a", transform=ax.transAxes, **{**head, "fontsize": 10})
             ax0 = ax
@@ -204,8 +203,6 @@ def main():
     axb.set_ylabel(r"RMS observed residual $r_j$ (nL/s)", fontsize=8); axb.tick_params(labelsize=8)
     for s_ in ("top", "right"):
         axb.spines[s_].set_visible(False)
-    axb.text(0.04, 0.96, r"$\sigma_j^2 = \Sigma_e\,(c_e\,y_e)^2 + \sigma_0^2$", transform=axb.transAxes, ha="left", va="top", fontsize=8, color=INK)
-    axb.text(0.04, 0.84, "held-out tiles", transform=axb.transAxes, ha="left", va="top", fontsize=8, color=MUTED)
     axb.text(-0.34, 1.03, "b", transform=axb.transAxes, **{**head, "fontsize": 10})
 
     # c: patch maps (same geometry & widths in every map), plus the three-vessel junction chart
@@ -272,7 +269,7 @@ def main():
         if kind == "meas":
             for n, (p, zm, _) in imb.items():
                 if np.isfinite(zm):
-                    ax.scatter(p[1], p[0], s=Z_S * min(abs(zm), 4) ** 2, facecolor="none", edgecolor="#ff6b6b", linewidth=0.5, zorder=7)
+                    ax.scatter(p[1], p[0], s=Z_S * min(abs(zm), 4) ** 2, facecolor="none", edgecolor="#c51b8a", linewidth=0.6, zorder=7)
         ax.set_title(title, fontsize=8, color=INK, pad=3)
         return ax
 
@@ -299,13 +296,12 @@ def main():
     ky = P0.y0 - 0.125
     fig.lines.append(matplotlib.lines.Line2D([P0.x0, P0.x0 + 0.025], [ky, ky], transform=fig.transFigure, color="#9a9a9a", lw=1.4, ls=(0, (1.0, 1.0))))
     fig.text(P0.x0 + 0.03, ky, "not imaged", fontsize=8, color=INK, va="center")
-    fig.add_artist(matplotlib.lines.Line2D([P0.x0 + 0.122], [ky], transform=fig.transFigure, marker="o", ms=np.sqrt(Z_S * 4), mfc="none", mec="#ff6b6b", mew=0.6, ls=""))
+    fig.add_artist(matplotlib.lines.Line2D([P0.x0 + 0.122], [ky], transform=fig.transFigure, marker="o", ms=np.sqrt(Z_S * 4), mfc="none", mec="#c51b8a", mew=0.6, ls=""))
     fig.text(P0.x0 + 0.135, ky, "junction residual |z| = 2", fontsize=8, color=INK, va="center")
 
     # correction vs reliability (all imaged vessels, network-wide), tile-30 vessels as small points
     axq = fig.add_subplot(bot[-1]); allim = im & (np.abs(Qm) > 0)
     ca, ra = ce[allim], np.abs(Qp[allim] - Qm[allim]) / np.maximum(np.abs(Qm[allim]), QF); qs = np.quantile(ca, np.linspace(0, 1, 7))
-    ti = np.array(list(rel_t)); axq.scatter(ce[ti], [abs(Qp[i] - Qm[i]) / max(abs(Qm[i]), QF) for i in ti], s=2.5, color="#b8b8b8", lw=0, zorder=1, label=f"tile {TILE}")
     xm, ym, lo_, hi_ = [], [], [], []
     for a_, b_ in zip(qs[:-1], qs[1:]):
         s_ = (ca >= a_) & (ca <= b_); xm.append(np.median(ca[s_])); v_ = ra[s_]
@@ -314,14 +310,10 @@ def main():
     axq.vlines(xm, lo_, hi_, color=INK, lw=0.8, zorder=2)
     axq.plot(xm, ym, "o-", color=INK, ms=3.5, lw=1.0, zorder=3, label="all vessels")
     log("  network: median |ΔQ|/|Q| by c sextile " + ", ".join(f"c≈{x:.2f}: {y:.2f}" for x, y in zip(xm, ym)))
-    axq.set_xlabel("c", fontsize=8, labelpad=1); axq.set_ylabel("|Q′ − y| / |y|", fontsize=8, labelpad=2)
-    axq.set_ylim(0, 1.3); axq.set_xlim(0.1, 1.5); axq.tick_params(labelsize=8)
+    axq.set_xlabel("Reliability score c", fontsize=8, labelpad=1); axq.set_ylabel("|Q′ − y| / |y|", fontsize=8, labelpad=2)
+    axq.set_ylim(0, 1.0); axq.set_xlim(0.1, 1.15); axq.tick_params(labelsize=8)
     for s_ in ("top", "right"):
         axq.spines[s_].set_visible(False)
-    axq.set_title("Correction vs. reliability", fontsize=8, color=INK, pad=3)
-    axq.legend(handles=axq.collections[:1], loc="upper right", frameon=False, fontsize=8, handletextpad=0.2, markerscale=2.0, borderaxespad=0.1)
-    axq.plot([0.04, 0.12], [0.88, 0.88], "o-", color=INK, ms=3.5, lw=1.0, transform=axq.transAxes, clip_on=False)
-    axq.text(0.15, 0.88, "all vessels", transform=axq.transAxes, fontsize=8, color=INK, va="center", ha="left")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     plos_style.save(fig, OUT)
@@ -371,7 +363,7 @@ def main():
     for s_ in ("top", "right", "left"):
         ax.spines[s_].set_visible(False)
     ax.text(-0.02, 1.02, "b", transform=ax.transAxes, fontsize=10, fontweight="bold", va="bottom")
-    so = OUT.parent / "fig6v5_S_heldout"
+    so = OUT.parent / "fig6_S_heldout"
     plos_style.save(fs, so)
     log(f"wrote {so}.png/.pdf")
 
