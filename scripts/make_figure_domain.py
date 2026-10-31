@@ -40,31 +40,41 @@ def main():
     inj = [dom["nodes"][i] for i in dom["inj"]]; side = np.asarray(dom["side"])
     print(f"[domain] retained {len(ret)} vessels, excluded {len(exc)}; arterial cuts L {np.sum(side == 'L')}, R {np.sum(side == 'R')}; V {dom['V']}")
 
-    fig = plt.figure(figsize=(7.5, 4.6))
-    gs = fig.add_gridspec(1, 2, width_ratios=[0.72, 1.0], wspace=0.04, left=0.01, right=0.99, top=0.94, bottom=0.01)
+    vmin_, vmax_ = np.percentile(mos[~out], 1), np.percentile(mos[~out], 99.5)
+    Pa = np.array([xy(n) for n in inj]); Pv = np.array([xy(n) for n in dom["V"]])
+    def crop(ax, ctr, half, show_A, show_V, sb_um):
+        ax.imshow(np.ma.masked_where(out, mos), cmap="gray", vmin=vmin_, vmax=vmax_, alpha=0.8, interpolation="antialiased")
+        ax.add_collection(LineCollection(ret, colors=RET, linewidths=0.6, alpha=0.95, zorder=2))
+        ax.add_collection(LineCollection(exc, colors=EXC, linewidths=1.8, alpha=0.95, zorder=3))
+        if show_A:
+            for s_, lab, dx in (("L", "A$_1$", -1), ("R", "A$_2$", 1)):
+                P_ = np.array([xy(n) for n, s in zip(inj, side) if s == s_])
+                ax.scatter(*P_.T, s=16, color=ART, edgecolor="white", linewidth=0.5, zorder=5)
+                ax.text(P_[:, 0].min() - 25 if dx < 0 else P_[:, 0].max() + 25, P_[:, 1].mean(), lab, ha="right" if dx < 0 else "left", va="center",
+                        fontsize=9, fontweight="bold", color=ART, path_effects=HALO, zorder=6)
+        if show_V:
+            for n, lab, dx in zip(dom["V"], ("V$_1$", "V$_2$"), (-1, 1)):
+                p_ = xy(n); ax.scatter(*p_, s=55, marker="s", color=VEN, edgecolor="white", linewidth=0.7, zorder=5)
+                ax.text(p_[0] + dx * 30, p_[1] + 30, lab, ha="right" if dx < 0 else "left", va="top", fontsize=9, fontweight="bold", color=VEN,
+                        path_effects=HALO, zorder=6)
+        ax.set_xlim(ctr[0] - half, ctr[0] + half); ax.set_ylim(ctr[1] + half, ctr[1] - half); ax.set_xticks([]); ax.set_yticks([])
+        for sp_ in ax.spines.values():
+            sp_.set_color("0.6"); sp_.set_linewidth(0.6)
+        L = sb_um / PX_UM; xe = ctr[0] + 0.92 * half; ya = ctr[1] + 0.88 * half
+        ax.plot([xe - L, xe], [ya, ya], color="white", lw=2, solid_capstyle="butt", path_effects=[pe.withStroke(linewidth=3.2, foreground="black")])
+        ax.text(xe, ya - 0.04 * half, f"{sb_um:g} µm", color="white", ha="right", va="bottom", fontsize=8, path_effects=[pe.withStroke(linewidth=1.6, foreground="black")])
+    fig = plt.figure(figsize=(7.5, 3.2))
+    gs = fig.add_gridspec(1, 3, width_ratios=[0.78, 1.0, 1.0], wspace=0.06, left=0.01, right=0.99, top=0.9, bottom=0.02)
     axA = fig.add_subplot(gs[0]); sch = _paths.FIGURES / "fig5" / "anatomy.png"     # Alex's drawing (figures/fig5/anatomy.svg)
     if sch.exists():
         axA.imshow(plt.imread(str(sch)), interpolation="antialiased")
-    axA.axis("off"); axA.text(0.0, 1.0, "a", transform=axA.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
-    ax = fig.add_subplot(gs[1]); ax.text(0.0, 1.0, "b", transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
-    ax.imshow(np.ma.masked_where(out, mos), cmap="gray", vmin=np.percentile(mos[~out], 1), vmax=np.percentile(mos[~out], 99.5), alpha=0.75)
-    ax.add_collection(LineCollection(ret, colors=RET, linewidths=0.35, alpha=0.9, zorder=2))
-    ax.add_collection(LineCollection(exc, colors=EXC, linewidths=1.6, alpha=0.95, zorder=3))
-    for s_, lab, dx in (("L", "A$_1$", -1), ("R", "A$_2$", 1)):
-        P = np.array([xy(n) for n, s in zip(inj, side) if s == s_])
-        ax.scatter(*P.T, s=9, color=ART, edgecolor="white", linewidth=0.4, zorder=5)
-        c = P.mean(0); ax.annotate(lab, c, xytext=(dx * 26, 10), textcoords="offset points", ha="center", fontsize=9, fontweight="bold", color=ART, path_effects=HALO,
-                                   arrowprops=dict(arrowstyle="-", color=ART, lw=0.6), zorder=6)
-    for n, lab, dx in zip(dom["V"], ("V$_1$", "V$_2$"), (-1, 1)):
-        p = xy(n); ax.scatter(*p, s=40, marker="s", color=VEN, edgecolor="white", linewidth=0.6, zorder=5)
-        ax.annotate(lab, p, xytext=(dx * 18, -12), textcoords="offset points", ha="center", fontsize=9, fontweight="bold", color=VEN, path_effects=HALO, zorder=6)
-    ys, xs = np.nonzero(~out); ax.set_xlim(xs.min() - 60, xs.max() + 60); ax.set_ylim(ys.max() + 60, ys.min() - 60); ax.axis("off")
-    x0 = xs.min(); L = 1000 / PX_UM; y = ys.max() + 30
-    ax.plot([x0, x0 + L], [y, y], color=INK, lw=2, solid_capstyle="butt"); ax.text(x0 + L / 2, y - 25, "1 mm", ha="center", va="bottom", fontsize=8)
-    from matplotlib.lines import Line2D
-    ax.legend(handles=[Line2D([], [], color=RET, lw=1.5, label="Retained network"), Line2D([], [], color=EXC, lw=2, label="Excluded"),
-                       Line2D([], [], marker="o", ls="", color=ART, label="Arterial cut (A)"), Line2D([], [], marker="s", ls="", color=VEN, label="Venous outlet (V)")],
-              loc="lower right", frameon=True, framealpha=0.85, edgecolor="none", fontsize=8, handlelength=1.2, borderaxespad=0.2)
+    axA.axis("off")
+    half_a = 0.62 * max(np.ptp(Pa[:, 0]), np.ptp(Pa[:, 1])); ca = Pa.mean(0)
+    half_v = max(0.9 * np.ptp(Pv[:, 0]), 380.0); cv = Pv.mean(0) + [0, 60]
+    axB = fig.add_subplot(gs[1]); crop(axB, ca, half_a, True, False, 200); axB.set_title("Arterial cuts", fontsize=9, pad=3)
+    axC = fig.add_subplot(gs[2]); crop(axC, cv, half_v, False, True, 200); axC.set_title("Venous outlets", fontsize=9, pad=3)
+    for ax_, l_ in ((axA, "a"), (axB, "b"), (axC, "c")):
+        ax_.text(0.0, 1.03, l_, transform=ax_.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
     plos_style.save(fig, _paths.FIGURES / "fig_domain" / "fig_domain")
 
 
