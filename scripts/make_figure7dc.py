@@ -186,7 +186,7 @@ def main():
     r_log = float(np.corrcoef(lm, ls_)[0, 1])
     consider = m & sig_ok
     p_agree = float(np.mean(np.sign(Qp[consider]) == np.sign(Qs[consider])))
-    axD.text(0.03, 0.985, f'$r_{{\\log}} = {r_log:.3f}$\n'
+    axD.text(0.03, 0.9, f'$r_{{\\log}} = {r_log:.3f}$\n'
                          f'direction agrees: {100 * p_agree:.0f}%\n(|Q′| > 2σ, n = {int(consider.sum())})',
              transform=axD.transAxes, va='top', ha='left', fontsize=8, bbox=dict(fc='white', ec='0.7', lw=0.5, pad=2.5))
     axD.set_xlabel(r"measured log$_{10}$|Q′| (nL/s)", labelpad=1)
