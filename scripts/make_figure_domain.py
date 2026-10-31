@@ -64,6 +64,12 @@ def main():
         L = sb_um / PX_UM; xe = ctr[0] + 0.92 * half; ya = ctr[1] + 0.88 * half
         ax.plot([xe - L, xe], [ya, ya], color="white", lw=2, solid_capstyle="butt", path_effects=[pe.withStroke(linewidth=3.2, foreground="black")])
         ax.text(xe, ya - 0.04 * half, f"{sb_um:g} µm", color="white", ha="right", va="bottom", fontsize=8, path_effects=[pe.withStroke(linewidth=1.6, foreground="black")])
+    da_stubs = [seg(e) for n in dom["DA"] for e in G.edges(n) if e not in keep and e[::-1] not in keep]
+    def draw_da(ax):                                               # the dorsal aorta (excluded arterial stubs), in arterial red
+        ax.add_collection(LineCollection(da_stubs, colors=ART, linewidths=3.0, alpha=0.95, zorder=4, capstyle="round"))
+        top = min(da_stubs, key=lambda q: q[:, 1].min()); i = int(np.argmin(top[:, 1]))
+        ax.text(np.mean([q[:, 0].mean() for q in da_stubs]), min(q[:, 1].min() for q in da_stubs) + 60, "DA", ha="center", va="top",
+                fontsize=9, fontweight="bold", color=ART, path_effects=HALO, zorder=6)
     fig = plt.figure(figsize=(7.5, 3.2))
     gs = fig.add_gridspec(1, 3, width_ratios=[0.78, 1.0, 1.0], wspace=0.06, left=0.01, right=0.99, top=0.9, bottom=0.02)
     axA = fig.add_subplot(gs[0]); sch = _paths.FIGURES / "fig5" / "anatomy.png"     # Alex's drawing (figures/fig5/anatomy.svg)
@@ -71,9 +77,10 @@ def main():
         axA.imshow(plt.imread(str(sch)), interpolation="antialiased")
     axA.axis("off")
     half_a = 0.62 * max(np.ptp(Pa[:, 0]), np.ptp(Pa[:, 1])); ca = Pa.mean(0)
-    half_v = 0.95 * np.ptp(Pv[:, 0]); cv = Pv.mean(0)
+    Pda = np.array([xy(n) for n in dom["DA"]])                       # dorsal-aorta stub ends sit just below the veins
+    cv = np.array([Pv[:, 0].mean(), (Pv[:, 1].min() + Pda[:, 1].max()) / 2 + 40]); half_v = 0.62 * (Pda[:, 1].max() + 120 - Pv[:, 1].min())
     axB = fig.add_subplot(gs[1]); crop(axB, ca, half_a, True, False, 200); axB.set_title("Arterial cuts", fontsize=9, pad=3)
-    axC = fig.add_subplot(gs[2]); crop(axC, cv, half_v, False, True, 100, show_exc=False, net_col=VEN); axC.set_title("Venous outlets", fontsize=9, pad=3)
+    axC = fig.add_subplot(gs[2]); crop(axC, cv, half_v, False, True, 100, show_exc=False, net_col=VEN); draw_da(axC); axC.set_title("Venous outlets", fontsize=9, pad=3)
     for ax_, l_ in ((axA, "a"), (axB, "b"), (axC, "c")):
         ax_.text(0.0, 1.03, l_, transform=ax_.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
     plos_style.save(fig, _paths.FIGURES / "fig_domain" / "fig_domain")
