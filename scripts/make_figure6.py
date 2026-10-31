@@ -286,7 +286,7 @@ def main():
         cb.set_label(label, fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8, length=2, pad=1, which="both"); cb.outline.set_linewidth(0.4)
         return cb
     P0, P1 = axs[0].get_position(), axs[1].get_position()
-    hbar(P0.x0 + 0.05 * P0.width, P1.x1 - 0.05 * P1.width, P0.y0 - 0.045, mag_norm, mag_cmap, "|flux| (nL/s), same scale in both maps")
+    hbar(P0.x0 + 0.05 * P0.width, P1.x1 - 0.05 * P1.width, P0.y0 - 0.045, mag_norm, mag_cmap, "|flux| (nL/s)")
     if VARIANT == "three":
         P2 = axs[2].get_position()
         cb = hbar(P2.x0 + 0.08 * P2.width, P2.x1 - 0.08 * P2.width, P2.y0 - 0.04, cor_norm, cor_cmap, "relative change in |flux|",
