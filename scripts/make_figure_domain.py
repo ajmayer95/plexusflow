@@ -72,17 +72,17 @@ def main():
             p_ = xy(n); ax.scatter(*p_, s=40, color=ART, edgecolor="white", linewidth=0.6, zorder=6)
             ax.text(p_[0] + dx * 22, p_[1] + 10, lab, ha="right" if dx < 0 else "left", va="center", fontsize=9, fontweight="bold",
                     color=ART, path_effects=HALO, zorder=6)
-    fig = plt.figure(figsize=(7.5, 3.2))
-    gs = fig.add_gridspec(1, 3, width_ratios=[0.8, 1.0, 1.0], wspace=0.06, left=0.01, right=0.99, top=0.9, bottom=0.02)
-    axA = fig.add_subplot(gs[0]); sch = _paths.FIGURES / "fig5" / "anatomy.png"     # Alex's drawing (figures/fig5/anatomy.svg)
+    fig = plt.figure(figsize=(5.2, 4.3))                       # a full height left; b, c stacked right
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.15, 1.0], hspace=0.14, wspace=0.05, left=0.01, right=0.99, top=0.93, bottom=0.01)
+    axA = fig.add_subplot(gs[:, 0]); sch = _paths.FIGURES / "fig5" / "anatomy.png"     # Alex's drawing (figures/fig5/anatomy.svg)
     if sch.exists():
         axA.imshow(plt.imread(str(sch)), interpolation="antialiased")
     axA.axis("off")
     half_a = 0.62 * max(np.ptp(Pa[:, 0]), np.ptp(Pa[:, 1])); ca = Pa.mean(0)
     Pda = np.array([xy(n) for n in dom["DA"]])                       # dorsal-aorta stub ends sit just below the veins
     cv = np.array([Pv[:, 0].mean(), (Pv[:, 1].min() + Pda[:, 1].max()) / 2 + 40]); half_v = 0.62 * (Pda[:, 1].max() + 120 - Pv[:, 1].min())
-    axB = fig.add_subplot(gs[1]); crop(axB, ca, half_a, True, False, 200, show_exc=False); axB.set_title("Arterial cuts", fontsize=9, pad=3)
-    axC = fig.add_subplot(gs[2]); crop(axC, cv, half_v, False, True, 100, show_exc=False); draw_da(axC); axC.set_title("Venous outlets", fontsize=9, pad=3)
+    axB = fig.add_subplot(gs[0, 1]); crop(axB, ca, half_a, True, False, 200, show_exc=False); axB.set_title("Effective arterial boundaries", fontsize=9, pad=3)
+    axC = fig.add_subplot(gs[1, 1]); crop(axC, cv, half_v, False, True, 100, show_exc=False); draw_da(axC); axC.set_title("True boundaries", fontsize=9, pad=3)
     for ax_, l_ in ((axA, "a"), (axB, "b"), (axC, "c")):
         ax_.text(0.0, 1.03, l_, transform=ax_.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
     plos_style.save(fig, _paths.FIGURES / "fig_domain" / "fig_domain")
