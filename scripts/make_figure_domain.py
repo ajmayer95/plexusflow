@@ -23,7 +23,7 @@ import matplotlib.patheffects as pe
 HALO = [pe.withStroke(linewidth=2.2, foreground="white")]
 
 PX_UM = 1.7
-RET, EXC, ART, VEN, INK = "#5f5f5f", "#9a9a9a", "#d40000", "#2b35a8", "#1a1a1a"
+RET, EXC, ART, VEN, INK = "#ffd23f", "#9a9a9a", "#d40000", "#2b35a8", "#1a1a1a"
 
 
 def main():
@@ -44,7 +44,7 @@ def main():
     Pa = np.array([xy(n) for n in inj]); Pv = np.array([xy(n) for n in dom["V"]])
     def crop(ax, ctr, half, show_A, show_V, sb_um, show_exc=True, net_col=RET):
         ax.imshow(np.ma.masked_where(out, mos), cmap="gray", vmin=vmin_, vmax=vmax_, alpha=0.8, interpolation="antialiased")
-        ax.add_collection(LineCollection(ret, colors=net_col, linewidths=0.6, alpha=0.95, zorder=2))
+        ax.add_collection(LineCollection(ret, colors=net_col, linewidths=0.7, alpha=0.95, zorder=2))
         if show_exc:
             ax.add_collection(LineCollection(exc, colors=EXC, linewidths=1.8, alpha=0.95, zorder=3))
         if show_A:
@@ -80,7 +80,7 @@ def main():
     Pda = np.array([xy(n) for n in dom["DA"]])                       # dorsal-aorta stub ends sit just below the veins
     cv = np.array([Pv[:, 0].mean(), (Pv[:, 1].min() + Pda[:, 1].max()) / 2 + 40]); half_v = 0.62 * (Pda[:, 1].max() + 120 - Pv[:, 1].min())
     axB = fig.add_subplot(gs[1]); crop(axB, ca, half_a, True, False, 200, show_exc=False); axB.set_title("Arterial cuts", fontsize=9, pad=3)
-    axC = fig.add_subplot(gs[2]); crop(axC, cv, half_v, False, True, 100, show_exc=False, net_col=VEN); draw_da(axC); axC.set_title("Venous outlets", fontsize=9, pad=3)
+    axC = fig.add_subplot(gs[2]); crop(axC, cv, half_v, False, True, 100, show_exc=False); draw_da(axC); axC.set_title("Venous outlets", fontsize=9, pad=3)
     for ax_, l_ in ((axA, "a"), (axB, "b"), (axC, "c")):
         ax_.text(0.0, 1.03, l_, transform=ax_.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
     plos_style.save(fig, _paths.FIGURES / "fig_domain" / "fig_domain")
