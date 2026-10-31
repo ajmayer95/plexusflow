@@ -78,19 +78,19 @@ def draw_measurement(ax, img, ki, color, valid):
     box = crop(img, clt, 2.0 * R); show(ax, img, box)
     for i in range(len(cl)):
         a_, b_ = clt[i] - R * nrm[i], clt[i] + R * nrm[i]
-        ax.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white" if valid[i] else "#9a9a9a", lw=0.6 if valid[i] else 0.5,
-                alpha=0.9 if valid[i] else 0.6, ls="-" if valid[i] else (0, (1.5, 1.5)), zorder=2)
+        ax.plot([a_[1], b_[1]], [a_[0], b_[0]], color="white" if valid[i] else "#9a9a9a", lw=0.35 if valid[i] else 0.35,
+                alpha=0.45 if valid[i] else 0.45, ls="-" if valid[i] else (0, (1.5, 1.5)), zorder=2)
     ax.plot(clt[:, 1], clt[:, 0], color=color, lw=1.6, zorder=3, solid_capstyle="round")
     # time-mean OF arrows on every other section, three points across the lumen
     P_, U = [], []
-    for i in range(1, len(cl), 3):
-        for s in (-0.45, 0.45):
+    for i in range(1, len(cl), 3):                       # every 3rd section, 5 across the lumen
+        for s in np.linspace(-0.7, 0.7, 5):
             p = cl[i] + s * R * nrm[i]; r, c = int(round(p[0])), int(round(p[1]))
             if 0 <= r < vf.shape[0] and 0 <= c < vf.shape[1]:
                 P_.append(p + off); U.append(vf[r, c])
-    P_, U = np.array(P_), np.array(U); sp = np.linalg.norm(U, axis=1); k = 0.75 * R / np.percentile(sp, 90)
-    ax.quiver(P_[:, 1], P_[:, 0], U[:, 0] * k, U[:, 1] * k, angles="xy", scale_units="xy", scale=1, color="white",
-              edgecolor=INK, linewidth=0.3, width=0.009, headwidth=3.5, headlength=3.5, headaxislength=3, zorder=4)
+    P_, U = np.array(P_), np.array(U); sp = np.linalg.norm(U, axis=1); k = 0.5 * R / np.percentile(sp, 90)
+    ax.quiver(P_[:, 1], P_[:, 0], U[:, 0] * k, U[:, 1] * k, angles="xy", scale_units="xy", scale=1, color="#ffd23f",
+              edgecolor=INK, linewidth=0.4, width=0.011, headwidth=3.5, headlength=3.5, headaxislength=3, pivot="middle", zorder=4)
     scalebar(ax, box)
     return box
 
