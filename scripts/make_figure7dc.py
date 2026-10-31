@@ -99,10 +99,10 @@ def main():
     vmin = max(float(np.percentile(allq, 2)), 1e-4); vmax = float(np.percentile(allq, 98))
     nAB = mcolors.LogNorm(vmin, vmax); cAB = plt.cm.viridis
     nC = mcolors.TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1); cC = plt.cm.PuOr_r
-    MIS = '#c51b8a'
+    MIS = '#c51b8a'; INKC = '#1a1a1a'
 
     def bg(ax):
-        ax.imshow(mos, cmap='gray', vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), aspect='equal', zorder=0)
+        ax.imshow(mos, cmap='gray', vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), aspect='equal', zorder=0, alpha=0.55)
         ax.set_xticks([]); ax.set_yticks([]); [s.set_visible(False) for s in ax.spines.values()]
         ax.set_xlim(0, Wm); ax.set_ylim(Hm, 0)
 
@@ -124,16 +124,15 @@ def main():
         ax.add_collection(LineCollection(segs, colors=cols, linewidths=lws, zorder=3))
 
     fig = plt.figure(figsize=(7.5, 6.6), facecolor='white')
-    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.72], hspace=0.14, left=0.06, right=0.9, top=0.97, bottom=0.08)
-    gT = gs[0].subgridspec(1, 2, wspace=0.08); gBm = gs[1].subgridspec(1, 3, width_ratios=[1.0, 1.0, 0.8], wspace=0.42)
+    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.8], hspace=0.04, left=0.06, right=0.9, top=0.97, bottom=0.08)
+    gT = gs[0].subgridspec(1, 2, wspace=0.08); gBm = gs[1].subgridspec(1, 3, width_ratios=[1.15, 1.0, 0.8], wspace=0.45)
     def letter(ax, l, title, dx=-0.02):
         ax.text(dx, 1.01, l, transform=ax.transAxes, fontsize=12, fontweight='bold', va='bottom', ha='right')
+        ax.set_title(title, fontsize=9, loc='left', pad=3)
 
     # a
     axA = fig.add_subplot(gT[0]); bg(axA); field(axA, Qp, True); markers(axA)
-    letter(axA, 'a', "conservative mean flow |Q′|")
-    axA.plot([], [], color=cAB(0.6), lw=0.6, alpha=0.35, label='imputed (unimaged) vessel')
-    axA.legend(loc='lower right', fontsize=8, frameon=False, borderaxespad=0, handlelength=1.4)
+    letter(axA, 'a', "Reference field Q′")
 
     # b
     axB = fig.add_subplot(gT[1]); bg(axB); field(axB, Qs, False); markers(axB)
@@ -142,13 +141,13 @@ def main():
         xy = nxy[nodes[nidx]]; a = inj[j]
         col = cAB(nAB(min(max(abs(a), vmin), vmax)))
         if a >= 0:
-            axB.scatter(*xy, s=10, facecolor=col, edgecolor='white', linewidths=0.4, zorder=5)
+            axB.scatter(*xy, s=22, facecolor=col, edgecolor=INKC, linewidths=0.5, zorder=7)
         else:
-            axB.scatter(*xy, s=10, facecolor='none', edgecolor=col, linewidths=0.8, zorder=5)
-    axB.scatter([], [], s=14, facecolor=cAB(0.9), edgecolor='white', label='emergent injection')
-    axB.scatter([], [], s=14, facecolor='none', edgecolor=cAB(0.6), linewidths=0.8, label='emergent withdrawal')
+            axB.scatter(*xy, s=22, facecolor='white', edgecolor=INKC, linewidths=0.7, zorder=7)
+    axB.scatter([], [], s=22, facecolor=cAB(0.9), edgecolor=INKC, linewidths=0.5, label='inflow (emergent)')
+    axB.scatter([], [], s=22, facecolor='white', edgecolor=INKC, linewidths=0.7, label='outflow (emergent)')
     axB.legend(loc='lower right', fontsize=8, frameon=False, borderaxespad=0, handletextpad=0.2, labelspacing=0.2)
-    letter(axB, 'b', 'passive-network prediction')
+    letter(axB, 'b', r'Passive prediction Q$_{\rm sim}$')
     pB = axB.get_position(); cax = fig.add_axes([pB.x1 + 0.012, pB.y0 + 0.1 * pB.height, 0.013, 0.8 * pB.height])
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=nAB, cmap=cAB), cax=cax)
     cb.set_label(r'$|\bar Q|$ (nL/s)', fontsize=9, labelpad=2); cb.outline.set_linewidth(0.5)
@@ -166,33 +165,33 @@ def main():
     mism = m & sig_ok & (np.sign(Qp) != np.sign(Qs))
     for c in np.flatnonzero(mism):
         s = segs[c]; mid = s[len(s) // 2]
-        axC.plot(*mid, 'o', color=MIS, ms=1.0, markeredgewidth=0, zorder=6, alpha=0.85)
+        axC.plot(*mid, 'o', color=MIS, ms=2.0, markeredgewidth=0, zorder=6, alpha=0.9)
     markers(axC)
-    letter(axC, 'c', r"local model error  E = log$_{10}$(|Q$_{\rm sim}$| / |Q′|)")
+    letter(axC, 'c', 'Local agreement')
     caxC = axC.inset_axes([0.15, -0.06, 0.7, 0.035])
     cbC = plt.colorbar(plt.cm.ScalarMappable(norm=nC, cmap=cC), cax=caxC, ticks=[-1, 0, 1], orientation='horizontal')
-    cbC.ax.set_xticklabels(['×0.1', '×1', '×10']); cbC.set_label(r'$|Q_{\rm sim}|\,/\,|Q^\prime|$', labelpad=1); cbC.outline.set_linewidth(0.5)
+    cbC.set_label(r'log$_{10}$(|Q$_{\rm sim}$| / |Q′|)', labelpad=1); cbC.outline.set_linewidth(0.5)
     axC.plot([], [], 'o', color=MIS, ms=3, label='direction mismatch')
     axC.legend(fontsize=8, loc='lower right', frameon=False, borderaxespad=0, handletextpad=0.1)
 
     # D
     axD = fig.add_subplot(gBm[1])
     lm, ls_ = np.log10(np.maximum(np.abs(Qp[m]), 1e-5)), np.log10(np.maximum(np.abs(Qs[m]), 1e-5))
-    axD.hexbin(lm, ls_, gridsize=45, cmap='Greys', mincnt=1, linewidths=0, zorder=2)
+    axD.hexbin(lm, ls_, gridsize=45, cmap='Greys', mincnt=1, linewidths=0, zorder=2, alpha=0.7)
     lo, hi = min(lm.min(), ls_.min()), max(lm.max(), ls_.max())
-    axD.plot([lo, hi], [lo, hi], 'k--', lw=0.7, alpha=0.7, zorder=3)
+    axD.plot([lo, hi], [lo, hi], color=INKC, ls='--', lw=0.9, zorder=3)
     mm = mism[m]
     axD.scatter(lm[mm], ls_[mm], s=5, facecolors='none', edgecolors=MIS, linewidths=0.5, alpha=0.8,
                 zorder=4, label='direction mismatch')
     r_log = float(np.corrcoef(lm, ls_)[0, 1])
     consider = m & sig_ok
     p_agree = float(np.mean(np.sign(Qp[consider]) == np.sign(Qs[consider])))
-    axD.text(0.03, 0.97, f'$r_{{\\log}} = {r_log:.3f}$\n'
-                         f'direction agrees: {100 * p_agree:.0f}%\n($|Q^\\prime| > 2\\sigma$, n = {int(consider.sum())})',
-             transform=axD.transAxes, va='top', ha='left', fontsize=8)
+    axD.text(0.03, 0.985, f'$r_{{\\log}} = {r_log:.3f}$\n'
+                         f'direction agrees: {100 * p_agree:.0f}%\n(|Q′| > 2σ, n = {int(consider.sum())})',
+             transform=axD.transAxes, va='top', ha='left', fontsize=8, bbox=dict(fc='white', ec='0.7', lw=0.5, pad=2.5))
     axD.set_xlabel(r"measured log$_{10}$|Q′| (nL/s)", labelpad=1)
     axD.set_ylabel(r'predicted log$_{10}$|Q$_{\rm sim}$| (nL/s)', labelpad=1)
-    letter(axD, 'd', 'measured vs predicted magnitude', dx=-0.16)
+    letter(axD, 'd', 'Vessel-by-vessel', dx=-0.2); axD.title.set_position((0, 1.06))
     axD.legend(fontsize=8, loc='lower right', frameon=False, borderaxespad=0, handletextpad=0.1); axD.set_aspect('equal')
     axD.spines[['top', 'right']].set_visible(False)
     axD.set_xlim(lo - 0.1, hi + 0.1); axD.set_ylim(lo - 0.1, hi + 0.1)
@@ -212,11 +211,11 @@ def main():
         axE.hlines(yi, 0, rv, color=col, lw=2, alpha=0.8)
         axE.errorbar(rv, yi, xerr=err if err else None, fmt='o', color=col, markersize=5, capsize=2, zorder=4)
         axE.text(rv + 0.03, yi + 0.28, f'{rv:.2f}', va='bottom', ha='center', fontsize=8, color=col)
-    axE.set_yticks([2, 1, 0], ['true radii', 'uniform', 'shuffled'])
+    axE.set_yticks([2, 1, 0], ['true radii', 'uniform radii', 'shuffled radii'])
     axE.set_xlim(0, 1.0); axE.set_ylim(-0.6, 2.9); axE.set_box_aspect(1.0)
     axE.set_xlabel(r"$r_{\log}$", labelpad=1)
     axE.spines['right'].set_visible(False); axE.spines['top'].set_visible(False)
-    letter(axE, 'e', 'measured calibres carry predictive information', dx=-0.12)
+    letter(axE, 'e', 'Radius controls', dx=-0.3)
 
     # F  distance from the driven carve boundary
     B = dom['B']; Bc = B.tocoo()
