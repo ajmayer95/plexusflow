@@ -42,9 +42,9 @@ def main():
 
     vmin_, vmax_ = np.percentile(mos[~out], 1), np.percentile(mos[~out], 99.5)
     Pa = np.array([xy(n) for n in inj]); Pv = np.array([xy(n) for n in dom["V"]])
-    def crop(ax, ctr, half, show_A, show_V, sb_um, show_exc=True):
+    def crop(ax, ctr, half, show_A, show_V, sb_um, show_exc=True, net_col=RET):
         ax.imshow(np.ma.masked_where(out, mos), cmap="gray", vmin=vmin_, vmax=vmax_, alpha=0.8, interpolation="antialiased")
-        ax.add_collection(LineCollection(ret, colors=RET, linewidths=0.6, alpha=0.95, zorder=2))
+        ax.add_collection(LineCollection(ret, colors=net_col, linewidths=0.6, alpha=0.95, zorder=2))
         if show_exc:
             ax.add_collection(LineCollection(exc, colors=EXC, linewidths=1.8, alpha=0.95, zorder=3))
         if show_A:
@@ -55,7 +55,7 @@ def main():
                         fontsize=9, fontweight="bold", color=ART, path_effects=HALO, zorder=6)
         if show_V:
             for n, lab, dx in zip(dom["V"], ("V$_1$", "V$_2$"), (-1, 1)):
-                p_ = xy(n); ax.scatter(*p_, s=90, marker="s", color=VEN, edgecolor="white", linewidth=0.8, zorder=5)
+                p_ = xy(n); ax.scatter(*p_, s=90, marker="s", color="white", edgecolor=VEN, linewidth=1.4, zorder=5)
                 ax.text(p_[0] + dx * 18, p_[1] + 18, lab, ha="right" if dx < 0 else "left", va="top", fontsize=9, fontweight="bold", color=VEN,
                         path_effects=HALO, zorder=6)
         ax.set_xlim(ctr[0] - half, ctr[0] + half); ax.set_ylim(ctr[1] + half, ctr[1] - half); ax.set_xticks([]); ax.set_yticks([])
@@ -73,7 +73,7 @@ def main():
     half_a = 0.62 * max(np.ptp(Pa[:, 0]), np.ptp(Pa[:, 1])); ca = Pa.mean(0)
     half_v = 0.95 * np.ptp(Pv[:, 0]); cv = Pv.mean(0)
     axB = fig.add_subplot(gs[1]); crop(axB, ca, half_a, True, False, 200); axB.set_title("Arterial cuts", fontsize=9, pad=3)
-    axC = fig.add_subplot(gs[2]); crop(axC, cv, half_v, False, True, 100, show_exc=False); axC.set_title("Venous outlets", fontsize=9, pad=3)
+    axC = fig.add_subplot(gs[2]); crop(axC, cv, half_v, False, True, 100, show_exc=False, net_col=VEN); axC.set_title("Venous outlets", fontsize=9, pad=3)
     for ax_, l_ in ((axA, "a"), (axB, "b"), (axC, "c")):
         ax_.text(0.0, 1.03, l_, transform=ax_.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
     plos_style.save(fig, _paths.FIGURES / "fig_domain" / "fig_domain")
