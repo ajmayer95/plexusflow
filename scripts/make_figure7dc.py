@@ -47,7 +47,8 @@ from plexusflow.reconcile import carved_domain, passive
 
 STAGE = _paths.STAGE
 MOSAIC_P = _paths.MOSAIC
-OUT_DIR = _paths.FIGURES / 'fig8alt_v3'
+OUT_DIR = _paths.FIGURES / 'fig7'
+SIGMA_P = 2.0          # Pa: soft equal-venous-pressure penalty (any σ_P ≲ 5 Pa gives the same split)
 SCHEME, RADIUS, N_SHUFFLE = 'irls', 'consensus', 10
 
 
@@ -63,7 +64,24 @@ def main():
     rec = dict(length=D['length'])
     Qp, Qs, fb, imaged, r = D['Qp'], D['Qs'], D['fb'], D['imaged'], D['radius']
     K = r ** 4 / D['length']; nodes = dom['nodes']
-    print(f"[fig8alt_v3] carved: {len(idx)} edges ({int(imaged.sum())} measured); "
+    # passive model with a soft equal-pressure penalty at the two vitelline-vein outlets: the outflow split (f_V1, f_V2) is
+    # chosen to minimise Σ_V (f_V − f_V^meas)²/σ_V² + (P_V1 − P_V2)²/σ_P², σ_V = stub-flow uncertainty (dc_reconciled sigma)
+    import scipy.sparse.linalg as spla
+    from plexusflow.reconcile.network import _gauge_nodes
+    MU, PX, NL = 3.5e-3, 1.7e-6, 1e-12
+    Kp = np.pi * (r * PX) ** 4 / (8 * MU * D['length'] * PX); Bm = dom['B']; Lp = (Bm @ sp.diags(Kp) @ Bm.T).tocsc()
+    v1, v2 = dom['out']; free = np.setdiff1d(np.arange(Bm.shape[0]), [v1]); lu = spla.splu(Lp[free][:, free])
+    def pres(f):
+        p_ = np.zeros(Bm.shape[0]); p_[free] = lu.solve(f[free]); return p_
+    sV = [float(np.sqrt(np.sum(D['sigma'][Bm.tocsc()[v].nonzero()[1]] ** 2))) for v in (v1, v2)]
+    d_ = np.zeros(Bm.shape[0]); d_[v1], d_[v2] = -1.0, 1.0
+    pA, pD = pres(fb * NL), pres(d_ * NL); dP0, kk = pA[v2] - pA[v1], pD[v2] - pD[v1]
+    shift = -(dP0 * kk / SIGMA_P ** 2) / (1 / sV[0] ** 2 + 1 / sV[1] ** 2 + kk ** 2 / SIGMA_P ** 2)
+    fb = fb.copy(); fb[v1] -= shift; fb[v2] += shift
+    Qs = passive(K, fb, dom)
+    print(f"[fig7] soft venous penalty σ_P {SIGMA_P} Pa: outflow V1 {fb[v1]:.2f}, V2 {fb[v2]:.2f} nL/s (shift {shift:+.2f}); "
+          f"P_V2 − P_V1 {dP0 + kk * shift:+.2f} Pa (was {dP0:+.2f})")
+    print(f"[fig7] carved: {len(idx)} edges ({int(imaged.sum())} measured); "
           f"Σ in {fb[dom['inj']].sum():.2f}; V {fb[dom['out']]}")
 
     mos = tifffile.imread(str(MOSAIC_P)); mos = mos.mean(axis=-1) if mos.ndim == 3 else mos
@@ -80,7 +98,8 @@ def main():
     allq = np.abs(np.r_[Qp[imaged], Qs[imaged]])
     vmin = max(float(np.percentile(allq, 2)), 1e-4); vmax = float(np.percentile(allq, 98))
     nAB = mcolors.LogNorm(vmin, vmax); cAB = plt.cm.viridis
-    nC = mcolors.TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1); cC = plt.cm.RdBu_r
+    nC = mcolors.TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1); cC = plt.cm.PuOr_r
+    MIS = '#c51b8a'
 
     def bg(ax):
         ax.imshow(mos, cmap='gray', vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), aspect='equal', zorder=0)
@@ -88,10 +107,10 @@ def main():
         ax.set_xlim(0, Wm); ax.set_ylim(Hm, 0)
 
     def markers(ax):
-        for n in G.graph['boundary']['DA']:
-            ax.plot(*nxy[n], marker='v', color='#8b0000', ms=5, markeredgecolor='white', mew=0.5, zorder=6, alpha=0.7)
+        for i_ in dom['inj']:                               # Fig 5 convention: arterial cuts red, venous outlets blue
+            ax.plot(*nxy[nodes[i_]], 'o', color='#d40000', ms=2.2, mec='white', mew=0.3, zorder=6)
         for n in G.graph['boundary']['V']:
-            ax.plot(*nxy[n], marker='*', color='#1f5fa8', ms=7, markeredgecolor='white', mew=0.5, zorder=6)
+            ax.plot(*nxy[n], 's', color='#2b35a8', ms=4, mec='white', mew=0.5, zorder=6)
 
     def field(ax, Q, faint_unimaged):
         cols, lws = [], []
@@ -104,22 +123,20 @@ def main():
             cols.append(col)
         ax.add_collection(LineCollection(segs, colors=cols, linewidths=lws, zorder=3))
 
-    fig = plt.figure(figsize=(7.5, 7.6), facecolor='white')
-    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.25], hspace=0.12, wspace=0.10, left=0.075, right=0.90, top=0.965, bottom=0.065)
-    gs_C = gs[1, 0].subgridspec(2, 1, height_ratios=[1.0, 0.34], hspace=0.45)
-    gs_D = gs[1, 1].subgridspec(2, 1, height_ratios=[1.0, 0.34], hspace=0.45)
+    fig = plt.figure(figsize=(7.5, 6.6), facecolor='white')
+    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.72], hspace=0.14, left=0.06, right=0.9, top=0.97, bottom=0.08)
+    gT = gs[0].subgridspec(1, 2, wspace=0.08); gBm = gs[1].subgridspec(1, 3, width_ratios=[1.0, 1.0, 0.8], wspace=0.42)
     def letter(ax, l, title, dx=-0.02):
         ax.text(dx, 1.01, l, transform=ax.transAxes, fontsize=12, fontweight='bold', va='bottom', ha='right')
-        ax.set_title(title, fontsize=9, loc='left', pad=3)
 
     # a
-    axA = fig.add_subplot(gs[0, 0]); bg(axA); field(axA, Qp, True); markers(axA)
+    axA = fig.add_subplot(gT[0]); bg(axA); field(axA, Qp, True); markers(axA)
     letter(axA, 'a', "conservative mean flow |Q′|")
     axA.plot([], [], color=cAB(0.6), lw=0.6, alpha=0.35, label='imputed (unimaged) vessel')
     axA.legend(loc='lower right', fontsize=8, frameon=False, borderaxespad=0, handlelength=1.4)
 
     # b
-    axB = fig.add_subplot(gs[0, 1]); bg(axB); field(axB, Qs, False); markers(axB)
+    axB = fig.add_subplot(gT[1]); bg(axB); field(axB, Qs, False); markers(axB)
     inj = fb[dom['inj']]
     for j, nidx in enumerate(dom['inj']):
         xy = nxy[nodes[nidx]]; a = inj[j]
@@ -137,39 +154,41 @@ def main():
     cb.set_label(r'$|\bar Q|$ (nL/s)', fontsize=9, labelpad=2); cb.outline.set_linewidth(0.5)
 
     # c
-    axC = fig.add_subplot(gs_C[0]); bg(axC)
+    axC = fig.add_subplot(gBm[0]); bg(axC)
     m = imaged & (np.abs(Qp) > 1e-12) & (np.abs(Qs) > 1e-12)
     E = np.log10(np.abs(Qs) / np.maximum(np.abs(Qp), 1e-12))
     axC.add_collection(LineCollection([segs[c] for c in np.flatnonzero(m)],
                                       colors=[cC(nC(E[c])) for c in np.flatnonzero(m)], linewidths=0.5, zorder=3))
     q_floor = max(vmin * 3, 3e-3)
-    mism = m & (np.sign(Qp) != np.sign(Qs)) & ((np.abs(Qp) >= q_floor) | (np.abs(Qs) >= q_floor))
+    # noise level = each vessel's calibrated measurement uncertainty σ_e = sqrt((c_e y_e)² + σ0²) (Fig 6b); a direction is only
+    # judged where the reconciled flow is clearly above it, |Q'| > 2σ_e
+    sig_ok = np.abs(Qp) > 2 * D['sigma']
+    mism = m & sig_ok & (np.sign(Qp) != np.sign(Qs))
     for c in np.flatnonzero(mism):
         s = segs[c]; mid = s[len(s) // 2]
-        axC.plot(*mid, 'o', color='#ff2bd6', ms=1.0, markeredgewidth=0, zorder=6, alpha=0.85)
+        axC.plot(*mid, 'o', color=MIS, ms=1.0, markeredgewidth=0, zorder=6, alpha=0.85)
     markers(axC)
     letter(axC, 'c', r"local model error  E = log$_{10}$(|Q$_{\rm sim}$| / |Q′|)")
-    caxC = axC.inset_axes([-0.04, 0.12, 0.035, 0.76])
-    cbC = plt.colorbar(plt.cm.ScalarMappable(norm=nC, cmap=cC), cax=caxC, ticks=[-1, 0, 1])
-    cbC.ax.set_yticklabels(['−1\n(10×\nunder)', '0', '+1\n(10×\nover)'])
-    cbC.ax.yaxis.tick_left(); cbC.outline.set_linewidth(0.5)
-    axC.plot([], [], 'o', color='#ff2bd6', ms=3, label=f'direction mismatch ({int(mism.sum())})')
+    caxC = axC.inset_axes([0.15, -0.06, 0.7, 0.035])
+    cbC = plt.colorbar(plt.cm.ScalarMappable(norm=nC, cmap=cC), cax=caxC, ticks=[-1, 0, 1], orientation='horizontal')
+    cbC.ax.set_xticklabels(['×0.1', '×1', '×10']); cbC.set_label(r'$|Q_{\rm sim}|\,/\,|Q^\prime|$', labelpad=1); cbC.outline.set_linewidth(0.5)
+    axC.plot([], [], 'o', color=MIS, ms=3, label='direction mismatch')
     axC.legend(fontsize=8, loc='lower right', frameon=False, borderaxespad=0, handletextpad=0.1)
 
     # D
-    axD = fig.add_subplot(gs_D[0])
+    axD = fig.add_subplot(gBm[1])
     lm, ls_ = np.log10(np.maximum(np.abs(Qp[m]), 1e-5)), np.log10(np.maximum(np.abs(Qs[m]), 1e-5))
     axD.hexbin(lm, ls_, gridsize=45, cmap='Greys', mincnt=1, linewidths=0, zorder=2)
     lo, hi = min(lm.min(), ls_.min()), max(lm.max(), ls_.max())
     axD.plot([lo, hi], [lo, hi], 'k--', lw=0.7, alpha=0.7, zorder=3)
     mm = mism[m]
-    axD.scatter(lm[mm], ls_[mm], s=5, facecolors='none', edgecolors='#c22a3f', linewidths=0.5, alpha=0.8,
-                zorder=4, label=f'direction mismatch ({int(mm.sum())})')
+    axD.scatter(lm[mm], ls_[mm], s=5, facecolors='none', edgecolors=MIS, linewidths=0.5, alpha=0.8,
+                zorder=4, label='direction mismatch')
     r_log = float(np.corrcoef(lm, ls_)[0, 1])
-    consider = m & ((np.abs(Qp) >= q_floor) | (np.abs(Qs) >= q_floor))
+    consider = m & sig_ok
     p_agree = float(np.mean(np.sign(Qp[consider]) == np.sign(Qs[consider])))
     axD.text(0.03, 0.97, f'$r_{{\\log}} = {r_log:.3f}$\n'
-                         f'$P(\\mathrm{{dir\\ agree}}\\,|\\,\\mathrm{{filtered}}) = {p_agree:.2f}$\n$n = {int(m.sum())}$',
+                         f'direction agrees: {100 * p_agree:.0f}%\n($|Q^\\prime| > 2\\sigma$, n = {int(consider.sum())})',
              transform=axD.transAxes, va='top', ha='left', fontsize=8)
     axD.set_xlabel(r"measured log$_{10}$|Q′| (nL/s)", labelpad=1)
     axD.set_ylabel(r'predicted log$_{10}$|Q$_{\rm sim}$| (nL/s)', labelpad=1)
@@ -187,16 +206,15 @@ def main():
     r_uni = r_of(np.mean(r) ** 4 / ln)
     r_sh = np.array([r_of(rng.permutation(r) ** 4 / ln) for _ in range(N_SHUFFLE)])
     print(f'  r_log true {r_log:.3f}, uniform {r_uni:.3f}, shuffled {r_sh.mean():.3f} ± {r_sh.std():.3f}')
-    axE = fig.add_subplot(gs_C[1])
+    axE = fig.add_subplot(gBm[2])
     for yi, lab, rv, col, err in ((2, 'true\nradii', r_log, '#2b70b4', 0), (1, 'uniform\nradii', r_uni, '#9e9e9e', 0),
-                                  (0, 'shuffled\nradii', r_sh.mean(), '#c22a3f', r_sh.std())):
+                                  (0, 'shuffled\nradii', r_sh.mean(), '#e08214', r_sh.std())):
         axE.hlines(yi, 0, rv, color=col, lw=2, alpha=0.8)
         axE.errorbar(rv, yi, xerr=err if err else None, fmt='o', color=col, markersize=5, capsize=2, zorder=4)
-        axE.text(rv + 0.015, yi, f'  r = {rv:.3f}' + (f' ± {err:.3f}' if err else ''), va='center', ha='left',
-                 fontsize=8, fontweight='bold', color=col)
+        axE.text(rv + 0.03, yi + 0.28, f'{rv:.2f}', va='bottom', ha='center', fontsize=8, color=col)
     axE.set_yticks([2, 1, 0], ['true radii', 'uniform', 'shuffled'])
-    axE.set_xlim(0, 1.0); axE.set_ylim(-0.6, 2.6)
-    axE.set_xlabel(r"$r_{\log}$ (measured vs predicted)", labelpad=1)
+    axE.set_xlim(0, 1.0); axE.set_ylim(-0.6, 2.9); axE.set_box_aspect(1.0)
+    axE.set_xlabel(r"$r_{\log}$", labelpad=1)
     axE.spines['right'].set_visible(False); axE.spines['top'].set_visible(False)
     letter(axE, 'e', 'measured calibres carry predictive information', dx=-0.12)
 
@@ -213,20 +231,19 @@ def main():
         n_vals.append(int(mk.sum()))
         r_vals.append(float(np.corrcoef(np.log10(np.abs(Qp[mk])), np.log10(np.abs(Qs[mk])))[0, 1]) if mk.sum() >= 20 else np.nan)
     r_vals = np.array(r_vals)
-    axF = fig.add_subplot(gs_D[1])
+    figF = plt.figure(figsize=(3.6, 2.4)); axF = figF.add_axes([0.16, 0.2, 0.68, 0.72])
     axF.plot(d_grid, r_vals, '-', color='#2b70b4', lw=1.2, zorder=3)
     axF.fill_between(d_grid, r_vals, where=~np.isnan(r_vals), color='#2b70b4', alpha=0.15, zorder=2)
     axF.set_xlim(0, d_grid.max()); axF.set_ylim(0, 1); axF.axhline(0.5, color='0.65', lw=0.6, ls=':')
     axF.set_xlabel('distance from the driven boundary (hops)', labelpad=1)
     axF.set_ylabel(r"$r_{\log}$", labelpad=1)
-    letter(axF, 'f', 'agreement away from the driven boundary', dx=-0.16)
     axF2 = axF.twinx(); axF2.plot(d_grid, n_vals, '--', color='0.45', lw=0.8, alpha=0.8)
     axF2.set_ylabel('vessels retained', color='0.45', labelpad=2); axF2.tick_params(colors='0.45'); axF2.spines['top'].set_visible(False); axF.spines['top'].set_visible(False)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    plos_style.save(fig, OUT_DIR / 'fig8alt_v3')
-    print(f"[fig8alt_v3] r_log {r_log:.3f}, P(dir agree|filtered) {p_agree:.2f}, mismatches {int(mism.sum())}, "
-          f"n {int(m.sum())}; wrote {OUT_DIR / 'fig8alt_v3.png'}")
+    plos_style.save(fig, OUT_DIR / 'fig7'); plos_style.save(figF, OUT_DIR / 'fig7_S_boundary_distance')
+    print(f"[fig7] r_log {r_log:.3f}, P(dir agree|filtered) {p_agree:.2f}, mismatches {int(mism.sum())}, "
+          f"n {int(m.sum())}; wrote {OUT_DIR / 'fig7.png'}")
 
 
 if __name__ == '__main__':
