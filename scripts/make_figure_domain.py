@@ -48,10 +48,11 @@ def main():
         if show_exc:
             ax.add_collection(LineCollection(exc, colors=EXC, linewidths=1.8, alpha=0.95, zorder=3))
         if show_A:
-            for s_, lab, dx in (("L", "A$_{\mathrm{eff},1}$", -1), ("R", "A$_{\mathrm{eff},2}$", 1)):
+            nL, nR = int(np.sum(side == "L")), int(np.sum(side == "R"))
+            for s_, lab, dx in (("L", r"$A^{\mathrm{L}}_{1\ldots%d}$" % nL, -1), ("R", r"$A^{\mathrm{R}}_{1\ldots%d}$" % nR, 1)):
                 P_ = np.array([xy(n) for n, s in zip(inj, side) if s == s_])
                 ax.scatter(*P_.T, s=18, color=ART, edgecolor="white", linewidth=0.5, zorder=5)
-                ax.text(P_[:, 0].mean() + dx * 70, P_[:, 1].min() - 30, lab, ha="center", va="bottom",
+                ax.text(P_[:, 0].max() + 40 if dx < 0 else P_[:, 0].min() - 40, P_[:, 1].mean(), lab, ha="left" if dx < 0 else "right", va="center",
                         fontsize=9, fontweight="bold", color=ART, path_effects=HALO, zorder=6)
         if show_V:
             for n, lab, dx in zip(dom["V"], ("V$_1$", "V$_2$"), (-1, 1)):
@@ -65,7 +66,8 @@ def main():
         ax.plot([xe - L, xe], [ya, ya], color="white", lw=2, solid_capstyle="butt", path_effects=[pe.withStroke(linewidth=3.2, foreground="black")])
         ax.text(xe, ya - 0.04 * half, f"{sb_um:g} µm", color="white", ha="right", va="bottom", fontsize=8, path_effects=[pe.withStroke(linewidth=1.6, foreground="black")])
     da_stubs = [seg(e) for n in dom["DA"] for e in G.edges(n) if e not in keep and e[::-1] not in keep]
-    def draw_da(ax):                                               # dorsal-aorta termini (the DA nodes), labelled in arterial red
+    def draw_da(ax):                                               # dorsal-aorta skeleton (excluded stubs) + termini, in arterial red
+        ax.add_collection(LineCollection(da_stubs, colors=ART, linewidths=1.0, alpha=0.95, zorder=4))
         for n, lab, dx in zip(dom["DA"], ("A$_{\mathrm{true},1}$", "A$_{\mathrm{true},2}$"), (-1, 1)):
             p_ = xy(n); ax.scatter(*p_, s=40, color=ART, edgecolor="white", linewidth=0.6, zorder=6)
             ax.text(p_[0] + dx * 22, p_[1] + 10, lab, ha="right" if dx < 0 else "left", va="center", fontsize=9, fontweight="bold",
