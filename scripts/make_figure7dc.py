@@ -48,7 +48,8 @@ from plexusflow.reconcile import carved_domain, passive
 STAGE = _paths.STAGE
 MOSAIC_P = _paths.MOSAIC
 OUT_DIR = _paths.FIGURES / 'fig7'
-SIGMA_P = 2.0          # Pa: soft equal-venous-pressure penalty (any σ_P ≲ 5 Pa gives the same split)
+import os
+SIGMA_P = float(os.environ.get('FIG7_SIGMA_P', '2.0'))   # Pa; 'inf' = no pressure penalty (measured venous split)  #: soft equal-venous-pressure penalty (any σ_P ≲ 5 Pa gives the same split)
 SCHEME, RADIUS, N_SHUFFLE = 'irls', 'consensus', 10
 
 
@@ -76,7 +77,7 @@ def main():
     sV = [float(np.sqrt(np.sum(D['sigma'][Bm.tocsc()[v].nonzero()[1]] ** 2))) for v in (v1, v2)]
     d_ = np.zeros(Bm.shape[0]); d_[v1], d_[v2] = -1.0, 1.0
     pA, pD = pres(fb * NL), pres(d_ * NL); dP0, kk = pA[v2] - pA[v1], pD[v2] - pD[v1]
-    shift = -(dP0 * kk / SIGMA_P ** 2) / (1 / sV[0] ** 2 + 1 / sV[1] ** 2 + kk ** 2 / SIGMA_P ** 2)
+    shift = 0.0 if not np.isfinite(SIGMA_P) else -(dP0 * kk / SIGMA_P ** 2) / (1 / sV[0] ** 2 + 1 / sV[1] ** 2 + kk ** 2 / SIGMA_P ** 2)
     fb = fb.copy(); fb[v1] -= shift; fb[v2] += shift
     Qs = passive(K, fb, dom)
     print(f"[fig7] soft venous penalty σ_P {SIGMA_P} Pa: outflow V1 {fb[v1]:.2f}, V2 {fb[v2]:.2f} nL/s (shift {shift:+.2f}); "
@@ -240,7 +241,7 @@ def main():
     axF2.set_ylabel('vessels retained', color='0.45', labelpad=2); axF2.tick_params(colors='0.45'); axF2.spines['top'].set_visible(False); axF.spines['top'].set_visible(False)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    plos_style.save(fig, OUT_DIR / 'fig7'); plos_style.save(figF, OUT_DIR / 'fig7_S_boundary_distance')
+    plos_style.save(fig, OUT_DIR / ('fig7' if np.isfinite(SIGMA_P) else 'fig7_no_vein_penalty')); plos_style.save(figF, OUT_DIR / 'fig7_S_boundary_distance')
     print(f"[fig7] r_log {r_log:.3f}, P(dir agree|filtered) {p_agree:.2f}, mismatches {int(mism.sum())}, "
           f"n {int(m.sum())}; wrote {OUT_DIR / 'fig7.png'}")
 
