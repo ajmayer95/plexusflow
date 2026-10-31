@@ -71,7 +71,7 @@ def main():
         ax.text(np.mean([q[:, 0].mean() for q in da_stubs]), min(q[:, 1].min() for q in da_stubs) + 60, "DA", ha="center", va="top",
                 fontsize=9, fontweight="bold", color=ART, path_effects=HALO, zorder=6)
     fig = plt.figure(figsize=(7.5, 3.2))
-    gs = fig.add_gridspec(1, 3, width_ratios=[0.78, 1.0, 1.0], wspace=0.06, left=0.01, right=0.99, top=0.9, bottom=0.02)
+    gs = fig.add_gridspec(1, 3, width_ratios=[0.8, 1.0, 1.0], wspace=0.06, left=0.01, right=0.99, top=0.9, bottom=0.02)
     axA = fig.add_subplot(gs[0]); sch = _paths.FIGURES / "fig5" / "anatomy.png"     # Alex's drawing (figures/fig5/anatomy.svg)
     if sch.exists():
         axA.imshow(plt.imread(str(sch)), interpolation="antialiased")
