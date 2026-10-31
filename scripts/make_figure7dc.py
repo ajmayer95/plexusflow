@@ -115,6 +115,7 @@ def main():
 
     resolved = np.abs(Qp) > 2 * D['sigma']                     # direction determined: |Q'| > 2σ_e (Fig 6 noise model)
     print(f"[fig7] direction resolved for {resolved.sum()} of {len(Qp)} vessels (|Q'| > 2σ)")
+    print(f"[fig7] resolved vessels carry {100 * np.abs(Qp[resolved]).sum() / np.abs(Qp).sum():.0f}% of Σ|Q'|; length-weighted {100 * (np.abs(Qp) * D['length'])[resolved].sum() / (np.abs(Qp) * D['length']).sum():.0f}%; passive Σ|Q_sim| on them {100 * np.abs(Qs[resolved]).sum() / np.abs(Qs).sum():.0f}%")
     def field(ax, Q, mask_unresolved):
         und = ~resolved if mask_unresolved else np.zeros(len(Q), bool)
         ax.add_collection(LineCollection([segs[c] for c in np.flatnonzero(und)], colors=[(0.6, 0.6, 0.6, 0.5)], linewidths=0.25, zorder=2))
@@ -136,7 +137,7 @@ def main():
     axA.legend(loc='lower right', fontsize=8, frameon=False, borderaxespad=0, handlelength=1.4)
 
     # b
-    axB = fig.add_subplot(gT[1]); bg(axB); field(axB, Qs, False); markers(axB)
+    axB = fig.add_subplot(gT[1]); bg(axB); field(axB, Qs, True); markers(axB)     # same measurement-support mask as a
     inj = fb[dom['inj']]
     for j, nidx in enumerate(dom['inj']):
         xy = nxy[nodes[nidx]]; a = inj[j]
