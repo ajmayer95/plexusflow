@@ -80,8 +80,8 @@ def main():
         # anatomical labels on the cartoon (pixel coordinates of anatomy.png, 2412 × 3015)
         k_ = 1.5075; lab_kw = dict(fontsize=8, color=INK, ha="center", va="center", arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"))
         axA.annotate("Heart", (840 * k_, 230 * k_), xytext=(1300 * k_, 230 * k_), **lab_kw)
-        axA.annotate("Vitelline\nvein", (380 * k_, 690 * k_), xytext=(240 * k_, 470 * k_), **lab_kw)
-        axA.annotate("Vitelline\nvein", (1250 * k_, 690 * k_), xytext=(1400 * k_, 470 * k_), **lab_kw)
+        axA.annotate("Left vitelline\nvein", (380 * k_, 690 * k_), xytext=(240 * k_, 470 * k_), **lab_kw)      # image left = embryo left
+        axA.annotate("Right vitelline\nvein", (1250 * k_, 690 * k_), xytext=(1400 * k_, 470 * k_), **lab_kw)   # (heart loops to image right)
         axA.annotate("Dorsal\naortae", (700 * k_, 900 * k_), xytext=(320 * k_, 950 * k_), **lab_kw)
         axA.annotate("", (890 * k_, 900 * k_), xytext=(420 * k_, 940 * k_), arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"))
         axA.annotate("Developing\nvitelline arteries", (560 * k_, 1700 * k_), xytext=(800 * k_, 2080 * k_), **lab_kw)
