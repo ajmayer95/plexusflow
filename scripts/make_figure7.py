@@ -360,7 +360,7 @@ def main():
         if k_ in (1, 3):
             ax_.set_yticklabels([])
         else:
-            ax_.set_ylabel(r"$Q/\bar Q$", fontsize=8, labelpad=0)
+            ax_.set_ylabel(r"$Q/\bar Q$", fontsize=8, labelpad=4)
         if k_ == 2:
             ax_.set_xlabel("Beats (aligned on the fundamental)", fontsize=8, labelpad=1, x=1.04)
         ax_.spines[["top", "right"]].set_visible(False)
@@ -1055,7 +1055,7 @@ def main():
 
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
     cax = axC.inset_axes([0.2, -0.04, 0.6, 0.022]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=np.arange(0, nph.vmax + 1, 40), extend="min")
-    cb.set_label("Fundamental phase lag (°)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
+    cb.set_label("Fundamental phase lag (°)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
     _L1 = 1000 / 1.7; _x0c, _y0c = XL[0] + 0.03 * (XL[1] - XL[0]), YL[0] - 0.04 * (YL[0] - YL[1])     # 1 mm scale bar, lower left
     axC.plot([_x0c, _x0c + _L1], [_y0c, _y0c], color="0.1", lw=2, solid_capstyle="butt", zorder=8)
     axC.text(_x0c + _L1 / 2, _y0c - 0.012 * (YL[0] - YL[1]), "1 mm", ha="center", va="bottom", fontsize=8, zorder=8)
@@ -1124,7 +1124,10 @@ def main():
         for t_ in f_.findobj(matplotlib.text.Text):
             if t_.get_text() and t_.get_fontsize() < lo:
                 t_.set_fontsize(lo)
+        for ax_ in f_.axes + [c_ for a_ in f_.axes for c_ in a_.child_axes]:   # tick labels are created at draw time (incl. inset axes)
+            ax_.tick_params(axis="both", which="both", labelsize=lo)
     for f_, out_, nm_ in ((figR, OUT8, "fig8"), (figS, OUT9, "fig9"), (figV, OUT9, "fig9_S_validation"), (figD, OUT8, "fig8_S_detection"), (figT, OUT8, "fig8_S_theta21")):
+        _plos_min_font(f_)                                     # PLOS: all text ≥ 8 pt (tick labels were 6–7 pt)
         plos_style.save(f_, out_ / f"{nm_}{args.tag}")
         log(f"wrote {out_ / f'{nm_}{args.tag}.png'}")
 
