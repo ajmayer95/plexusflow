@@ -121,6 +121,7 @@ def main():
     stats = dict(pf_corr=lc(pf_m[ok], pf_s[ok]), rms_corr=lc(rms_m[e & (rms_s > 0)], rms_s[e & (rms_s > 0)]),
                  h1_dphi_deg=dphi(1), h2_dphi_deg=dphi(2), pires=np.median(pires[e]))
     print('[fig9alt_v3] ' + ', '.join(f'{k} {v:.3f}' for k, v in stats.items()))
+    print(f'[fig10] n: RMS correlation {int((e & (rms_s > 0) & (rms_m > 0)).sum())}, phase errors {int(ph_ok.sum())}')
 
     mos = tifffile.imread(str(_paths.MOSAIC)); mos = mos.mean(axis=-1) if mos.ndim == 3 else mos
     Hmos, Wmos = mos.shape
@@ -203,7 +204,7 @@ def main():
     axB = fig.add_subplot(gB[0]); bg(axB); edgemap(axB, pires, e, nPI, cPI, 0.45); pick_marks(axB)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=nPI, cmap=cPI), cax=axB.inset_axes([1.03, 0.10, 0.05, 0.80]))
     cb.set_label('Harmonic residual', fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
-    axB.set_title('Normalised-harmonic residual', fontsize=9, pad=3)
+    axB.set_title('Harmonic residual', fontsize=9, pad=3)
 
     # c  pulsatile RMS scatter + statistics
     axC = fig.add_subplot(gB[1])
@@ -215,7 +216,7 @@ def main():
     axC.set_xscale('log'); axC.set_yscale('log'); axC.set_xlim(lo, hi); axC.set_ylim(lo, hi); axC.set_aspect('equal')
     axC.set_xlabel('Measured pulsatile RMS (nL/s)', fontsize=8, labelpad=1)
     axC.set_ylabel('RC network (nL/s)', fontsize=8, labelpad=1); axC.tick_params(labelsize=8)
-    axC.text(0.0, 1.03, f"$r_{{\\log}}$ = {stats['rms_corr']:.2f} (n = {int(sel.sum())})\nmedian $|\\Delta\\phi_1|$ = {stats['h1_dphi_deg']:.0f}°, $|\\Delta\\phi_2|$ = {stats['h2_dphi_deg']:.0f}°\n(both n = {int(ph_ok.sum())})",
+    axC.text(0.0, 1.03, f"$r_{{\\log}}$ = {stats['rms_corr']:.2f}\nmedian $|\\Delta\\phi_1|$ = {stats['h1_dphi_deg']:.0f}°, $|\\Delta\\phi_2|$ = {stats['h2_dphi_deg']:.0f}°",
              transform=axC.transAxes, va='bottom', fontsize=8, linespacing=1.2)
     axC.spines[['top', 'right']].set_visible(False)
 
@@ -254,7 +255,8 @@ def main():
             ax.set_xlabel('$t/T$', fontsize=8, labelpad=1)
         ax.text(0.04, 0.95, str(k + 1), transform=ax.transAxes, ha='center', va='center', fontsize=8, fontweight='bold',
                 bbox=dict(fc='#f5d400', ec='black', lw=0.6, boxstyle='circle,pad=0.2'))
-        ax.set_title(f"{('Good', 'Typical', 'Poor')[k]} harmonic fit\nresidual {pires[c]:.2f}", fontsize=8, pad=3, loc='center', linespacing=1.1)
+        ax.set_title(f"{('Good', 'Typical', 'Poor')[k]} fit", fontsize=9, pad=3, loc='center')
+        print(f"[fig10] e{k + 1} ({('good', 'typical', 'poor')[k]}): edge {edges[c]}, harmonic residual {pires[c]:.2f}")
     axs_e[0].legend(fontsize=8, loc='lower left', frameon=False, borderaxespad=0.1, handlelength=1.8)
 
     # panel letters on a grid
