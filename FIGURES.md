@@ -17,9 +17,9 @@ stage config (`raw_video_dir`). To run: `PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S
 | 6 | DC measurement reliability, held-out calibration, conservation-consistent reconciliation | `make_figure6.py` | `results/reliability_model_v1.json`, `results/dc_reconciled_v2.pkl`, `batch_kl_inputs/` |
 | 7 | Whole-organ DC: reference field Q′ vs passive Poiseuille prediction (soft equal-venous-pressure penalty), local agreement, radius controls | `make_figure7dc.py` | `results/dc_reconciled_v2.pkl`, canonical graph |
 | 8, 9 | Pulsatile regime (transient vs retained recordings, repeat-vessel waveform reproducibility); tile-clock synchronisation and organ phase map (one script, two figures + SI; writes `figures/fig8/`, `figures/fig9/`) | `make_figure7.py` | `results/ac_field_v7.pkl`, canonical graph |
-| 10 | Measured vs simulated pulsatile flow (RC network) | `mech/make_figure9alt_v3.py --bc-json results/ac_estimate_v8.json --tag v8` | `results/ac_field_v7.pkl`, `results/ac_estimate_v8.json` |
+| 10 | Pulsatile flow: measured vs distributed RC network (maps on the Fig 9 phase reference, PI residual, RMS scatter), profiled distensibility fit, Q/Q̄ waveforms; SI stiff / fitted / compliant | `make_figure10.py --bc-json $PLEXUSFLOW_STAGE/results/ac_estimate_v8.json` | `results/ac_field_v7.pkl`, `results/ac_estimate_v8.json` |
 
 Supplementary figures are written by the same scripts (`*_S_*` / `*_supp_*` files in the same output folder).
 
 Superseded versions kept for reference: `make_figure2_registration_old.py`, `make_figure3_meanflow_old.py`,
-`make_figure4_pulsatile_old.py`, `make_figure6v3.py`. Script names for Figs 8–10 still carry older numbering.
+`make_figure4_pulsatile_old.py`, `make_figure6v3.py`. The script for Figs 8–9 (`make_figure7.py`) still carries older numbering; it writes `figures/fig8/` and `figures/fig9/`.

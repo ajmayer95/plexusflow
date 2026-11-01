@@ -7,7 +7,7 @@ ratio with L/R group corrections; veins pinned to the stub waveforms (--veins me
 vein node its own stub, 27S); latent tile gauge; waveform-based weights; η = 0 (pass --eta 0 0.2 0.4 … to estimate it).
 The stub waveforms are gauge-corrected with the fitted tile corrections, so the fit is run twice (--gauge-passes).
 Writes results/ac_estimate_v3.json (D, η, profile, fitted boundary forcing per node, tile gauge corrections — the input of
-make_figure9alt_v3.py --bc-json) and figures/ac/ac_estimate_v3.png.
+make_figure10.py --bc-json) and figures/ac/ac_estimate_v3.png.
 """
 import sys
 from pathlib import Path

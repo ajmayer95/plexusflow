@@ -1,7 +1,7 @@
 """AC (waveform) field figure — the measured, tile-aligned harmonic field on the carved network, no model.
 
 Needs results/dc_reconciled_v2.pkl (scripts/dc_reconcile.py) and results/ac_field_v2.pkl (scripts/ac_field.py).
-The model comparison (RC network vs measured) is scripts/mech/make_figure9alt_v3.py.
+The model comparison (RC network vs measured) is scripts/make_figure10.py.
 
   A  pulsatility fraction (|H1|²+|H2|²)/|Q̄|², H1 phase, H2 phase (mod π; phase-determined vessels only)
   B  tile time gauge: bootstrap SD of each vessel's winner tile; junction residual |Σ s Ĥ| / Σ|Ĥ| for the aligned field,
