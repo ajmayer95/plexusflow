@@ -37,7 +37,6 @@ HCOL = ["#1f4e8c", "#d95f02", "#7570b3"]
 KW = dict(dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="median_band", median_lo=0.5, median_hi=1.5, R_slice_lo=0.5,
           R_slice_hi=2.0, min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0)
 UMS = PX_SIZE_UM / FRAME_DT_S
-RAW_DIR = Path("/Users/amayer/Desktop/ImageData/21Somites/emb1")
 HALO = [pe.withStroke(linewidth=1.6, foreground="black")]
 
 
@@ -66,6 +65,8 @@ def main():
     # a: vessel in its tile, time-mean OF, cross-sections
     # a single representative raw frame (full resolution, same grid as the tile projection): the frame closest to the
     # movie's per-pixel median, among every 10th frame
+    from plexusflow.config import StageConfig
+    RAW_DIR = Path(StageConfig.load(P).raw_video_dir).expanduser()      # raw tile movies (stage config)
     raw = sorted((RAW_DIR / f"10x 250fps loc{TILE}_C001H001S0001").glob(f"10x 250fps loc{TILE}_C001H001S0001*.tif"))
     stack = np.stack([tifffile.imread(str(f_)).astype(float) for f_ in raw[::10]]); med = np.median(stack, axis=0)
     k_rep = int(np.argmin([np.mean((fr_ - med) ** 2) for fr_ in stack])); img = stack[k_rep]; img = img.mean(-1) if img.ndim == 3 else img
