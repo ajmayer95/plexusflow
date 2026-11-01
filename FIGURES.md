@@ -16,7 +16,7 @@ stage config (`raw_video_dir`). To run: `PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S
 | 5 | Effective vascular domain: anatomy cartoon, true boundaries (V₁, V₂, dorsal aorta), effective arterial cuts | `make_figure5.py` | `figures/fig5/anatomy.png` (drawing), canonical graph, `fuse/organ_fusion.tif` |
 | 6 | DC measurement reliability, held-out calibration, conservation-consistent reconciliation | `make_figure6.py` | `results/reliability_model_v1.json`, `results/dc_reconciled_v2.pkl`, `batch_kl_inputs/` |
 | 7 | Whole-organ DC: reference field Q′ vs passive Poiseuille prediction (soft equal-venous-pressure penalty), local agreement, radius controls | `make_figure7dc.py` | `results/dc_reconciled_v2.pkl`, canonical graph |
-| 8, 9 | Pulsatile regime / measurability; tile-clock synchronisation and organ phase map (one script, two figures + SI) | `make_figure7.py` | `results/ac_field_v7.pkl`, canonical graph |
+| 8, 9 | Pulsatile regime (transient vs retained recordings, repeat-vessel waveform reproducibility); tile-clock synchronisation and organ phase map (one script, two figures + SI; writes `figures/fig8/`, `figures/fig9/`) | `make_figure7.py` | `results/ac_field_v7.pkl`, canonical graph |
 | 10 | Measured vs simulated pulsatile flow (RC network) | `mech/make_figure9alt_v3.py --bc-json results/ac_estimate_v8.json --tag v8` | `results/ac_field_v7.pkl`, `results/ac_estimate_v8.json` |
 
 Supplementary figures are written by the same scripts (`*_S_*` / `*_supp_*` files in the same output folder).

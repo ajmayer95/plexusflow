@@ -22,7 +22,8 @@ in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
   Phases: synchronisation anchored on the dorsal aorta (= results/ac_field_v3); zero = tile-14 physiological boundary
   (2 DA + 2 V stubs, one recording); flow-direction frame (sgn Q′); measurements against the reconciled flow not used.
   (supplement fig7_supp_heldout: held-out overlap prediction)
-Reads the graph and results/dc_reconciled_v2.pkl (recomputes the AC field); writes figures/fig7_sync/fig7.{png,pdf,tif}.
+Reads the graph and results/dc_reconciled_v2.pkl (recomputes the AC field); writes figures/fig8/fig8.* (pulsatile regime) and figures/fig9/fig9.* (phase sync),
+plus their supplementary figures fig8_S_* / fig9_S_* in the same folders.
 """
 from __future__ import annotations
 import sys
@@ -46,7 +47,7 @@ from plexusflow.ac.field import build_ac_field, F0_BAND
 from plexusflow.config import StageConfig
 from plexusflow.analyze.geometry import load_tile_geometry
 
-OUT_DIR = _paths.FIGURES / "fig7_sync"
+OUT8, OUT9 = _paths.FIGURES / "fig8", _paths.FIGURES / "fig9"     # paper Fig 8 (pulsatile regime) / Fig 9 (phase sync)
 SD_MAX = 30.0
 T0 = time.time()
 
@@ -142,7 +143,7 @@ def main():
     figR = plt.figure(figsize=(7.5, 5.6), facecolor="white")
     gR = figR.add_gridspec(2, 2, width_ratios=[1, 1.1], height_ratios=[0.58, 1], wspace=0.24, hspace=0.5,
                            left=0.075, right=0.985, top=0.93, bottom=0.08)
-    gRx = gR[1, 1].subgridspec(2, 2, wspace=0.1, hspace=0.55)
+    gRx = gR[1, 1].subgridspec(2, 2, wspace=0.1, hspace=0.62)
     GA, GT, GB7 = gR[0, 0], gR[0, 1], gR[1, 0]; GX = [gRx[0, 0], gRx[0, 1], gRx[1, 0], gRx[1, 1]]
     figT = plt.figure(figsize=(3.6, 2.9), facecolor="white")       # SI: clock-free Θ21 check (fig7_supp_theta21)
     GTH = figT.add_gridspec(1, 1, left=0.17, right=0.97, top=0.95, bottom=0.17)[0]
@@ -158,7 +159,7 @@ def main():
     fig = figR
 
     def label(cell, letter):
-        b_ = cell.get_position(fig); fig.text(b_.x0 - 0.045, b_.y1 + 0.03, letter, fontsize=10, fontweight="bold", va="bottom", ha="left")
+        b_ = cell.get_position(fig); fig.text(b_.x0 - 0.045, b_.y1 + 0.03, letter, fontsize=12, fontweight="bold", va="bottom", ha="left")
 
     # ---- a: which tiles are comparable — heart rate per tile, accepted band
     axA = fig.add_subplot(GA); ts = sorted(tf0); f = np.array([tf0[t] for t in ts]); inb = np.array([t in band for t in ts])
@@ -181,7 +182,7 @@ def main():
                 _tcih[t] = _dtm.datetime(*map(int, _md.groups()), *map(int, _mt.groups())).timestamp()
     tacq = _tcih if all(t in _tcih for t in ts) else _tfile        # one clock for every tile (the two differ by a fixed ~3 h)
     if all(t in tacq for t in ts):
-        _t0 = min(tacq.values()); xs_a = np.array([(tacq[t] - _t0) / 60 for t in ts]); xlab = "acquisition time (min)"
+        _t0 = min(tacq.values()); xs_a = np.array([(tacq[t] - _t0) / 60 for t in ts]); xlab = "Acquisition time (min)"
     else:
         xs_a = np.array(ts, float); xlab = "acquisition order (tile)"
     xref = xs_a[ts.index(ref)]
@@ -206,7 +207,7 @@ def main():
     ezone_e = {e_ for e_ in mall if G.has_edge(*e_) and any(pp_.contains_point(_mid(e_)) for pp_ in _ep)}
     log(f"  early-tile footprint: {len(ezone_e)} vessels")
     RCOL = {"T": "#b23a48", "L": "#8a8a8a", "S": "#2b5c8a"}
-    RLAB = {"T": "transient", "L": "", "S": "retained"}
+    RLAB = {"T": "early", "L": "", "S": "later"}          # early = f0 below the band (rapid rise); main = analysed set
     # detection of the fundamental above broadband noise, per measurement: F-test of the 3-harmonic fit (ρ = explained-variance
     # fraction of n samples, 6 regressors); detected = p < P_DET
     from scipy.stats import f as _Fd
@@ -227,12 +228,10 @@ def main():
         axA.scatter(xs_a[m_], f[m_], s=10, color=RCOL[k_], edgecolors="white", linewidths=0.4, zorder=3, label=RLAB[k_])
     # the retained set is the heart-rate band (f0 within ±21 % of the reference recording); b–d show it is a reproducible regime
     _te = max(xs_a[ts.index(t)] for t in early); _tr = min(xs_a[ts.index(t)] for t in ts if reg(t) == "S")
-    axA.axvline((_te + _tr) / 2, color="0.5", lw=0.7, ls=":")
-    axA.text((_te + _tr) / 2 + 6, 1.0, "end of\ntransient", fontsize=8, color="0.4", va="bottom", ha="left", linespacing=0.9)
+    axA.axvspan(xs_a.min() - 10, (_te + _tr) / 2, color=RCOL["T"], alpha=0.08, lw=0, zorder=0)        # transient recordings
     axA.set_xlabel(xlab, fontsize=8, labelpad=1); axA.set_ylabel("$f_0$ (Hz)", fontsize=8, labelpad=1); axA.set_yticks([1, 2, 3])
     axA.tick_params(labelsize=7); axA.spines[["top", "right"]].set_visible(False)
     axA.legend(loc="lower right", fontsize=8, frameon=False, handletextpad=0.1, borderaxespad=0.1, labelspacing=0.15)
-    label(GA, "a")
 
     fig = figD
     # ---- c: phase is measurable where the local pulsatile signal is large enough — per vessel recording (retained tiles):
@@ -273,7 +272,7 @@ def main():
         return H_ * u_ ** np.arange(1, 4) / abs(y_["a0"])
     def _D(ya, yb):
         sa, sb = _shape(ya), _shape(yb); return np.linalg.norm(sa - sb) / np.sqrt((np.linalg.norm(sa) ** 2 + np.linalg.norm(sb) ** 2) / 2)
-    SP = {"E": [], "B": []}; vD = {"E": {}, "B": {}}; TH = {"E": [], "B": []}
+    SP = {"E": [], "B": []}; vD = {"E": {}, "B": {}}; TH = {"E": [], "B": []}; PM = {"E": [], "B": []}   # PM: (D, |Δf0|/f0, |Δt| min)
     for e_, x_ in mall.items():
         ok_ = [t_ for t_, y_ in x_.items() if np.isfinite(y_["rho"]) and y_["rho"] >= 0.2 and abs(y_["a0"]) > 0 and abs(y_["H"][0]) > 0]
         for i_ in range(len(ok_)):
@@ -283,10 +282,33 @@ def main():
                 if g_ is None or np.sign(ya["a0"]) != np.sign(yb["a0"]):
                     continue
                 d_ = _D(ya, yb); SP[g_].append(d_); vD[g_].setdefault(e_, []).append(d_)
+                PM[g_].append((d_, abs(tf0[a_] - tf0[b_]) / (0.5 * (tf0[a_] + tf0[b_])), abs(xs_a[ts.index(a_)] - xs_a[ts.index(b_)])))
                 _th = lambda y_: np.angle(y_["H"][1] * np.conj(y_["H"][0]) ** 2)
                 TH[g_].append((abs(np.degrees(np.angle(np.exp(1j * (_th(ya) - _th(yb)))))), min(ya["rho"], yb["rho"])))
     SP = {k: np.array(v) for k, v in SP.items()}; SCOL = {"E": RCOL["T"], "B": RCOL["S"]}
-    SLAB = {"E": "transient", "B": "retained"}
+    SLAB = {"E": "early", "B": "later"}
+    # vessel-level bootstrap (pairs sharing a vessel are not independent): resample vessels, median D of their pairs
+    _rng = np.random.default_rng(0); _ve = {g_: list(vD[g_].values()) for g_ in ("E", "B")}
+    _bm = lambda g_: np.median(np.concatenate([_ve[g_][i_] for i_ in _rng.integers(0, len(_ve[g_]), len(_ve[g_]))]))
+    _bd = np.array([_bm("E") - _bm("B") for _ in range(2000)])
+    log(f"  (b) median D transient − retained, vessel bootstrap: {np.median(SP['E']) - np.median(SP['B']):.2f} "
+        f"[95% {np.percentile(_bd, 2.5):.2f}, {np.percentile(_bd, 97.5):.2f}], P(≤0) {np.mean(_bd <= 0):.4f}")
+    # does the retained waveform shape drift with heart rate / time?  (f0 keeps rising through the retained recordings)
+    from scipy.stats import spearmanr as _spr
+    _pm = np.array(PM["B"])
+    for j_, nm_ in ((1, "|Δf0|/f0"), (2, "|Δt| (min)")):
+        r_, p_ = _spr(_pm[:, 0], _pm[:, j_]); q_ = np.percentile(_pm[:, j_], [0, 25, 50, 75, 100])
+        meds_ = [np.median(_pm[(_pm[:, j_] >= lo_) & (_pm[:, j_] <= hi_), 0]) for lo_, hi_ in zip(q_[:-1], q_[1:])]
+        log(f"  (b) retained pairs: D vs {nm_}: Spearman {r_:+.2f} (p {p_:.1g}); median D by quartile of {nm_}: "
+            + ", ".join(f"{m_:.2f}" for m_ in meds_) + f" (quartile edges {', '.join(f'{v_:.2f}' for v_ in q_)})")
+    # confound check: transient pairs span large heart-rate jumps; compare D at MATCHED |Δf0|/f0 and |Δt|
+    _pe = np.array(PM["E"])
+    log(f"  (b) transient pairs: |Δf0|/f0 median {np.median(_pe[:, 1]):.2f} (range {_pe[:, 1].min():.2f}–{_pe[:, 1].max():.2f}), "
+        f"|Δt| median {np.median(_pe[:, 2]):.0f} min (range {_pe[:, 2].min():.0f}–{_pe[:, 2].max():.0f})")
+    for lo_, hi_ in ((0.0, 0.05), (0.05, 0.1), (0.1, 0.2), (0.2, 1.0)):
+        me_ = (_pe[:, 1] >= lo_) & (_pe[:, 1] < hi_); mb_ = (_pm[:, 1] >= lo_) & (_pm[:, 1] < hi_)
+        log(f"  (b) |Δf0|/f0 in [{lo_:.2f}, {hi_:.2f}): transient n {me_.sum()} median D {np.median(_pe[me_, 0]) if me_.any() else np.nan:.2f} · "
+            f"retained n {mb_.sum()} median D {np.median(_pm[mb_, 0]) if mb_.any() else np.nan:.2f}")
     for g_ in ("E", "B"):
         log(f"  (e) repeat-vessel shape difference D, both {SLAB[g_]}: {len(SP[g_])} pairs / {len(vD[g_])} vessels, median {np.median(SP[g_]):.2f}, "
             f"90th {np.percentile(SP[g_], 90):.2f}")
@@ -295,10 +317,11 @@ def main():
     from plexusflow.reconcile.harmonics import phasors as _phz
     EXV, EXA, EXB = (1206, 1267), 3, 5                     # transient: tiles 3 → 5, 12 min apart
     LPV, LPT, LPR = (12024, 12102), 16, 15                  # low pulsatility: one vessel, clear in retained tile 15, lost in low tile 16
-    RV = (49550, 49649); RVe = RV if RV in mall else RV[::-1]; xr_ = mall[RVe]
+    RV = (68128, 68255); RVe = RV if RV in mall else RV[::-1]; xr_ = mall[RVe]
     rv_t = sorted([t_ for t_, y_ in xr_.items() if t_ in stitch and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
-    # example 3: retained, other half of the organ, recordings 40 min apart (sandbox/find_example3.py)
-    RV3 = (71514, 71560); RV3e = RV3 if RV3 in mall else RV3[::-1]; xr3_ = mall[RV3e]   # intermediate D (sandbox/find_retained_mid.py)
+    # retained examples 3, 4: interior vessels (≥ 1 mm from the organ outline) whose recordings are far apart in time (43–45 min),
+    # with typical D for that separation (sandbox/find_fig8_examples.py)
+    RV3 = (56890, 57078); RV3e = RV3 if RV3 in mall else RV3[::-1]; xr3_ = mall[RV3e]
     rv3_t = sorted([t_ for t_, y_ in xr3_.items() if t_ in stitch and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
     EXe = EXV if EXV in mall else EXV[::-1]
     def _trace(ax_, E_, t_, col_, lab_):
@@ -307,7 +330,7 @@ def main():
         a0_, H_ = _phz(q_, tf0[t_]); tt_ = np.arange(len(q_)) / 250.0; tau_ = tf0[t_] * tt_ + np.angle(H_[0]) / (2 * np.pi)
         tau_ = tau_ - np.floor(tau_[0]); sel_ = (tau_ >= 0) & (tau_ <= 2); tg_ = np.linspace(0, 2, 300)
         fit_ = a0_ + sum((abs(H_[n - 1]) * np.exp(1j * (np.angle(H_[n - 1]) - n * np.angle(H_[0]))) * np.exp(2j * np.pi * n * tg_)).real for n in (1, 2, 3))
-        ax_.plot(tau_[sel_], q_[sel_] / a0_, color=col_, lw=0.3, alpha=0.1, zorder=2)
+        ax_.plot(tau_[sel_], q_[sel_] / a0_, color=col_, lw=0.35, alpha=0.38, zorder=2)
         ax_.plot(tg_, fit_ / a0_, color=col_, lw=1.3, zorder=3, label=lab_)
         return a0_, H_
     T2V, T2A, T2B = (689, 857), 2, 3                        # second transient vessel: tiles 2 → 3, both ρ ≥ 0.94 (sandbox/find_transient2.py)
@@ -315,16 +338,19 @@ def main():
     axs_d = [fig.add_subplot(g_) for g_ in GX]
     _trace(axs_d[0], EXV, EXA, "#b23a48", f"{xs_a[ts.index(EXA)]:.0f} min"); _trace(axs_d[0], EXV, EXB, "#e08a96", f"{xs_a[ts.index(EXB)]:.0f} min")
     _trace(axs_d[1], T2V, T2A, "#b23a48", f"{xs_a[ts.index(T2A)]:.0f} min"); _trace(axs_d[1], T2V, T2B, "#e08a96", f"{xs_a[ts.index(T2B)]:.0f} min")
-    for t_, c_ in zip(rv_t, plt.cm.viridis(np.linspace(0.05, 0.8, len(rv_t)))):
+    _ramp = lambda n_: plt.cm.Blues(np.linspace(0.95, 0.45, n_))          # retained: one hue, dark (earliest) → light (latest)
+    for t_, c_ in zip(rv_t, _ramp(len(rv_t))):
         _trace(axs_d[2], RV, t_, c_, f"{xs_a[ts.index(t_)]:.0f}")
-    for t_, c_ in zip(rv3_t, plt.cm.viridis(np.linspace(0.05, 0.8, len(rv3_t)))):
+    for t_, c_ in zip(rv3_t, _ramp(len(rv3_t))):
         _trace(axs_d[3], RV3, t_, c_, f"{xs_a[ts.index(t_)]:.0f}")
     dEX = _D(mall[EXe][EXA], mall[EXe][EXB]); dT2 = _D(mall[T2e][T2A], mall[T2e][T2B])
     dRV = [_D(xr_[a_], xr_[b_]) for i_, a_ in enumerate(rv_t) for b_ in rv_t[i_ + 1:]]
     dRV3 = [_D(xr3_[a_], xr3_[b_]) for i_, a_ in enumerate(rv3_t) for b_ in rv3_t[i_ + 1:]]
     _sp = lambda tl_: xs_a[ts.index(tl_[-1])] - xs_a[ts.index(tl_[0])]
-    ttl_ = [("1", "T", f"transient · D = {dEX:.2f}"), ("2", "T", f"transient · D = {dT2:.2f}"),
-            ("3", "S", f"retained · D ≤ {max(dRV):.2f}"), ("4", "S", f"retained · D {'=' if len(dRV3) == 1 else '≤'} {max(dRV3):.2f}")]
+    _dt = lambda a_, b_: abs(xs_a[ts.index(b_)] - xs_a[ts.index(a_)])                          # first → last recording
+    ttl_ = [("1", "T", f"max D = {dEX:.2f} · Δt = {_dt(EXA, EXB):.0f} min"), ("2", "T", f"max D = {dT2:.2f} · Δt = {_dt(T2A, T2B):.0f} min"),
+            ("3", "S", f"max D = {max(dRV):.2f} · Δt = {_dt(rv_t[0], rv_t[-1]):.0f} min"),
+            ("4", "S", f"max D = {max(dRV3):.2f} · Δt = {_dt(rv3_t[0], rv3_t[-1]):.0f} min")]     # max over recording pairs (= D for 2)
     for k_, ax_ in enumerate(axs_d):
         tag_, cl_, sub_ = ttl_[k_]
         ax_.axhline(1, color="0.75", lw=0.4, ls=":"); ax_.axhline(0, color="0.4", lw=0.5); ax_.set_xlim(0, 2); ax_.set_xticks([0, 1, 2])
@@ -333,10 +359,8 @@ def main():
             ax_.set_yticklabels([])
         else:
             ax_.set_ylabel(r"$Q/\bar Q$", fontsize=8, labelpad=0)
-        if k_ in (0, 1):
-            ax_.set_xticklabels([])
         if k_ == 2:
-            ax_.set_xlabel("beats (aligned on the fundamental)", fontsize=8, labelpad=1, x=1.04)
+            ax_.set_xlabel("Beats (aligned on the fundamental)", fontsize=8, labelpad=1, x=1.04)
         ax_.spines[["top", "right"]].set_visible(False)
         ax_.text(-0.02, 1.06, tag_, transform=ax_.transAxes, fontsize=6.5, fontweight="bold", color="white", va="bottom", ha="right",
                  bbox=dict(boxstyle="circle,pad=0.15", fc=RCOL[cl_], ec="none"))
@@ -344,8 +368,7 @@ def main():
         pass
     log(f"  (c) examples: transient D {dEX:.2f}, {dT2:.2f}; retained max D {max(dRV):.2f}, {max(dRV3):.2f}")
     _q0, _q1 = axs_d[0].get_position(), axs_d[1].get_position()
-    fig.text((_q0.x0 + _q1.x1) / 2, _q0.y1 + 0.07, "same vessel measured repeatedly", fontsize=8, ha="center", va="bottom", fontweight="bold", color="0.2")
-    # the examples belong to panel c (bottom row = map + examples); no separate letter
+    fig.text(_q0.x0 - 0.02, _q0.y1 + 0.055, "Within-vessel reproducibility", fontsize=9, va="bottom", ha="left")
 
     # ---- e: across all repeat vessels — D, both recordings transient vs both stitchable; examples 1 and 3 marked
     axD = fig.add_subplot(GT); ecdf_ = {}
@@ -354,26 +377,20 @@ def main():
         axD.step(v_, np.arange(1, len(v_) + 1) / len(v_), where="post", color=SCOL[g_], lw=1.3, label=f"{SLAB[g_]} ({len(v_)})")
         m_ = np.median(v_); axD.plot([m_], [0.5], "o", ms=3, color=SCOL[g_], zorder=4)
         axD.plot([m_, m_], [0, 0.5], color=SCOL[g_], lw=0.6, ls=":", zorder=2)
-        axD.text(m_, 0.5, f" {m_:.2f}", color=SCOL[g_], fontsize=8, ha="left", va="top" if g_ == "E" else "bottom")
-    _on = lambda g_, x_: np.searchsorted(ecdf_[g_], x_, side="right") / len(ecdf_[g_])
-    for g_, xs_, tag_ in (("E", [dEX], "1"), ("E", [dT2], "2"), ("B", dRV, "3"), ("B", dRV3, "4")):
-        for x_ in xs_:
-            axD.plot(x_, _on(g_, x_), "o", ms=3.5, mfc="white", mec=SCOL[g_], mew=0.9, zorder=5)
-        xm_ = np.median(xs_); axD.annotate(tag_, xy=(xm_, _on(g_, xm_)), xytext=(xm_ + {"1": -0.1, "2": 0.07, "3": -0.04, "4": 0.12}[tag_], _on(g_, xm_) + {"1": 0.05, "2": 0.12, "3": 0.3, "4": -0.06}[tag_]),
-                                           fontsize=7, fontweight="bold", color=SCOL[g_], ha="center", arrowprops=dict(arrowstyle="-", lw=0.5, color=SCOL[g_]))
+        axD.text(m_ + 0.012, 0.02, f"{m_:.2f}", color=SCOL[g_], fontsize=8, ha="left", va="bottom")      # median, beside its dotted line
     axD.set_xlim(0, 1.1); axD.set_ylim(0, 1.02); axD.set_yticks([0, 0.5, 1]); axD.spines[["top", "right"]].set_visible(False)
-    axD.set_xlabel("waveform-shape difference $D$", fontsize=8, labelpad=1)
-    axD.text(0.0, 1.06, "← more reproducible", transform=axD.transAxes, fontsize=8, color="0.4", va="bottom")
-    axD.text(0.98, 0.26, f"retained ({len(SP['B'])})", color=SCOL["B"], fontsize=8, transform=axD.transAxes, va="bottom", ha="right")
-    axD.text(0.98, 0.1, f"transient ({len(SP['E'])})", color=SCOL["E"], fontsize=8, transform=axD.transAxes, va="bottom", ha="right")
-    axD.set_ylabel("cum. fraction", fontsize=8, labelpad=0); axD.tick_params(labelsize=7)
-    _pd = axD.get_position(); fig.text(_pd.x0 - 0.06, _pd.y1 + 0.03, "b", fontsize=10, fontweight="bold", va="bottom")
+    axD.set_xlabel("Waveform-shape difference $D$", fontsize=8, labelpad=1)
+    axD.text(0.02, 0.98, "← more reproducible", transform=axD.transAxes, fontsize=8, color="0.4", va="top")
+    axD.text(0.98, 0.26, f"later: {len(SP['B'])} pairs, {len(vD['B'])} vessels", color=SCOL["B"], fontsize=8, transform=axD.transAxes, va="bottom", ha="right")
+    axD.text(0.98, 0.1, f"early: {len(SP['E'])} pairs, {len(vD['E'])} vessels", color=SCOL["E"], fontsize=8, transform=axD.transAxes, va="bottom", ha="right")
+    axD.set_ylabel("Cumulative fraction", fontsize=8, labelpad=0); axD.tick_params(labelsize=7)
+
     pass
 
     fig = figT
     # ---- d: clock-free check — the shape phase Θ21 = φ2 − 2φ1 is unchanged by any tile clock offset (φn → φn + nψ)
     axTH = fig.add_subplot(GTH)
-    for g_, ls_, sel_, lab_ in (("E", "-", 0.2, "transient"), ("B", "-", 0.2, "retained"), ("B", "--", 0.5, "retained, both ρ ≥ 0.5")):
+    for g_, ls_, sel_, lab_ in (("E", "-", 0.2, "early"), ("B", "-", 0.2, "later"), ("B", "--", 0.5, "later, both ρ ≥ 0.5")):
         a_ = np.array(TH[g_]); v_ = np.sort(a_[a_[:, 1] >= sel_, 0])
         axTH.step(v_, np.arange(1, len(v_) + 1) / len(v_), where="post", color=SCOL[g_], lw=1.3 if ls_ == "-" else 1.0, ls=ls_,
                   label=f"{lab_} (median {np.median(v_):.0f}°)")
@@ -461,14 +478,19 @@ def main():
     axB7.set_aspect("equal"); axB7.set_xticks([]); axB7.set_yticks([]); [s_.set_visible(False) for s_ in axB7.spines.values()]
     for E_, tag_, k_, off_ in ((EXV, "1", "T", (-160, 260)), (T2V, "2", "T", (320, -200)), (RV, "3", "S", (300, 260)), (RV3, "4", "S", (-320, 300))):
         e_ = E_ if G.has_edge(*E_) else E_[::-1]; xx_, yy_ = _path(e_); cx_, cy_ = np.mean(xx_), np.mean(yy_)
-        axB7.plot(xx_, yy_, color="white", lw=6.0, zorder=5, solid_capstyle="round"); axB7.plot(xx_, yy_, color="black", lw=4.0, zorder=5.1, solid_capstyle="round")
-        axB7.annotate("", xy=(cx_, cy_), xytext=(cx_ + off_[0], cy_ + off_[1]), arrowprops=dict(arrowstyle="-", lw=0.7, color="black"), zorder=5)
+        axB7.plot(xx_, yy_, color="white", lw=3.6, zorder=5, solid_capstyle="round"); axB7.plot(xx_, yy_, color=RCOL[k_], lw=2.0, zorder=5.1, solid_capstyle="round")
+        axB7.annotate("", xy=(cx_, cy_), xytext=(cx_ + off_[0], cy_ + off_[1]), arrowprops=dict(arrowstyle="-", lw=0.6, color=RCOL[k_]), zorder=5)
         axB7.plot(cx_ + off_[0], cy_ + off_[1], "o", ms=10, mfc=RCOL[k_], mec="white", mew=0.8, zorder=6)
         axB7.text(cx_ + off_[0], cy_ + off_[1], tag_, fontsize=7, ha="center", va="center", fontweight="bold", color="white", zorder=7)
-    axB7.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.28), ec=RCOL["T"], label="transient early recordings"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.16), ec="0.35", label="retained recordings")],
+    axB7.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.28), ec=RCOL["T"], label="early recordings"),
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.16), ec="0.35", label="later recordings")],
                 loc="upper center", bbox_to_anchor=(0.5, 0.0), fontsize=8, frameon=False, ncol=2, handlelength=1.2, borderaxespad=0, columnspacing=0.8)
-    fig = figR; _pb = axB7.get_position(); fig.text(_pb.x0 - 0.02, _pb.y1 + 0.005, "c", fontsize=10, fontweight="bold", va="bottom")
+    fig = figR
+    # panel letters on a grid: a/c share the left column's x, b/d the right column's; a/b share the top row's y, c/d the bottom's
+    _pa, _pb_, _pc, _pd0 = axA.get_position(), axD.get_position(), axB7.get_position(), axs_d[0].get_position()
+    _xl = _pa.x0 - 0.065; _xr = min(_pb_.x0, _pd0.x0) - 0.065; _yt = max(_pa.y1, _pb_.y1) + 0.03; _yb = _pd0.y1 + 0.055
+    for x_, y_, l_ in ((_xl, _yt, "a"), (_xr, _yt, "b"), (_xl, _yb, "c"), (_xr, _yb, "d")):
+        figR.text(x_, y_, l_, fontsize=12, fontweight="bold", va="bottom", ha="left")
 
     # ---- SI (fig7_supp_shape_map): repeat vessels on the organ coloured by their waveform-shape difference D; early tiles shaded
     figSM = plt.figure(figsize=(4.0, 4.6), facecolor="white"); _fig_main = fig; fig = figSM
@@ -1023,7 +1045,7 @@ def main():
 
 
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    OUT8.mkdir(parents=True, exist_ok=True); OUT9.mkdir(parents=True, exist_ok=True)
     # supplement — held-out overlap prediction (fig7_supp_heldout)
     fs = plt.figure(figsize=(2.7, 2.7), facecolor="white"); axP = fs.add_axes([0.24, 0.22, 0.72, 0.72]); axP.set_aspect("equal")
     axP.plot([-200, 200], [-200, 200], color="0.6", lw=0.7, ls="--", zorder=1)
@@ -1032,8 +1054,8 @@ def main():
     axP.set_xlabel("tile-pair offset measured\nfrom shared vessels (deg)"); axP.set_ylabel("predicted with pair held out (deg)", labelpad=0)
     axP.spines[["top", "right"]].set_visible(False)
     axP.text(0.03, 0.97, f"{len(obs)} tile pairs\nmedian error {np.median(res):.0f}°", transform=axP.transAxes, ha="left", va="top", fontsize=7.5, color="0.3", linespacing=1.4)
-    plos_style.save(fs, OUT_DIR / f"fig7_supp_heldout{args.tag}")
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    plos_style.save(fs, OUT9 / f"fig9_S_heldout{args.tag}")
+    OUT8.mkdir(parents=True, exist_ok=True); OUT9.mkdir(parents=True, exist_ok=True)
     # SI fig8_supp_phase_rho: repeat-vessel aligned phase difference vs the weaker recording's coherence (retained tiles)
     PR_ = []
     for e_, x_ in meas.items():
@@ -1058,17 +1080,17 @@ def main():
     axPR.set_xscale("log"); axPR.set_ylim(0, 120); axPR.set_yticks([0, 30, 60, 90, 120])
     axPR.set_xlabel("coherence of the weaker recording, ρ", fontsize=7.5); axPR.set_ylabel("repeat-vessel phase difference,\naligned (deg)", fontsize=7.5)
     axPR.tick_params(labelsize=7); axPR.spines[["top", "right"]].set_visible(False)
-    plos_style.save(figP, OUT_DIR / f"fig8_supp_phase_rho{args.tag}")
-    plos_style.save(figB, OUT_DIR / f"fig8_supp_block{args.tag}")
-    plos_style.save(figSM, OUT_DIR / f"fig7_supp_shape_map{args.tag}")
+    plos_style.save(figP, OUT9 / f"fig9_S_phase_rho{args.tag}")
+    plos_style.save(figB, OUT9 / f"fig9_S_block{args.tag}")
+    plos_style.save(figSM, OUT8 / f"fig8_S_shape_map{args.tag}")
     def _plos_min_font(f_, lo=8.0):
         """PLOS Comp Biol: figure text 8–12 pt — raise every smaller text element (labels, ticks, legends, annotations) to `lo`."""
         for t_ in f_.findobj(matplotlib.text.Text):
             if t_.get_text() and t_.get_fontsize() < lo:
                 t_.set_fontsize(lo)
-    for f_, nm_ in ((figR, "fig7_regime"), (figS, "fig8_sync"), (figD, "fig7_supp_detection"), (figT, "fig7_supp_theta21")):
-        plos_style.save(f_, OUT_DIR / f"{nm_}{args.tag}")
-        log(f"wrote {OUT_DIR / f'{nm_}{args.tag}.png'}")
+    for f_, out_, nm_ in ((figR, OUT8, "fig8"), (figS, OUT9, "fig9"), (figD, OUT8, "fig8_S_detection"), (figT, OUT8, "fig8_S_theta21")):
+        plos_style.save(f_, out_ / f"{nm_}{args.tag}")
+        log(f"wrote {out_ / f'{nm_}{args.tag}.png'}")
 
 
 if __name__ == "__main__":
