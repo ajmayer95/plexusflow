@@ -244,6 +244,32 @@ def main():
     axF2.set_ylabel('vessels retained', color='0.45', labelpad=2); axF2.tick_params(colors='0.45'); axF2.spines['top'].set_visible(False); axF.spines['top'].set_visible(False)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # SI: sensitivity of the direction-confidence threshold k (|Q'| > kσ): coverage, directed loops, model agreement
+    import networkx as nx
+    tl_ = np.asarray((Bm.multiply(Bm > 0)).argmax(0)).ravel(); hd_ = np.asarray((Bm.multiply(Bm < 0)).argmin(0)).ravel()
+    zz = np.abs(Qp) / D['sigma']; ks = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]); rows = []
+    for k_ in ks:
+        keep = zz > k_ if k_ > 0 else np.abs(Qp) > 1e-12
+        DG = nx.DiGraph(); [DG.add_edge(tl_[e], hd_[e]) if Qp[e] > 0 else DG.add_edge(hd_[e], tl_[e]) for e in np.flatnonzero(keep)]
+        Sc = [c for c in nx.strongly_connected_components(DG) if len(c) > 1]; Su = set().union(*Sc) if Sc else set()
+        nl = sum(keep[e] and tl_[e] in Su and hd_[e] in Su for e in range(len(Qp)))
+        mk = keep & imaged & (np.abs(Qs) > 1e-12)
+        rows.append((100 * keep.mean(), 100 * np.abs(Qp[keep]).sum() / np.abs(Qp).sum(), 100 * nl / max(keep.sum(), 1),
+                     100 * np.mean(np.sign(Qp[mk]) == np.sign(Qs[mk])), np.corrcoef(np.log10(np.abs(Qp[mk])), np.log10(np.abs(Qs[mk])))[0, 1]))
+    rows = np.array(rows)
+    for k_, rw in zip(ks, rows):
+        print(f"[fig7 SI] k={k_:.1f}: vessels {rw[0]:.0f}%, flux {rw[1]:.0f}%, on directed loops {rw[2]:.1f}%, direction agree {rw[3]:.1f}%, r_log {rw[4]:.3f}")
+    figT, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.4, 2.6)); figT.subplots_adjust(wspace=0.45, left=0.1, right=0.97, bottom=0.2, top=0.92)
+    ax1.plot(ks, rows[:, 0], 'o-', color='0.3', ms=3, label='vessels retained'); ax1.plot(ks, rows[:, 1], 's-', color='#2b70b4', ms=3, label='flux carried')
+    ax1.plot(ks, rows[:, 2], '^-', color=MIS, ms=3, label='retained vessels on directed loops')
+    ax1.set_xlabel(r"threshold $k$  ($|Q'| > k\sigma$)", labelpad=1); ax1.set_ylabel('%', labelpad=1); ax1.set_ylim(0, 102)
+    ax1.legend(frameon=False, loc='center right'); ax1.axvline(2, color='0.7', lw=0.6, ls=':')
+    ax2.plot(ks, rows[:, 3], 'o-', color='#2b70b4', ms=3); ax2.set_ylabel('direction agreement (%)', color='#2b70b4', labelpad=1)
+    ax2b = ax2.twinx(); ax2b.plot(ks, rows[:, 4], 's--', color='0.4', ms=3); ax2b.set_ylabel(r'$r_{\log}$', color='0.4', labelpad=2)
+    ax2.set_xlabel(r"threshold $k$", labelpad=1); ax2.axvline(2, color='0.7', lw=0.6, ls=':')
+    for ax_, l_ in ((ax1, 'a'), (ax2, 'b')):
+        ax_.text(-0.18, 1.02, l_, transform=ax_.transAxes, fontsize=12, fontweight='bold', va='bottom')
+    plos_style.save(figT, OUT_DIR / 'fig7_S_threshold')
     plos_style.save(fig, OUT_DIR / ('fig7' if np.isfinite(SIGMA_P) else 'fig7_no_vein_penalty')); plos_style.save(figF, OUT_DIR / 'fig7_S_boundary_distance')
     print(f"[fig7] r_log {r_log:.3f}, P(dir agree|filtered) {p_agree:.2f}, mismatches {int(mism.sum())}, "
           f"n {int(m.sum())}; wrote {OUT_DIR / 'fig7.png'}")
