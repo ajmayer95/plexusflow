@@ -104,30 +104,39 @@ def _fit_theta(d, nT, tau=1.0, jitters=(0.0, 0.3, -0.3)):
     return best
 
 
-def fit_reliability(G, M, tau=1.0):
-    """ML fit of (c_T per tile, c_f, c_a, σ0) on all same-tile junctions.  Returns (model dict, junction list).
+def fit_reliability(G, M, tau=1.0, tile_terms=False):
+    """ML fit of the reliability model on all same-tile junctions.  Returns (model dict, junction list).
 
-    Well-posed by construction (2026-10-15; the earlier fit used numerical gradients and default tolerances, and its
-    weakly constrained parameters — σ0, c_T of tiles with few junctions — differed by up to 15–160 % between scipy
-    versions, which moved the sensitive ~1 % of reconciled flows): exact gradient, tight tolerances, σ0 ≥ 1e-4·median|Q|,
-    c in [1e-4, 10], and a mild pull of log c_T toward the tiles' mean (SD `tau` in log, i.e. a factor ~e) so tiles with
-    few junctions do not wander."""
-    tiles = sorted({t for t, _ in M}); nT = len(tiles); J = []
+    Default (2026-10-19): c = c0 + c_f (1 − f) + c_a (1 − align) — three numbers.  Against the earlier per-tile model
+    (tile_terms=True: c_T per tile, shrunk to their mean with SD `tau` in log) it loses 62 NLL on 21S's 4358 junctions for
+    52 fewer parameters, stays calibrated across deciles, and gives the same reconciliation (held-out error 0.709 vs 0.708,
+    2.7 % directions reversed both).  A residual off-centring term (quality.centre) was tested and added nothing in 5-fold
+    cross-validation (held-out ΔNLL −2.8).  Fit: exact gradient, tight tolerances, σ0 ≥ 1e-4·median|Q|, c in [1e-4, 10]."""
+    tiles = sorted({t for t, _ in M}); J = []
     for t in tiles:
         J += [(t, j) for j in same_tile_junctions(G, t, {e for (tt, e) in M if tt == t})]
     d = _arrays(J, M, tiles)
+    if not tile_terms:
+        d = d[:4] + (np.zeros_like(d[4]),) + d[5:]
+    nT = len(tiles) if tile_terms else 1
     best = _fit_theta(d, nT, tau)
     th = best.x
-    model = dict(c_T={int(t): float(np.exp(th[i])) for i, t in enumerate(tiles)}, c_f=float(np.exp(th[nT])),
-                 c_a=float(np.exp(th[nT + 1])), sigma0=float(np.exp(th[-1])), n_junctions=len(J),
-                 tau_log_cT=tau, converged=bool(best.success), nll=float(best.fun),
-                 formula="c = c_T + c_f*(1-f) + c_a*(1-align);  sigma = sqrt((|Q| c)^2 + sigma0^2)")
+    cT = {int(t): float(np.exp(th[i if tile_terms else 0])) for i, t in enumerate(tiles)}
+    model = dict(c_T=cT, c_f=float(np.exp(th[nT])), c_a=float(np.exp(th[nT + 1])), sigma0=float(np.exp(th[-1])), n_junctions=len(J),
+                 tile_terms=bool(tile_terms), converged=bool(best.success), nll=float(best.fun),
+                 formula=("c = c_T + c_f*(1-f) + c_a*(1-align)" if tile_terms else "c = c0 + c_f*(1-f) + c_a*(1-align)")
+                         + ";  sigma = sqrt((|Q| c)^2 + sigma0^2)")
+    if tile_terms:
+        model["tau_log_cT"] = tau
+    else:
+        model["c0"] = float(np.exp(th[0]))
     return model, J
 
 
 def c_of(model, m):
     """Reliability c of one measurement row (needs keys tile, f, align)."""
-    return model["c_T"][m["tile"]] + model["c_f"] * (1 - m["f"]) + model["c_a"] * (1 - _align(m))
+    base = model["c_T"].get(m["tile"], model.get("c0")) if "c0" in model else model["c_T"][m["tile"]]
+    return base + model["c_f"] * (1 - m["f"]) + model["c_a"] * (1 - _align(m))
 
 
 def c_of_measurement(model, m):

@@ -29,7 +29,8 @@ def carved_domain(G):
     mid = float(np.mean([G.nodes[n]["x"] for n in A_anch]))
     inj = np.array([ix[n] for n in carve_bnd]); out = np.array([ix[n] for n in sorted(V_anch) if n in ix])
     side = np.array(["L" if G.nodes[n]["x"] < mid else "R" for n in carve_bnd])
-    return dict(name="carved", edges=sub, nodes=nodes, B=B, inj=inj, out=out, bnd=np.r_[inj, out], side=side,
+    side_out = np.array(["L" if G.nodes[n]["x"] < mid else "R" for n in sorted(V_anch) if n in ix])     # V nodes, same rule
+    return dict(name="carved", edges=sub, nodes=nodes, B=B, inj=inj, out=out, bnd=np.r_[inj, out], side=side, side_out=side_out,
                 V=[n for n in sorted(V_anch) if n in ix], DA=sorted(A_anch))
 
 

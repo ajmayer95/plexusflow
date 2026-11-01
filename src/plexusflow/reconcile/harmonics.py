@@ -42,3 +42,33 @@ def beat_scatter(q, f0, fs=FS):
         b, *_ = np.linalg.lstsq(X, q[sel], rcond=None); H1.append(b[1] - 1j * b[2])
     H1 = np.array(H1); Hm = H1.mean()
     return float(np.std(np.abs(H1 - Hm)) / max(abs(Hm), 1e-12) * np.sqrt(2))
+
+
+def beat_uncertainty(q, f0, fs=FS):
+    """Waveform repeatability of a trace: per complete cardiac cycle j, DC + H1 + H2 fitted → H_kj, a0_j.  With the mean
+    phasor H̄_k = |H̄_k| e^{iφ_k} and Z_kj = H_kj e^{−iφ_k} (beats in the mean frame):
+        var_phi_k  = Var_j[Im Z_kj] / (N |H̄_k|²)                           phase of the mean, k = 1, 2 (rad²)
+        var_logpi  = (Var_j[Re Z_1j] / |H̄_1|² + Var_j[a0_j] / ā0²) / (N ln²10)   log10(|H1|/|a0|), delta method
+    Only the scatter orthogonal to the mean phasor enters the phase (amplitude jitter does not).  On 21S it predicts the
+    phase disagreement between repeat measurements of a vessel in two tiles (Spearman +0.58; the DC reliability c: +0.20).
+    Returns dict(n, var_phi1, var_phi2, var_logpi); variances nan with fewer than 3 complete cycles."""
+    q = np.asarray(q, float); t = np.arange(len(q)) / fs; cyc = np.floor(t * f0).astype(int)
+    full = [c for c in np.unique(cyc) if np.sum(cyc == c) >= 0.9 * fs / f0]
+    out = dict(n=len(full), var_phi1=np.nan, var_phi2=np.nan, var_logpi=np.nan)
+    if len(full) < 3:
+        return out
+    H, a = [], []
+    for c in full:
+        s = cyc == c; tt = t[s]
+        X = np.column_stack([np.ones(s.sum())] + [fn(2 * np.pi * k * f0 * tt) for k in (1, 2) for fn in (np.cos, np.sin)])
+        b, *_ = np.linalg.lstsq(X, q[s], rcond=None); a.append(b[0]); H.append([b[1] - 1j * b[2], b[3] - 1j * b[4]])
+    H = np.array(H); a = np.array(a); N = len(a)
+    for k in (0, 1):
+        m = H[:, k].mean()
+        if abs(m) > 0:
+            out[f"var_phi{k + 1}"] = float(np.var((H[:, k] * np.exp(-1j * np.angle(m))).imag, ddof=1) / (N * abs(m) ** 2))
+    m1 = H[:, 0].mean()
+    if abs(m1) > 0 and abs(a.mean()) > 0:
+        out["var_logpi"] = float((np.var((H[:, 0] * np.exp(-1j * np.angle(m1))).real, ddof=1) / abs(m1) ** 2
+                                  + np.var(a, ddof=1) / a.mean() ** 2) / (N * np.log(10) ** 2))
+    return out

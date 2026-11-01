@@ -5,6 +5,9 @@ Wall: complex areal distensibility D_eff = D (1 − iη) (constant loss tangent)
 Vessel-mean flux H_e = ½[(Y_s P_t − Y_t P_h) + (Y_t P_t − Y_s P_h)].
 Boundary forcing at carve + vein nodes: f_n^(k) = f_DC,n · r_n^(k), r = local measured ratio
 Σ s·Ĥ_k / Σ s·Q' over AC-eligible edges within ≤ 4 hops of n (stop once ≥ 3 edges found).
+Vein nodes can instead be driven by their stub waveforms (vein_forcing): the measured mean-normalised harmonics
+Ĥ_k/Q' = H_k/a0 of the vessel(s) ending at the node — 'own' (each node its own stub) or 'mean' (one waveform, the
+complex mean over the stubs, at every vein node).
 """
 from __future__ import annotations
 import numpy as np
@@ -90,3 +93,50 @@ def ac_reliability(G, field, model):
         if t >= 0:
             c[i] = c_of_measurement(model, next(m for m in G.edges[e]["measurements_piv"] if m["tile_id"] == t))
     return c
+
+
+def vein_forcing(C, field, mode="mean", gauge_rad=None):
+    """Replace the vein-node forcing of context C by stub waveforms.  field: the FULL AC field (all eligible vessels —
+    stubs are usually outside the measurement-supported fit set because their DC is under-read).  Per vein node n the stub
+    ratio r_n,k = Σ s Ĥ_k / Σ s Q' over its incident AC-eligible vessels (Ĥ gauge-corrected by gauge_rad[tile] if
+    given), and f_n,k = f_DC,n · r with
+        'own'   r = r_n (nodes without an eligible stub keep the local-ratio forcing)
+        'mean'  r = mean_n r_n at every vein node (one shared venous waveform)
+    Returns (C', info) with info = dict(stubbed=[node indices], ratio={k: {node: r}}, mean={k: r̄})."""
+    out = np.asarray(C["dom"]["out"]); t, h = C["tail"], C["head"]; Qp = C["Qp"]; fdc = C["dom"]["B"] @ Qp
+    el = field["elig"]; g = gauge_rad or {}
+    ratio = {1: {}, 2: {}}
+    for n in out:
+        es = [(e, 1.0) for e in np.flatnonzero(t == n)] + [(e, -1.0) for e in np.flatnonzero(h == n)]
+        es = [(e, s_) for e, s_ in es if el[e]]
+        if not es:
+            continue
+        for k in (1, 2):
+            Hh = sum(s_ * field["H"][k - 1][e] * np.exp(-1j * k * g.get(int(field["tile"][e]), 0.0)) for e, s_ in es)
+            ratio[k][int(n)] = Hh / sum(s_ * Qp[e] for e, s_ in es)
+    stubbed = sorted(ratio[1]); C2 = dict(C); C2["F"] = dict(C["F"]); rbar = {}
+    if not stubbed:
+        raise ValueError("no vein node has an AC-eligible stub")
+    for k in (1, 2):
+        F = C["F"][(k, "flux")].copy(); rbar[k] = np.mean([ratio[k][n] for n in stubbed])
+        for n in out:
+            if mode == "mean":
+                F[n] = fdc[n] * rbar[k]
+            elif mode == "own" and int(n) in ratio[k]:
+                F[n] = fdc[n] * ratio[k][int(n)]
+            elif mode != "own":
+                raise ValueError(f"unknown vein forcing mode {mode!r}")
+        C2["F"][(k, "flux")] = F
+    return C2, dict(stubbed=stubbed, ratio=ratio, mean=rbar)
+
+
+def group_response(C, k, D, eta, gid, el):
+    """Vessel-mean H_k (rows: eligible edges) driven by the context's flux forcing restricted to each boundary group
+    (columns g = 0..3).  Equals response(C, k, D, eta, bnd)[el][:, gid == g] @ f[bnd][gid == g], with 4 right-hand sides
+    instead of one per boundary node."""
+    Ys, Yt, Y = _admittances(C, k, D, eta); t, h, nN = C["tail"], C["head"], C["nN"]; bnd = np.asarray(C["dom"]["bnd"])
+    f = C["F"][(k, "flux")][bnd]; RHS = np.zeros((nN, 4), complex)
+    for g in range(4):
+        RHS[bnd[gid == g], g] = f[gid == g] * NL
+    P = spla.splu(Y).solve(RHS)
+    return (0.5 * (Ys + Yt)[:, None] * (P[t] - P[h]) / NL)[el]
