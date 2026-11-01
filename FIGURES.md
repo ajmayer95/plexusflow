@@ -19,6 +19,8 @@ stage config (`raw_video_dir`). To run: `PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S
 | 8, 9 | Pulsatile regime (transient vs retained recordings, repeat-vessel waveform reproducibility); tile-clock synchronisation and organ phase map (one script, two figures + SI; writes `figures/fig8/`, `figures/fig9/`) | `make_figure7.py` | `results/ac_field_v7.pkl`, canonical graph |
 | 10 | Pulsatile flow: measured vs distributed RC network (maps on the Fig 9 phase reference, PI residual, RMS scatter), profiled distensibility fit, Q/Q̄ waveforms; SI stiff / fitted / compliant | `make_figure10.py --bc-json $PLEXUSFLOW_STAGE/results/ac_estimate_v8.json` | `results/ac_field_v7.pkl`, `results/ac_estimate_v8.json` |
 
+After re-rendering, `python3 scripts/collect_figures.py` copies Figs 1–10 to `$PLEXUSFLOW_STAGE/figures/latest/` (Fig1–Fig10 .tif/.pdf/.png + README with render dates).
+
 Supplementary figures are written by the same scripts (`*_S_*` / `*_supp_*` files in the same output folder).
 
 Superseded versions kept for reference: `make_figure2_registration_old.py`, `make_figure3_meanflow_old.py`,
