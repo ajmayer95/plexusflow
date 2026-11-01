@@ -38,6 +38,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.patches
+import matplotlib.patheffects
 from matplotlib.patches import Polygon
 from matplotlib.collections import LineCollection
 
@@ -153,9 +154,10 @@ def main():
     # left column: a tile overlap network (left) with one highlighted pair, before/after alignment of that pair (right) ·
     # b validation histograms · right: c organ phase field
     figS = plt.figure(figsize=(7.5, 5.9), facecolor="white")
-    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.62, 1], wspace=0.1, left=0.05, right=0.98, top=0.95, bottom=0.165)
-    gL = gS2[0].subgridspec(2, 1, height_ratios=[2.0, 0.95], hspace=0.38); GD, GC = gL[1], gS2[1]
-    gA = gL[0].subgridspec(1, 2, width_ratios=[1, 0.85], wspace=0.15); GNET, GB = gA[0], gA[1]
+    gS2 = figS.add_gridspec(1, 2, width_ratios=[0.62, 1], wspace=0.1, left=0.05, right=0.98, top=0.92, bottom=0.2)
+    gL = gS2[0].subgridspec(2, 1, height_ratios=[0.8, 2.0], hspace=0.08); GNET, GB, GC = gL[0], gL[1], gS2[1]
+    figV = plt.figure(figsize=(5.2, 2.6), facecolor="white")       # SI fig9_S_validation: repeat-vessel phase agreement, H1 vs H2
+    GD = figV.add_gridspec(1, 1, left=0.06, right=0.97, top=0.78, bottom=0.2)[0]
     fig = figR
 
     def label(cell, letter):
@@ -691,7 +693,8 @@ def main():
             Vraw.append((V[-1][0], (dr + 30) % 360 - 30, y["rho"], t))
     tdel = {t: (v + 30) % 360 - 30 for t, v in tdel.items()}
     dmax = max(v for t, v in tdel.items() if t in shown_t); vtop = 20 * np.ceil(np.percentile([v[1] for v in V], 98) / 20)
-    cmp = plt.cm.plasma; nph = mcolors.Normalize(0, 160); LEV = np.arange(0, vtop + 1, 20)      # colour capped at 160° (rim saturates)
+    cmp = plt.cm.plasma; nph = mcolors.Normalize(0, max(160, vtop)); LEV = np.arange(0, vtop + 1, 20)   # colour to the 98th pct of vessel phases
+    log(f"  (c) phase colour scale 0–{max(160, vtop):.0f}° (98th pct of vessel phases {np.percentile([v[1] for v in V], 98):.0f}°, max {max(v[1] for v in V):.0f}°)")
 
     def smooth_field(vs, sigma_um, step_px, box):
         """Circular kernel smoothing of vessel delays on a grid: Z = G_σ * Σ w e^{iδ}; masked where the kernel weight is small."""
@@ -722,8 +725,8 @@ def main():
     ca, cb_ = cen[ta], cen[tb]; nrm_s = (cb_ - ca) / np.linalg.norm(cb_ - ca); mid_s = (ca + cb_) / 2
     side = lambda p_: np.dot(p_.mean(0) - mid_s, nrm_s)
     cmc = plt.cm.twilight_shifted; ncy = mcolors.Normalize(-180, 180)
-    gBs = GB.subgridspec(3, 1, height_ratios=[1, 1, 0.3], hspace=0.2)
-    for j_, (VV, ttl) in enumerate(((Vraw, "before"), (V, "after: one offset per tile"))):
+    gBs = GB.subgridspec(3, 1, height_ratios=[1, 1, 0.07], hspace=0.22)
+    for j_, (VV, ttl) in enumerate(((Vraw, "Before alignment: tile-relative phase"), (V, "After alignment: synchronised phase"))):
         ax = fig.add_subplot(gBs[j_, 0])
         ax.imshow(mos, cmap="gray", vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), alpha=0.3, zorder=0)
         for p_, dl, w, t in VV:
@@ -741,15 +744,16 @@ def main():
         ax.set_xlim(x0, x1); ax.set_ylim(y1, y0); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
         for sp in ax.spines.values():
             sp.set_linewidth(0.5); sp.set_color("0.5")
-        ax.text(0.02, 0.97, ttl, transform=ax.transAxes, fontsize=7.5, va="top", ha="left", zorder=7, bbox=dict(fc="white", ec="none", alpha=0.85, pad=1.0))
+        ax.text(0.02, 0.97, ttl, transform=ax.transAxes, fontsize=8, va="top", ha="left", zorder=7, bbox=dict(fc="white", ec="none", alpha=0.85, pad=1.0))
+    fig.axes[-2].set_title(f"Tiles {min(ta, tb)}–{max(ta, tb)}", fontsize=8, pad=2, color="0.25")
     axb0, axb1 = fig.axes[-2], fig.axes[-1]; p0_, p1_ = axb0.get_position(), axb1.get_position()
     xm_ = p0_.x0 + 0.5 * p0_.width
     fig.patches.append(matplotlib.patches.FancyArrowPatch((xm_, p0_.y0 + 0.002), (xm_, p1_.y1 - 0.002),
                        transform=fig.transFigure, arrowstyle="-|>", mutation_scale=9, lw=1.0, color="black", zorder=10))
     fig.text(xm_ + 0.012, (p0_.y0 + p1_.y1) / 2, r"$-\psi_t$", ha="left", va="center", fontsize=8, zorder=10)
 
-    bb = GB.get_position(fig)
-    fig.text(bb.x0 + 0.5 * bb.width, bb.y0 + 0.06 * bb.height, r"$\phi^{\rm aligned}_{e,t} = \phi^{\rm obs}_{e,t} - \psi_t$", ha="center", fontsize=8.5)
+    caxk = fig.add_subplot(gBs[2, 0]); caxk.set_anchor("C"); caxk.set_box_aspect(0.045); cbk = fig.colorbar(plt.cm.ScalarMappable(norm=ncy, cmap=cmc), cax=caxk, orientation="horizontal", ticks=[-180, 0, 180])
+    cbk.set_label("Vessel $H_1$ phase (°)", fontsize=8, labelpad=1); cbk.ax.tick_params(labelsize=8, length=2, pad=1); cbk.outline.set_linewidth(0.4)
 
     log(f"  (b) tile pair {ta}/{tb} ({npair_} shared coherent vessels)")
     pass
@@ -782,17 +786,50 @@ def main():
     ixg = np.clip(np.round((gx - gxs[0]) / stp).astype(int), 0, len(gxs) - 1); iyg = np.clip(np.round((gy - gys[0]) / stp).astype(int), 0, len(gys) - 1)
     _bad = (mX[np.ix_(iyg, ixg)] > 0.5) | (mU[np.ix_(iyg, ixg)] > 0.5) | (lab_[np.ix_(iyg, ixg)] < 0)
     fo = np.ma.masked_where(np.ma.getmaskarray(fo) | _bad, fo)
+    _fv = np.ma.compressed(fo); nph.vmax = max(nph.vmax, 20 * np.ceil(_fv.max() / 20))     # no clipping of the rim
+    log(f"  (c) smoothed field: pct 50/90/98/100 = " + "/".join(f"{np.percentile(_fv, q_):.0f}" for q_ in (50, 90, 98, 100)) + f"°; share > {nph.vmax:.0f}°: {np.mean(_fv > nph.vmax):.1%}")
     axC.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.85, zorder=1, interpolation="bilinear")
-    LEVc = LEV[::2]
-    cs = axC.contour(gx, gy, fo, levels=LEVc, colors="0.1", linewidths=0.5, zorder=3)
-    _cl = axC.clabel(cs, levels=[v for v in LEVc if v in (40, 80, 160)], fmt="%d°", fontsize=8, inline_spacing=1); _seen = set()
-    for t_ in _cl:                                        # one label per level
-        if t_.get_text() in _seen:
-            t_.set_visible(False)
-        _seen.add(t_.get_text())
+    LEVc = list(np.arange(30, LEV.max() + 1, 30))                     # isochrones every 30°; 60° multiples slightly heavier
+    cs = axC.contour(gx, gy, fo, levels=LEVc, colors=["0.88" if v <= 60 else "0.25" for v in LEVc],   # light on the dark low-lag basin
+                     linewidths=[0.45 if v % 60 == 0 or v == 30 else 0.27 for v in LEVc], alpha=0.9, zorder=3)
+    _xmid = np.mean([G.nodes[n_]["x"] for n_ in dom["DA"]])                # midline (dorsal aortae)
+    # labels placed by hand: one per labelled level per side of the midline, at the middle of that side's longest run of the contour,
+    # away from the reference markers
+    _refxy = np.array([(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"]) for n_ in dom["DA"]] + [(G.nodes[nds[int(i)]]["x"], Hm_ - G.nodes[nds[int(i)]]["y"]) for i in dom["out"]])
+    # 30°/60°: every substantial piece of the contour (basins and the loops round the arteries); higher levels: one per side.
+    # Greedy placement along each piece, ≥ 220 px from other labels and ≥ 90 px from the reference markers.
+    _man = []
+    def _place(q_):
+        n_ = len(q_)
+        for f_ in (0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9):
+            pt_ = q_[int(f_ * (n_ - 1))]
+            if np.min(np.linalg.norm(_refxy - pt_, axis=1)) > 90 and all(np.hypot(*(pt_ - np.asarray(m_))) > 220 for m_ in _man):
+                _man.append(tuple(pt_)); return
+    for li_, v_ in enumerate(LEVc):
+        if not (v_ % 60 == 0 or v_ == 30):
+            continue
+        pieces_ = [np.asarray(q_) for q_ in cs.get_paths()[li_].to_polygons(closed_only=False) if len(q_) >= 25]
+        if v_ <= 60:
+            for q_ in sorted(pieces_, key=len, reverse=True):
+                _place(q_)
+        else:
+            for left_ in (True, False):
+                side_ = [q_[(q_[:, 0] < _xmid) == left_] for q_ in pieces_]; side_ = [q_ for q_ in side_ if len(q_) >= 25]
+                if side_:
+                    _place(max(side_, key=len))
+    _cl = axC.clabel(cs, fmt="%d°", fontsize=8, inline_spacing=1, manual=_man)
+    for t_ in _cl:
+        t_.set_path_effects([matplotlib.patheffects.withStroke(linewidth=2.2, foreground="white")]); t_.set_color("0.15")
     plt.rcParams["hatch.linewidth"] = 0.3; plt.rcParams["hatch.color"] = "0.5"
-    fbf = np.ma.filled(fb, 0)
-    axC.contour(gx, gy, fbf, levels=[0.5], colors="0.15", linewidths=0.9, linestyles="--", zorder=4)
+    fbf = np.where(np.ma.getmaskarray(fo), 0.0, np.ma.filled(fb, 0))     # outline only where the phase field is shown
+    axC.contour(gx, gy, fbf, levels=[0.5], colors="0.35", linewidths=1.5, linestyles="--", zorder=4)
+    _ysb, _xsb = np.nonzero(fbf > 0.5)
+    if len(_xsb):
+        _ymc = np.median(gy[_ysb]); _row = _xsb[np.abs(gy[_ysb] - _ymc) < 30]
+        _pt = (np.percentile(gx[_row], 25), _ymc)                                  # inside the purple lobe, left part
+        axC.annotate("Separate\nphase\ncomponent", xy=_pt, xytext=(-0.005, 0.5), textcoords="axes fraction",
+                     ha="right", va="center", fontsize=8, color="0.25", linespacing=0.95,
+                     arrowprops=dict(arrowstyle="-", lw=0.6, color="0.35"), zorder=8, annotation_clip=False)
     if beta_sd:
         bdeg, bsd, _, _ = beta_sd[0]; ys_, xs_ = np.nonzero(fbf > 0.5)
         pass
@@ -802,10 +839,10 @@ def main():
     L_thr = 0.05 * np.median(list(Lt.values())); weak_t = {t for t in band if Lt[t] < L_thr}
     log(f"  (c) weakly constrained tiles (link < 5 % of median, {L_thr:.2f}): {sorted(weak_t)}")
     # transient region from Fig 7 (excluded from AC reconstruction)
-    plt.rcParams["hatch.color"] = "0.6"; plt.rcParams["hatch.linewidth"] = 0.4
-    axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["white"], alpha=0.5, zorder=4.4)
-    axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["none"], hatches=["//"], zorder=4.5)
-    axC.contour(gxs, gys, mX, levels=[0.5], colors=["0.6"], linewidths=0.5, zorder=4.6)
+    plt.rcParams["hatch.color"] = "0.62"; plt.rcParams["hatch.linewidth"] = 0.35
+    axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["white"], alpha=0.55, zorder=4.4)
+    axC.contourf(gxs, gys, mX, levels=[0.5, 2], colors=["none"], hatches=["/"], zorder=4.5)
+    axC.contour(gxs, gys, mX, levels=[0.5], colors=["0.75"], linewidths=0.4, zorder=4.6)
     # retained (Fig 7: physiologically usable) but absolute phase not identifiable — area covered only by tiles with offset SD > SD_MAX
     if False:                                        # tiles 52/53: ≤ 9 detected vessels — shown as "no usable phase", not separately
         axC.contourf(gxs, gys, mU, levels=[0.5, 2], colors=["white"], alpha=0.7, zorder=4.4)
@@ -815,19 +852,20 @@ def main():
     refpts = [(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"]) for n_ in list(dom["DA"]) + [nds[int(i)] for i in dom["out"]]]
     for n_ in dom["DA"]:
         axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="v", ms=5.5, color="white", mec="black", mew=0.6, zorder=6)
+    _c0 = np.mean([(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"]) for n_ in list(dom["DA"]) + [nds[int(i)] for i in dom["out"]]], axis=0)
+    axC.text(_c0[0], _c0[1], "0°", fontsize=8, ha="center", va="center", zorder=7,           # centroid of the DA (▽) and V (☆) markers
+             path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="white")])
     for i in [int(i) for i in dom["out"]]:
         n_ = nds[i]; axC.plot(G.nodes[n_]["x"], Hm_ - G.nodes[n_]["y"], marker="*", ms=7, color="white", mec="black", mew=0.6, zorder=6)
-    rp = np.array(refpts); axC.annotate("simultaneous DA/V\nphase reference, 0°", xy=(rp[:, 0].mean(), rp[:, 1].min() - 20),
-                                        xytext=(rp[:, 0].mean() + 0.30 * (XL[1] - XL[0]), YL[1] + 0.02 * (YL[0] - YL[1])), ha="center", va="top", fontsize=8,
-                                        arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"), zorder=7)
+
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch as _Pt
-    axC.legend(handles=[_Pt(fc="white", ec="0.6", hatch="//", lw=0.5, label="transient — excluded (Fig. 7)"),
-                        _Pt(fc="0.82", ec="none", label="no usable phase of the fundamental"),
-                        _Pt(fc="none", ec="0.15", ls="--", lw=0.9, label="separately oriented block")],
+    axC.legend(handles=[_Pt(fc="white", ec="0.55", hatch="///", lw=0.5, label="Early recordings excluded"),
+                        _Pt(fc="0.82", ec="none", label="No reliable fundamental phase"),
+                        _Pt(fc="none", ec="0.35", ls="--", lw=1.3, label="Separate phase component")],
                loc="upper center", bbox_to_anchor=(0.5, -0.135), fontsize=8, frameon=False, handlelength=1.6, borderaxespad=0, labelspacing=0.25,
-               ncol=2, columnspacing=1.0)
+               ncol=1, columnspacing=1.0)
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
     # tile centres; its connected components are the synchronization blocks; the dashed bridge = the inlet-symmetry constraint (β)
     import networkx as _nx
@@ -859,9 +897,7 @@ def main():
             axN.text(cen[t_][0] + _dx * 130, cen[t_][1] - 170, str(t_), fontsize=8, color=TCOL[t_], fontweight="bold", zorder=5,
                      ha="left" if _dx > 0 else "right")
         else:
-            axN.plot(*cen[t_], "o", ms=3.6, mfc="0.72" if t_ in WEAKGRP else ("white" if und_ else "0.3"), mec="0.3", mew=0.6, zorder=3)
-        if t_ == ref:
-            axN.plot(*cen[t_], "s", ms=6.5, mfc="none", mec="black", mew=0.9, zorder=4)
+            axN.plot(*cen[t_], "o", ms=3.4, mfc="0.45", mec="0.3", mew=0.5, zorder=3)
     if cother_:
         from scipy.spatial import ConvexHull as _CH
         _sb = np.array([cen[t_] for t_ in max(cother_, key=len)]); _h = _CH(_sb); _v = _sb[_h.vertices]; _c = _v.mean(0); _v = _c + 1.25 * (_v - _c)
@@ -869,20 +905,14 @@ def main():
     allN_ = np.array([cen[t_] for t_ in Tg.nodes()]); pN_ = 160
     axN.set_xlim(allN_[:, 0].min() - pN_, allN_[:, 0].max() + pN_); axN.set_ylim(allN_[:, 1].max() + pN_, allN_[:, 1].min() - pN_)
 
-    axN.text(0.5, 1.0, "tile overlap network", transform=axN.transAxes, ha="center", va="bottom", fontsize=8, color="0.25")
+    axN.text(0.0, 1.0, "Tile-phase synchronisation", transform=axN.transAxes, ha="left", va="bottom", fontsize=9)
+    if cother_:
+        axN.text(_v[:, 0].min() - 40, _v[:, 1].mean(), "separate\ncomponent", ha="right", va="center", fontsize=8, color="0.25", linespacing=0.9)
     from matplotlib.lines import Line2D as _L2n
-    axN.legend(handles=[_L2n([], [], ls="none", marker="o", ms=4, mfc="0.3", mec="0.3", label="clock solved"),
-                        _L2n([], [], ls="none", marker="o", ms=4, mfc="0.72", mec="0.3", label="oriented by seam continuity"),
-                        _L2n([], [], ls="none", marker="o", ms=4, mfc="white", mec="0.3", label="unresolved"),
-                        _L2n([], [], ls="none", marker="s", ms=5, mfc="none", mec="black", label="reference"),
-                        _L2n([], [], color="0.2", lw=0.8, ls="--", label="separate block")],
-               loc="upper left", bbox_to_anchor=(-0.05, -0.02), fontsize=8, frameon=False, ncol=2, handletextpad=0.3, columnspacing=0.5,
-               borderaxespad=0, labelspacing=0.2)
     # connector from the highlighted edge to the before/after maps
     _midab = (np.asarray(cen[ta]) + np.asarray(cen[tb])) / 2; _pb0 = axb0.get_position()
-    figS.add_artist(matplotlib.patches.ConnectionPatch(xyA=_midab, coordsA=axN.transData, xyB=(_pb0.x0, (_pb0.y0 + axb1.get_position().y1) / 2),
-                                                       coordsB=figS.transFigure, arrowstyle="-|>", lw=0.8, color="0.3", mutation_scale=8))
-    figS.text(axN.get_position().x0 - 0.01, axb0.get_position().y1 + 0.015, "a", fontsize=10, fontweight="bold", va="bottom")
+    pass                                             # pair colours match the dashed tile outlines below; no connector
+
     # ---- SI figure fig8_supp_block: a overlap graph · b soft mode of the synchronization Laplacian · c estimates of the block offset β ·
     #      d sensitivity of the phase map to β
     figB = plt.figure(figsize=(7.5, 6.4), facecolor="white")
@@ -1024,24 +1054,30 @@ def main():
     axS.set_title("isochrones (20° apart) under alternative β", fontsize=8); labB(axS, "d")
 
     sm = plt.cm.ScalarMappable(norm=nph, cmap=cmp)
-    cax = axC.inset_axes([0.2, -0.04, 0.6, 0.022]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=[0, 40, 80, 120, 160], extend="both")
-    cb.set_label("phase lag of the fundamental behind DA/V reference (deg)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
-    _pC = axC.get_position(); fig.text(_pC.x0 - 0.01, _pC.y1 + 0.03, "c", fontsize=10, fontweight="bold", va="bottom", ha="left")
+    cax = axC.inset_axes([0.2, -0.04, 0.6, 0.022]); cb = fig.colorbar(sm, cax=cax, orientation="horizontal", ticks=np.arange(0, nph.vmax + 1, 40), extend="min")
+    cb.set_label("Fundamental phase lag (°)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=7); cb.outline.set_linewidth(0.4)
+    _L1 = 1000 / 1.7; _x0c, _y0c = XL[0] + 0.03 * (XL[1] - XL[0]), YL[0] - 0.04 * (YL[0] - YL[1])     # 1 mm scale bar, lower left
+    axC.plot([_x0c, _x0c + _L1], [_y0c, _y0c], color="0.1", lw=2, solid_capstyle="butt", zorder=8)
+    axC.text(_x0c + _L1 / 2, _y0c - 0.012 * (YL[0] - YL[1]), "1 mm", ha="center", va="bottom", fontsize=8, zorder=8)
 
     # ---- e: repeat-vessel agreement after alignment; H2 is an independent check (not used in the synchronization)
+    fig = figV
     gDs = GD.subgridspec(1, 2, wspace=0.3); bins = np.linspace(-60, 60, 25)
     for c_, k in enumerate((1, 2)):
         ax = fig.add_subplot(gDs[c_]); v = d[k]["aligned"]
         ax.hist(v, bins=bins, density=True, color="#8fb0d3" if k == 1 else "#c9b6d9", ec="white", lw=0.3)
         ax.set_xlim(-60, 60); ax.set_yticks([]); ax.spines[["top", "right", "left"]].set_visible(False); ax.set_xticks([-60, 0, 60])
         ax.axvline(0, color="0.3", lw=0.6, zorder=3); ax.tick_params(axis="x", labelsize=7)
-        ax.text(0.0, 1.13, "fundamental" if k == 1 else "2nd harmonic", transform=ax.transAxes, fontsize=8, fontweight="bold", va="bottom")
-        ax.text(0.0, 1.01, "used to synchronize" if k == 1 else "not used", transform=ax.transAxes, fontsize=8, va="bottom", color="0.3")
-        ax.text(0.0, 0.97, f"median $|\\Delta\\phi|$ = {np.median(np.abs(v)):.0f}°", transform=ax.transAxes, fontsize=6.5, va="top", ha="left", color="0.25", zorder=5,
-                bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.4))
-    fig.text(GD.get_position(fig).x0 + 0.5 * GD.get_position(fig).width, GD.get_position(fig).y0 - 0.045,
-             "repeat-vessel phase difference (deg)", ha="center", va="top", fontsize=8)
-    label(GD, "b")
+        ax.text(0.0, 1.13, "Fundamental" if k == 1 else "2nd harmonic", transform=ax.transAxes, fontsize=8, fontweight="bold", va="bottom")
+        ax.text(0.0, 1.01, "used to synchronise" if k == 1 else "not used (check)", transform=ax.transAxes, fontsize=8, va="bottom", color="0.3")
+        ax.text(1.0, 0.97, f"median\n$|\\Delta\\phi|$ = {np.median(np.abs(v)):.0f}°", transform=ax.transAxes, fontsize=8, va="top", ha="right", color="0.25", zorder=5,
+                linespacing=1.1)
+    for ax_ in figV.axes:
+        ax_.set_xlabel("Repeat-vessel phase difference (°)", fontsize=8, labelpad=1); ax_.tick_params(axis="x", labelsize=8)
+    fig = figS
+    _pN, _pC = axN.get_position(), axC.get_position(); _yt = max(_pN.y1, _pC.y1) + 0.03
+    for x_, l_ in ((_pN.x0 - 0.03, "a"), (_pC.x0 - 0.01, "b")):
+        figS.text(x_, _yt, l_, fontsize=12, fontweight="bold", va="bottom", ha="left")
 
 
 
@@ -1088,7 +1124,7 @@ def main():
         for t_ in f_.findobj(matplotlib.text.Text):
             if t_.get_text() and t_.get_fontsize() < lo:
                 t_.set_fontsize(lo)
-    for f_, out_, nm_ in ((figR, OUT8, "fig8"), (figS, OUT9, "fig9"), (figD, OUT8, "fig8_S_detection"), (figT, OUT8, "fig8_S_theta21")):
+    for f_, out_, nm_ in ((figR, OUT8, "fig8"), (figS, OUT9, "fig9"), (figV, OUT9, "fig9_S_validation"), (figD, OUT8, "fig8_S_detection"), (figT, OUT8, "fig8_S_theta21")):
         plos_style.save(f_, out_ / f"{nm_}{args.tag}")
         log(f"wrote {out_ / f'{nm_}{args.tag}.png'}")
 
