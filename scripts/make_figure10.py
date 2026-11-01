@@ -7,11 +7,12 @@ profiled objective over a D grid).
   a  2 × 3 maps (rows measured / RC network): pulsatility fraction (|H1|²+|H2|²)/Q̄², H1 and H2 phase lag (deg) behind the
      Fig 9 reference (ρ-weighted tile-14 dorsal-aorta + vitelline-vein stub phase, H_n in each vessel's own flow direction);
      both rows on the same reference
-  b  pulsatility-index residual map sqrt(Σ_k |PI_k,meas − PI_k,sim|²), PI_k = H_k sgn(Q̄)/|Q̄|; examples of e marked
+  b  normalised-harmonic residual sqrt(Σ_k=1,2 |h_k,meas − h_k,sim|²), h_k = H_k sgn(Q̄)/|Q̄| (complex; not the classical
+     PI = (Q_max − Q_min)/Q̄); examples of e marked
   c  pulsatile RMS measured vs RC network (log), with r_log, n and median H1/H2 phase errors
   d  profiled fitting objective vs D (boundary group corrections re-fitted at each D; η = 0) — a composite pseudo-likelihood,
      conditional on the radii, resistance scale and boundary model; no interval drawn
-  e  Q/Q̄ over one beat at three well-measured vessels at the 20th / 50th / 80th percentile of the PI residual
+  e  Q/Q̄ over one beat at three well-measured vessels at the 20th / 50th / 80th percentile of the harmonic residual
 SI fig10_S_distensibility: H1 lag and pulsatility fraction, measured vs the network at low / fitted / high D (boundary
 forcing held at the D̂ fit).  Writes figures/fig10/fig10[_<tag>].*; nothing to any graph.
 """
@@ -201,8 +202,8 @@ def main():
     nPI = mcolors.LogNorm(0.05, 1.5); cPI = plt.cm.magma
     axB = fig.add_subplot(gB[0]); bg(axB); edgemap(axB, pires, e, nPI, cPI, 0.45); pick_marks(axB)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=nPI, cmap=cPI), cax=axB.inset_axes([1.03, 0.10, 0.05, 0.80]))
-    cb.set_label('PI residual', fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
-    axB.set_title('Pulsatility-index residual', fontsize=9, pad=3)
+    cb.set_label('Harmonic residual', fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
+    axB.set_title('Normalised-harmonic residual', fontsize=9, pad=3)
 
     # c  pulsatile RMS scatter + statistics
     axC = fig.add_subplot(gB[1])
@@ -214,7 +215,7 @@ def main():
     axC.set_xscale('log'); axC.set_yscale('log'); axC.set_xlim(lo, hi); axC.set_ylim(lo, hi); axC.set_aspect('equal')
     axC.set_xlabel('Measured pulsatile RMS (nL/s)', fontsize=8, labelpad=1)
     axC.set_ylabel('RC network (nL/s)', fontsize=8, labelpad=1); axC.tick_params(labelsize=8)
-    axC.text(0.0, 1.03, f"$r_{{\\log}}$ = {stats['rms_corr']:.2f} (n = {int(sel.sum())})\nmedian $|\\Delta\\phi_1|$ = {stats['h1_dphi_deg']:.0f}°,\nmedian $|\\Delta\\phi_2|$ = {stats['h2_dphi_deg']:.0f}° (n = {int(ph_ok.sum())})",
+    axC.text(0.0, 1.03, f"$r_{{\\log}}$ = {stats['rms_corr']:.2f} (n = {int(sel.sum())})\nmedian $|\\Delta\\phi_1|$ = {stats['h1_dphi_deg']:.0f}°, $|\\Delta\\phi_2|$ = {stats['h2_dphi_deg']:.0f}°\n(both n = {int(ph_ok.sum())})",
              transform=axC.transAxes, va='bottom', fontsize=8, linespacing=1.2)
     axC.spines[['top', 'right']].set_visible(False)
 
@@ -253,7 +254,7 @@ def main():
             ax.set_xlabel('$t/T$', fontsize=8, labelpad=1)
         ax.text(0.04, 0.95, str(k + 1), transform=ax.transAxes, ha='center', va='center', fontsize=8, fontweight='bold',
                 bbox=dict(fc='#f5d400', ec='black', lw=0.6, boxstyle='circle,pad=0.2'))
-        ax.set_title(f"{('Good', 'Typical', 'Poor')[k]} fit\nPI residual {pires[c]:.2f}", fontsize=8, pad=3, loc='center', linespacing=1.1)
+        ax.set_title(f"{('Good', 'Typical', 'Poor')[k]} harmonic fit\nresidual {pires[c]:.2f}", fontsize=8, pad=3, loc='center', linespacing=1.1)
     axs_e[0].legend(fontsize=8, loc='lower left', frameon=False, borderaxespad=0.1, handlelength=1.8)
 
     # panel letters on a grid
