@@ -270,6 +270,38 @@ def main():
     for ax_, l_ in ((ax1, 'a'), (ax2, 'b')):
         ax_.text(-0.18, 1.02, l_, transform=ax_.transAxes, fontsize=12, fontweight='bold', va='bottom')
     plos_style.save(figT, OUT_DIR / 'fig7_S_threshold')
+    # SI: forcing sensitivity — redistribute arterial inflow across the cut vertices at fixed L/R totals (and fixed V split)
+    inj_ = np.asarray(dom['inj']); side_ = np.asarray(dom['side']); Bcr = Bm.tocsr()
+    def redistribute(w):
+        f_ = fb.copy()
+        for s_ in ('L', 'R'):
+            mk_ = side_ == s_; tot_ = fb[inj_[mk_]].sum(); ww = np.maximum(np.asarray(w, float)[mk_], 0); f_[inj_[mk_]] = tot_ * ww / ww.sum()
+        return f_
+    def score(f_):
+        q_ = passive(K, f_, dom); mk = m & (np.abs(q_) > 1e-12); mr = mk & (np.abs(Qp) > 2 * D['sigma'])
+        rl_ = lambda x: np.corrcoef(np.log10(np.abs(Qp[x])), np.log10(np.abs(q_[x])))[0, 1]
+        return rl_(mk), rl_(mr), 100 * np.mean(np.sign(Qp[mr]) == np.sign(q_[mr]))
+    stub = lambda fn: np.array([fn(Bcr[i].indices) for i in inj_])
+    cases = [('reconstructed', fb), ('uniform', redistribute(np.ones(len(inj_)))),
+             ('∝ radius²', redistribute(stub(lambda ix: (r[ix] ** 2).sum()))), ('∝ conductance', redistribute(stub(lambda ix: K[ix].sum())))]
+    sc = np.array([score(f_) for _, f_ in cases])
+    rngF = np.random.default_rng(0); rnd = np.array([score(redistribute(rngF.dirichlet(np.ones(len(inj_))))) for _ in range(40)])
+    fx = fb.copy(); fx[inj_] = 0; fx[inj_[side_ == 'L']] = fb[inj_].sum() / (side_ == 'L').sum(); ext = np.array(score(fx))
+    figF2, axs_ = plt.subplots(1, 2, figsize=(7.0, 2.8)); figF2.subplots_adjust(wspace=0.3, left=0.2, right=0.98, bottom=0.18, top=0.9)
+    labs = ['reconstructed', 'uniform', r'$\propto r^2$', r'$\propto r^4/L$', 'random (n = 40)', 'all inflow from L']; y_ = np.arange(len(labs))[::-1]
+    for ax_, j_, xl in ((axs_[0], 1, r'$r_{\log}$ (|Q′| > 2σ)'), (axs_[1], 2, 'direction agreement (%)')):
+        vals = list(sc[:, j_]) + [rnd[:, j_].mean(), ext[j_]]; errs = [0] * len(cases) + [rnd[:, j_].std(), 0]
+        cols = ['#2b70b4'] + ['0.45'] * (len(cases) - 1) + ['0.65', '#e08214']
+        ax_.barh(y_, vals, color=cols, height=0.6)
+        ax_.errorbar(vals[-2], y_[-2], xerr=errs[-2], fmt='none', ecolor='k', lw=0.8, capsize=2)
+        ax_.set_yticks(y_, labs if j_ == 1 else [''] * len(labs)); ax_.set_xlabel(xl, labelpad=1)
+        ax_.set_xlim(0.4 if j_ == 1 else 70, 0.85 if j_ == 1 else 100); ax_.spines[['top', 'right']].set_visible(False)
+        for yy, vv in zip(y_, vals):
+            ax_.text(vv + (0.012 if j_ == 1 else 0.8) + (errs[list(y_).index(yy)] if True else 0), yy, f'{vv:.2f}' if j_ == 1 else f'{vv:.1f}', va='center', fontsize=8)
+    axs_[0].text(-0.45, 1.03, 'a', transform=axs_[0].transAxes, fontsize=12, fontweight='bold', va='bottom')
+    axs_[1].text(-0.1, 1.03, 'b', transform=axs_[1].transAxes, fontsize=12, fontweight='bold', va='bottom')
+    print('[fig7 SI forcing] ' + '; '.join(f'{l_}: r {v[1]:.3f}, dir {v[2]:.1f}%' for l_, v in zip(labs, list(sc) + [rnd.mean(0), ext])))
+    plos_style.save(figF2, OUT_DIR / 'fig7_S_forcing')
     plos_style.save(fig, OUT_DIR / ('fig7' if np.isfinite(SIGMA_P) else 'fig7_no_vein_penalty')); plos_style.save(figF, OUT_DIR / 'fig7_S_boundary_distance')
     print(f"[fig7] r_log {r_log:.3f}, P(dir agree|filtered) {p_agree:.2f}, mismatches {int(mism.sum())}, "
           f"n {int(m.sum())}; wrote {OUT_DIR / 'fig7.png'}")
