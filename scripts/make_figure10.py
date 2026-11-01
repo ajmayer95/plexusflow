@@ -179,7 +179,7 @@ def main():
     nPH = mcolors.Normalize(-30, 330); cPH = plt.cm.twilight_shifted          # cyclic: −30° ≡ 330°
     allmask = np.ones(nE, bool); axes_A = {}
     for row, (side, pf, Hr, dcr, mask, pmask) in enumerate((('Measured', pf_m, Hm_, Qp, e, e if gcorr else ph_ok),
-                                                            ('RC network', pf_s, Hs, Qdc_s, allmask, allmask))):
+                                                            ('RC network', pf_s, Hs, Qdc_s, e, e if gcorr else ph_ok))):   # same vessels as measured
         for col in range(3):
             ax = fig.add_subplot(gA[row, col]); bg(ax); axes_A[row, col] = ax
             if col == 0: edgemap(ax, pf, mask, nPF, cPF, 0.5)
@@ -214,7 +214,7 @@ def main():
     axC.set_xscale('log'); axC.set_yscale('log'); axC.set_xlim(lo, hi); axC.set_ylim(lo, hi); axC.set_aspect('equal')
     axC.set_xlabel('Measured pulsatile RMS (nL/s)', fontsize=8, labelpad=1)
     axC.set_ylabel('RC network (nL/s)', fontsize=8, labelpad=1); axC.tick_params(labelsize=8)
-    axC.text(0.0, 1.03, f"$r_{{\\log}}$ = {stats['rms_corr']:.2f}, n = {int(sel.sum())}\nmedian |Δφ|: $H_1$ {stats['h1_dphi_deg']:.0f}°, $H_2$ {stats['h2_dphi_deg']:.0f}°",
+    axC.text(0.0, 1.03, f"$r_{{\\log}}$ = {stats['rms_corr']:.2f} (n = {int(sel.sum())})\nmedian $|\\Delta\\phi_1|$ = {stats['h1_dphi_deg']:.0f}°,\nmedian $|\\Delta\\phi_2|$ = {stats['h2_dphi_deg']:.0f}° (n = {int(ph_ok.sum())})",
              transform=axC.transAxes, va='bottom', fontsize=8, linespacing=1.2)
     axC.spines[['top', 'right']].set_visible(False)
 
@@ -226,7 +226,7 @@ def main():
         axD.axvline(d_main * 1e4, color='#d62728', lw=0.8, ls='--')
         axD.text(d_main * 1e4, 0.97 * dS.max(), f" $\\hat D$ = {d_main * 1e4:.1f}", color='#d62728', fontsize=8, va='top', ha='left')
         axD.set_xlabel('Distensibility $D$ ($10^{-4}$ Pa$^{-1}$)', fontsize=8, labelpad=1)
-        axD.set_ylabel('Δ objective (profiled)', fontsize=8, labelpad=1); axD.tick_params(labelsize=8)
+        axD.set_ylabel(r'$\Delta\mathcal{L}(D)$, profiled', fontsize=8, labelpad=1); axD.tick_params(labelsize=8)
         axD.set_ylim(-0.03 * dS.max(), 1.05 * dS.max())
         print(f'[fig10] D profile: min at {Dg[np.argmin(Sg)]:.3g} (fit {d_main:.3g}); Δ at grid ends {dS[0]:.0f} / {dS[-1]:.0f}')
     axD.set_title('Distensibility fit', fontsize=9, pad=3); axD.spines[['top', 'right']].set_visible(False)
@@ -253,9 +253,8 @@ def main():
             ax.set_xlabel('$t/T$', fontsize=8, labelpad=1)
         ax.text(0.04, 0.95, str(k + 1), transform=ax.transAxes, ha='center', va='center', fontsize=8, fontweight='bold',
                 bbox=dict(fc='#f5d400', ec='black', lw=0.6, boxstyle='circle,pad=0.2'))
-        ax.text(0.1, 0.95, f'PI res. {pires[c]:.2f}', transform=ax.transAxes, ha='left', va='center', fontsize=8, color='0.3')
+        ax.set_title(f"{('Good', 'Typical', 'Poor')[k]} fit\nPI residual {pires[c]:.2f}", fontsize=8, pad=3, loc='center', linespacing=1.1)
     axs_e[0].legend(fontsize=8, loc='lower left', frameon=False, borderaxespad=0.1, handlelength=1.8)
-    axs_e[0].set_title('Waveforms (good / typical / poor fit)', fontsize=9, pad=3, loc='left')
 
     # panel letters on a grid
     pa, pb, pc, pd, pe = axes_A[0, 0].get_position(), axB.get_position(), axC.get_position(), axD.get_position(), axs_e[0].get_position()
