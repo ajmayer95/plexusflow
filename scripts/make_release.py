@@ -223,7 +223,10 @@ def main():
     cfg_ = StageConfig.load(st)
     write_acquisition_times(out, cfg_, sorted(G.graph["tile_f0_piv"]))   # Figs 1, 8 (raw headers are not released)
     write_representative_frame(out, cfg_, FIG3_TILE)                      # Fig 3a
-    print(f"  figure inputs: {', '.join(FIGURE_INPUTS)}, acquisition_times.json, raw_subset/", flush=True)
+    from plexusflow.analyze.geometry import tile_video_shape, VIDEO_SHAPES_FILE
+    (out / VIDEO_SHAPES_FILE).write_text(json.dumps({str(t): list(tile_video_shape(cfg_, t)) for t in sorted(G.graph["tile_f0_piv"])
+                                                      if tile_video_shape(cfg_, t)}))              # tile geometry (raw not released)
+    print(f"  figure inputs: {', '.join(FIGURE_INPUTS)}, acquisition_times.json, tile_video_shapes.json, raw_subset/", flush=True)
     (out / "results").mkdir()
     for f in RESULTS:
         shutil.copy2(paths.RESULTS / f, out / "results" / f)
@@ -253,7 +256,7 @@ the analysis needs; **extras** adds the per-tile realtime videos (viewer playbac
 | `fuse/`, `stitch/` | core | organ mosaic and tile placement |
 | `results/` | core | final DC reconciliation, synchronised AC (waveform) field `ac_field_v7`, distensibility fit `ac_estimate_v8`, reliability model; CSV exports and `summary.json` |
 | `fuse/`, `mask/`, `tiles/maxmed/`, `assets/` | core | mosaic projections, segmentation probability and mask, per-tile projections, figure drawings |
-| `acquisition_times.json`, `raw_subset/` | core | recording times of every tile (from the camera headers) and the representative raw frame of tile 36 (Fig 3) |
+| `acquisition_times.json`, `tile_video_shapes.json`, `raw_subset/` | core | recording times and frame sizes of every tile (from the raw recordings) and the representative raw frame of tile 36 (Fig 3) |
 | `videos_realtime/` | extras | every tile's realtime video as used by the figures and the viewer |
 | `batch_kl_inputs/` | extras | Kloosterman sidecars (time-mean flow per vessel) — refit the reliability model without videos |
 

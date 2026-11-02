@@ -111,7 +111,7 @@ def locator(ax, geom):
 def main():
     plos_style.apply()
     P = _paths.STAGE; G = _paths.load_graph(); tf0 = G.graph["tile_f0_piv"]; cfg = StageConfig.load(P)
-    shapes = {i: tile_video_shape(cfg, i) for i in cfg.discover_raw_tile_ids()}
+    shapes = {i: tile_video_shape(cfg, i) for i in (cfg.discover_raw_tile_ids() or sorted(G.graph['tile_f0_piv']))}
     geom = load_tile_geometry(cfg, video_shapes={k: v for k, v in shapes.items() if v is not None})
 
     fig = plt.figure(figsize=(5.2, 4.6))                     # text-column width; no organ locator

@@ -58,16 +58,29 @@ class MosaicGeom:
     pad: int                           # bbox padding used by fuser
 
 
-def tile_video_shape(cfg: StageConfig, tile_id: int) -> Optional[tuple[int, int]]:
-    """Peek the (H, W) of one raw tile video by reading its first frame.
+VIDEO_SHAPES_FILE = "tile_video_shapes.json"     # stored in data releases, which have no raw recordings
 
-    Returns None if the tile folder or a frame is missing."""
+
+def _stored_video_shape(cfg: StageConfig, tile_id: int) -> Optional[tuple[int, int]]:
+    import json
+    p = Path(cfg.root) / VIDEO_SHAPES_FILE
+    if not p.exists():
+        return None
+    v = json.loads(p.read_text()).get(str(int(tile_id)))
+    return (int(v[0]), int(v[1])) if v else None
+
+
+def tile_video_shape(cfg: StageConfig, tile_id: int) -> Optional[tuple[int, int]]:
+    """Peek the (H, W) of one raw tile video by reading its first frame, or from ``<stage>/tile_video_shapes.json``
+    when the raw recordings are absent (data releases).
+
+    Returns None if neither is available."""
     try:
         frames = cfg.raw_tile_frames(tile_id)
     except FileNotFoundError:
-        return None
+        frames = None
     if not frames:
-        return None
+        return _stored_video_shape(cfg, tile_id)
     with tifffile.TiffFile(str(frames[0])) as tf:
         H, W = tf.pages[0].shape[:2]
     return (int(H), int(W))
