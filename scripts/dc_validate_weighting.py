@@ -1,0 +1,92 @@
+"""Validation of the DC reconciliation weighting against independent repeat recordings (input to Fig 6f).
+
+Carved vessels measured in ≥ 2 tiles provide independent references: the projection uses one measurement per vessel
+(the winner, smallest c); every other tile's measurement of that vessel is held out.  Two tests, five weightings:
+  measured   the reconciled flow of a vessel vs its held-out repeat (does imposing conservation degrade the data?)
+  imputed    hide EVERY measurement of a random 10 % of the repeat-measured vessels (5 disjoint folds), reconcile the
+             rest, compare the network-imputed flow with the hidden measurements (does conservation add information?)
+Weightings: uniform w = 1;  quality w = 1/c²;  measured-scale w = 1/(c² y² + s0²);  calibrated (production)
+w = 1/(c² Q′² + s0²) at the reconciled flow (reconcile_dc; one ensemble member in the imputation folds);  and 'raw'
+(Q = y, measured test only).  Scores: median |log(|Q|/|h|)| and direction agreement, for all references and for
+trusted references (c_h < 0.5); 95 % intervals from a vessel-clustered bootstrap.
+Writes $PLEXUSFLOW_RESULTS/dc_weighting_validation.json.  ~5 min (21S).
+"""
+from __future__ import annotations
+import json, pickle, sys, time
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+import numpy as np
+import plexusflow.paths as P
+from plexusflow.reconcile.reliability import measurement_table, c_of
+from plexusflow.reconcile.dc import reconcile_dc
+from plexusflow.reconcile.network import project, carved_domain, EPS_UNIMAGED
+
+KINDS = ("uniform", "quality", "measured_scale", "calibrated")
+TRUST = 0.5
+T0 = time.time()
+log = lambda s: print(f"[+{time.time() - T0:4.0f} s] {s}", flush=True)
+
+
+def fields(D, dom):
+    y, im = D["Qm"], D["imaged"]; C = np.where(im, D["c"], 1.0); s0 = D["sigma0_floor"]
+    norm = lambda w: np.where(im, w / np.median(w[im]), EPS_UNIMAGED)
+    return {"uniform": project(y, norm(np.ones_like(y)), dom), "quality": project(y, norm(1 / C ** 2), dom),
+            "measured_scale": project(y, norm(1 / (C ** 2 * y ** 2 + s0 ** 2)), dom), "calibrated": D["Qp"]}
+
+
+def summarise(rows, rng, n_boot=500):
+    """rows: (vessel, err, direction_ok, c_ref) → {all, trusted}: median err [CI], direction agreement [CI], n"""
+    a = np.array(rows, float); out = {}
+    for lab, sel in (("all", np.ones(len(a), bool)), ("trusted", a[:, 3] < TRUST)):
+        b = a[sel]; ves = np.unique(b[:, 0]); grp = [np.nonzero(b[:, 0] == v)[0] for v in ves]; be, bd = [], []
+        for _ in range(n_boot):
+            ix = np.concatenate([grp[k] for k in rng.integers(0, len(grp), len(grp))]); be.append(np.median(b[ix, 1])); bd.append(b[ix, 2].mean())
+        out[lab] = dict(err=float(np.median(b[:, 1])), err_ci=np.percentile(be, [2.5, 97.5]).tolist(),
+                        dir=float(b[:, 2].mean()), dir_ci=np.percentile(bd, [2.5, 97.5]).tolist(), n=int(len(b)), n_vessels=int(len(ves)))
+    return out
+
+
+def main(n_fold=5, frac=0.10, seed=0):
+    G = P.load_graph(); M = measurement_table(G); model = json.loads((P.RESULTS / "reliability_model_v1.json").read_text())
+    D = pickle.loads((P.RESULTS / "dc_reconciled_v2.pkl").read_bytes()); dom = carved_domain(G)
+    E = list(dom["edges"]); assert E == [tuple(e) for e in D["edges"]]; eix = {e: i for i, e in enumerate(E)}
+    by_e = {}
+    for (t, e), m in M.items():
+        if e in eix:
+            by_e.setdefault(e, []).append(m)
+    rng = np.random.default_rng(seed); rows = {k: [] for k in ("raw",) + KINDS}
+    # 1. measured vessels: reconciled vs held-out repeat
+    F = {"raw": D["Qm"], **fields(D, dom)}
+    for e, ms in by_e.items():
+        i = eix[e]
+        for m in ms:
+            if m["tile"] != D["tile"][i] and abs(m["Q"]) > 0:
+                for k, Q in F.items():
+                    rows[k].append((i, abs(np.log(max(abs(Q[i]), 1e-12) / abs(m["Q"]))), float(np.sign(Q[i]) == np.sign(m["Q"])), c_of(model, m)))
+    measured = {k: summarise(v, rng) for k, v in rows.items()}
+    log(f"measured: {measured['calibrated']['all']['n_vessels']} vessels with repeats; trusted err raw {measured['raw']['trusted']['err']:.3f}, "
+        f"calibrated {measured['calibrated']['trusted']['err']:.3f}")
+    # 2. imputation: hide every measurement of 10 % of the repeat-measured vessels per fold
+    multi = sorted(e for e, ms in by_e.items() if len(ms) >= 2); rng.shuffle(multi)
+    folds = np.array_split(np.arange(len(multi)), int(round(1 / frac)))[:n_fold]; rows = {k: [] for k in KINDS}
+    for fi, ix in enumerate(folds):
+        hide = {multi[j] for j in ix}
+        Df = reconcile_dc(G, model, {k: m for k, m in M.items() if k[1] not in hide}, dom=dom, n_ens=1, n_shuffle=1); Ff = fields(Df, dom)
+        for e in hide:
+            i = eix[e]
+            for m in by_e[e]:
+                if abs(m["Q"]) > 0:
+                    for k, Q in Ff.items():
+                        rows[k].append((i, abs(np.log(max(abs(Q[i]), 1e-12) / abs(m["Q"]))), float(np.sign(Q[i]) == np.sign(m["Q"])), c_of(model, m)))
+        log(f"imputation fold {fi + 1}/{n_fold}: {len(hide)} vessels hidden")
+    imputed = {k: summarise(v, rng) for k, v in rows.items()}
+    for k in KINDS:
+        log(f"  {k:15s} measured trusted {measured[k]['trusted']['err']:.3f} / {measured[k]['trusted']['dir']:.3f}   "
+            f"imputed trusted {imputed[k]['trusted']['err']:.3f} / {imputed[k]['trusted']['dir']:.3f}")
+    out = dict(measured=measured, imputed=imputed, trust_c=TRUST, n_fold=n_fold, frac=frac, seed=seed)
+    P.RESULTS.mkdir(parents=True, exist_ok=True); (P.RESULTS / "dc_weighting_validation.json").write_text(json.dumps(out, indent=1))
+    log(f"wrote {P.RESULTS / 'dc_weighting_validation.json'}")
+
+
+if __name__ == "__main__":
+    main()

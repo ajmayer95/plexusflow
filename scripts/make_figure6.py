@@ -1,16 +1,16 @@
-"""Fig 6v5 — measurement reliability → calibrated uncertainty → conservation-consistent projection (redesign of fig6v3,
-rebuilt from the pipeline outputs, numbers checked against fig6v3).  PLOS: 7.5 in wide, all text ≥ 8 pt Arial.
+"""Fig 6 — DC reconciliation: measurement reliability → held-out calibration → weighted conservative projection → result and
+validation.  PLOS: 7.5 in wide, all text ≥ 8 pt Arial.
 
-  a  high- vs low-quality Kloosterman measurement (tile 30): kept cross-sections white, rejected grey, time-mean OF arrows;
-     f, alignment and c under each image; c formula once.
-  b  standardized same-tile junction residuals z_j = Σ s y / σ_j under results/reliability_model_v1.json vs N(0, 1).
-  c  tile-30 junction 28329: measured y_e (dot) → network-reconciled Q'_e (open diamond, results/dc_reconciled_v2.pkl Qp,
-     as fig6v3); the single-junction projection Q' = y − σ² s (Σ s y) / Σ σ² is logged for comparison.
+  a  reliable vs unreliable Kloosterman measurement (tile 30): kept cross-sections, time-mean OF arrows; c, f, align under
+     each; the reliability formula with the fitted coefficients (results/reliability_model_v1.json).
+  b  tile-held-out (5-fold) calibration: RMS predicted junction uncertainty σ_j vs RMS observed imbalance r_j.
+  c  the projection (min Σ w (q − y)² s.t. B_int q = 0, w = 1/(c² Q′² + s0²)) and tile-30 junction 28329 before / after
+     (network-reconciled values from results/dc_reconciled_v2.pkl).
+  d, e  measured / reconciled |flux| in tile 30 (junction-imbalance circles on d).
+  f  validation against independent repeat recordings (results/dc_weighting_validation.json, dc_validate_weighting.py):
+     error of measured (reconciled) and hidden (imputed) vessels for four weightings, trusted references c < 0.5.
 
-  c (v5) patch maps around junction 28329 (±85 px, tile-30 frame): measured | reconciled [| correction] + the junction chart.
-
-Run: python3 -u scripts/make_figure6v5.py [--variant two|three]   (default three; writes figures/fig6v5/fig6v5_<variant>.{png,pdf,tif}
-     and the SI figure fig6v5_S_heldout)
+Run: python3 -u scripts/make_figure6.py   (writes figures/fig6/fig6.{png,pdf,tif} and the SI figure fig6_S_heldout)
 """
 import sys, json, gzip, pickle, time, argparse
 from pathlib import Path
@@ -30,10 +30,9 @@ from plexusflow.config import StageConfig
 
 ST = P.STAGE
 _ap = argparse.ArgumentParser(description="Fig 6v5 (DC reliability and reconciliation)")
-_ap.add_argument("--variant", choices=("two", "three"), default="three", help="two maps + junction chart, or three (adds the correction map)")
-VARIANT = _ap.parse_args().variant
-OUT = P.FIGURES / "fig6" / ("fig6" if VARIANT == "three" else f"fig6_{VARIANT}")
-REL_LIM, Z_S, Q_FLOOR_PCT = 0.5, 5.0, 10          # correction colour range ±50 %; junction-circle area per z²
+_ap.parse_args()
+OUT = P.FIGURES / "fig6" / "fig6"
+Z_S = 5.0                                         # junction-circle area per z²
 TILE, NODE = 30, 28329
 HIGH, LOW = (28304, 28329), (35992, 36030)
 PX_UM = 1.7
@@ -179,36 +178,74 @@ def main():
         log(f"  {e}: kept {valid.sum()}/{len(valid)} (stored f {m['f']:.3f}), align {m['align']:.2f}, c {ex[e]['c']:.2f}")
 
     # ---------------------------------------------------------------- layout (7.5 in wide, PLOS max)
-    fig = plt.figure(figsize=(7.5, 4.9), facecolor="white")
-    top = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.95, bottom=0.585, width_ratios=[1.45, 1], wspace=0.22)
-    ga = top[0].subgridspec(1, 2, wspace=0.06)
-    head = dict(fontsize=8.5, fontweight="bold", color=INK, ha="left", va="bottom")
-
-    for k, (e, lab, colr) in enumerate(((HIGH, "High quality", COL[0]), (LOW, "Low quality", LOWCOL))):
-        ax = fig.add_subplot(ga[k]); x = ex[e]; draw_measurement(ax, img, x["ki"], colr, x["valid"])
-        n = len(x["valid"])
-        ax.text(0.5, -0.04, f"c = {x['c']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=8, fontweight="bold", color=colr)
-        if k == 0:
-            ax.text(-0.02, 1.03, "a", transform=ax.transAxes, **{**head, "fontsize": 10})
-            ax0 = ax
+    # three stages, top to bottom: (a, b) reliability and its held-out calibration → (c) the weighted conservative
+    # projection → (d, e) measured / reconciled flux in tile 30 and (f) validation against independent repeat recordings
+    fig = plt.figure(figsize=(7.5, 6.9), facecolor="white")
+    LET = dict(fontsize=12, fontweight="bold", color=INK, ha="left", va="bottom")
+    top = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.955, bottom=0.66, width_ratios=[1.45, 1], wspace=0.24)
+    ga = top[0].subgridspec(1, 2, wspace=0.06); axA = []
+    for k, (e, lab, colr) in enumerate(((HIGH, "Reliable measurement", COL[0]), (LOW, "Unreliable measurement", LOWCOL))):
+        ax = fig.add_subplot(ga[k]); x = ex[e]; draw_measurement(ax, img, x["ki"], colr, x["valid"]); axA.append(ax)
+        ax.set_title(lab, fontsize=9, color=colr, pad=3)
+        ax.text(0.5, -0.03, f"c = {x['c']:.2f}   (f = {x['f']:.2f}, align = {x['align']:.2f})", transform=ax.transAxes, ha="center",
+                va="top", fontsize=8, color=colr)
+    c0_ = mod.get("c0", np.median(list(mod["c_T"].values())))
+    pa0, pa1 = axA[0].get_position(), axA[1].get_position(); xm_ = (pa0.x0 + pa1.x1) / 2
+    fig.text(xm_, pa0.y0 - 0.045, r"$c_k = c_0 + c_f\,(1 - f_k) + c_a\,(1 - \mathrm{align}_k)$" + f"   ($c_0$ = {c0_:.2f}, $c_f$ = {mod['c_f']:.2f}, "
+             f"$c_a$ = {mod['c_a']:.2f})", ha="center", va="top", fontsize=9, color=INK)
+    fig.text(xm_, pa0.y0 - 0.074, "f = fraction of cross-sections kept;  align = flow–centreline alignment", ha="center", va="top",
+             fontsize=8, color=MUTED)
 
     axb = fig.add_subplot(top[1]); R_ = cal["rows"]
     lo_, hi_ = R_[:, 0].min() / 1.6, R_[:, 0].max() * 1.6
     axb.plot([lo_, hi_], [lo_, hi_], color=MUTED, lw=0.8, ls=(0, (3, 2)), zorder=1)
-    axb.text(hi_ / 1.25, hi_ / 1.25 * 1.18, "y = x", color=MUTED, fontsize=8, ha="right", va="bottom", rotation=0)
+    axb.text(hi_ / 4.5, hi_ / 4.5 * 1.25, "y = x", color=MUTED, fontsize=8, ha="right", va="bottom")
     axb.errorbar(R_[:, 0], R_[:, 1], yerr=[R_[:, 1] - R_[:, 2], R_[:, 3] - R_[:, 1]], fmt="o", ms=4, color="#2a6fb0",
-                 mec="white", mew=0.5, ecolor="#1a1a1a", elinewidth=0.9, capsize=2.0, capthick=0.9, zorder=3)
+                 mec="white", mew=0.5, ecolor=INK, elinewidth=0.9, capsize=2.0, capthick=0.9, zorder=3)
     axb.set_xscale("log"); axb.set_yscale("log"); axb.set_xlim(lo_, hi_); axb.set_ylim(lo_, hi_); axb.set_aspect("equal")
-    axb.set_xlabel(r"RMS predicted uncertainty $\sigma_j$ (nL/s)", fontsize=8)
-    axb.set_ylabel(r"RMS observed residual $r_j$ (nL/s)", fontsize=8); axb.tick_params(labelsize=8)
+    axb.set_xlabel(r"predicted junction uncertainty $\sigma_j$ (nL/s)", fontsize=8, labelpad=1)
+    axb.set_ylabel(r"observed imbalance $|r_j|$, RMS (nL/s)", fontsize=8, labelpad=1); axb.tick_params(labelsize=8)
+    axb.set_title(f"Held-out tiles (5-fold), {len(z):,} junctions", fontsize=9, pad=3, color=INK)
+    axb.text(0.97, 0.04, r"$\sigma_j^2 = \sum_{k \in j} c_k^2\, y_k^2 + s_0^2$", transform=axb.transAxes, ha="right", va="bottom", fontsize=8)
     for s_ in ("top", "right"):
         axb.spines[s_].set_visible(False)
-    axb.text(-0.34, 1.03, "b", transform=axb.transAxes, **{**head, "fontsize": 10})
 
-    # c: patch maps (same geometry & widths in every map), plus the three-vessel junction chart
+    # c: the projection (equations) and one real junction before / after (tile-30 node NODE, network-reconciled values)
+    gc = fig.add_gridspec(1, 3, left=0.04, right=0.985, top=0.545, bottom=0.41, width_ratios=[1.55, 0.62, 0.62], wspace=0.05)
+    axE = fig.add_subplot(gc[0]); axE.axis("off")
+    axE.text(0.0, 0.93, "Conservative weighted projection", transform=axE.transAxes, fontsize=9, fontweight="bold", va="top", color=INK)
+    axE.text(0.0, 0.62, r"$\mathbf{Q}' = \arg\min_{\mathbf{q}}\ \sum_k w_k\,(q_k - y_k)^2 \quad \mathrm{s.t.}\quad B_{\mathrm{int}}\,\mathbf{q} = 0$",
+             transform=axE.transAxes, fontsize=9, va="center", color=INK)
+    axE.text(0.0, 0.30, r"$w_k = 1\,/\,(c_k^2\,Q_k'^2 + s_0^2)$,  re-weighted at the reconciled flow until self-consistent",
+             transform=axE.transAxes, fontsize=8, va="center", color=INK)
+    axE.text(0.0, 0.06, "unimaged vessels: $w_k \\approx 0$ (imputed from conservation alone)", transform=axE.transAxes, fontsize=8,
+             va="center", color=MUTED)
+    pn = np.array([G.nodes[NODE]["x"], G.nodes[NODE]["y"]], float)
+    ang = []
+    for e_, s_ in jn:
+        nb_ = e_[1] if e_[0] == NODE else e_[0]; d_ = np.array([G.nodes[nb_]["x"], G.nodes[nb_]["y"]], float) - pn; ang.append(np.arctan2(-d_[1], d_[0]))
+
+    def junction(ax, vals, title, cols, cs=None):
+        ax.set_xlim(-2.3, 2.3); ax.set_ylim(-2.45, 2.25); ax.set_aspect("equal"); ax.axis("off")
+        for th, v, cl in zip(ang, vals, cols):
+            u = np.array([np.cos(th), np.sin(th)]); ax.plot([0, u[0]], [0, u[1]], color="0.75", lw=3.2, solid_capstyle="round", zorder=1)
+            a0, a1 = (0.12 * u, 0.92 * u) if v > 0 else (0.92 * u, 0.12 * u)            # s·y > 0 = flow out of the node
+            ax.annotate("", xy=a1, xytext=a0, arrowprops=dict(arrowstyle="-|>", color=cl, lw=1.4, mutation_scale=12, shrinkA=0, shrinkB=0), zorder=3)
+            ax.text(*(1.62 * u), f"{abs(v):.3f}" + (f"\nc = {cs[list(vals).index(v)]:.2f}" if cs is not None else ""), ha="center",
+                    va="center", fontsize=8, color=cl, linespacing=0.95)
+        ax.scatter([0], [0], s=14, color=INK, zorder=4)
+        tot = abs(np.sum(vals))                                       # |Σ s q|: inflow ≠ outflow
+        ax.set_title(title, fontsize=8, pad=1, color=INK)
+        ax.text(0, -2.42, f"imbalance {tot:.3f}" if tot > 5e-4 else "imbalance 0", ha="center", va="bottom", fontsize=8,
+                color="#c51b8a" if tot > 5e-4 else INK)
+    cj_ = [COL[0] if c_ < 0.4 else LOWCOL for c_ in cj]
+    axJ = fig.add_subplot(gc[1]); junction(axJ, y, "measured y (nL/s)", cj_, cs=cj)
+    junction(fig.add_subplot(gc[2]), yp, "reconciled Q′", cj_)
+
+    # d, e: patch maps (same geometry & widths in every map)
     geom = load_tile_geometry(StageConfig.load(ST)); E = [tuple(e) for e in D["edges"]]
     tile_xy = lambda xy: graph_to_tile_batch(np.asarray(xy, float), geom, TILE)
-    ctr = tile_xy([[G.nodes[NODE]["x"], G.nodes[NODE]["y"]]])[0]; box = (0, img.shape[0], 0, img.shape[1]); SC = img.shape[1] / 170
+    box = (0, img.shape[0], 0, img.shape[1])
     r0, r1, c0, c1 = box; inside = lambda q: np.any((q[:, 0] > r0) & (q[:, 0] < r1) & (q[:, 1] > c0) & (q[:, 1] < c1))
     path = {}
     for u, v, d in G.edges(data=True):
@@ -219,7 +256,6 @@ def main():
     Qm, Qp, ce, im = D["Qm"], D["Qp"], D["c"], D["imaged"].astype(bool)
     rad = {e: G.edges[e].get("radius", 5.0) for e in path}; rmax = np.percentile(list(rad.values()), 95)
     lw_of = lambda e: 0.5 + 1.5 * min(rad[e] / rmax, 1.0)
-    # junction residuals z_j (as panel b) at interior nodes in the tile whose incident edges are all carved and imaged
     sig = D["sigma"]; imb = {}
     for n in {n for e in ps for n in e}:
         if G.degree(n) < 3 or G.nodes[n].get("boundary_type") in ("source", "sink"):
@@ -239,15 +275,11 @@ def main():
     after = max(abs(v[2]) for v in imb.values()); zz = np.array([v[1] for v in imb.values() if np.isfinite(v[1])])
     log(f"tile {TILE}: {len(pe)} carved vessels ({im[pe].sum()} imaged), {len(imb)} junctions ({len(zz)} fully imaged, RMS z {np.sqrt(np.mean(zz ** 2)):.2f}); "
         f"max |Σ s Q'| after {after:.1e} nL/s")
-    QF = Q_FLOOR_PCT and float(np.percentile(np.abs(Qm[im]), Q_FLOOR_PCT)); log(f"  relative-change denominator floor max(|y|, {QF:.4f} nL/s) (p{Q_FLOOR_PCT} of |y|)")
-    rel_t = {i: (abs(Qp[i]) - abs(Qm[i])) / max(abs(Qm[i]), QF) for i in pe if im[i] and abs(Qm[i]) > 0}
-    log("  tile: median |ΔQ|/|Q| by c  <0.3 / 0.3–0.5 / ≥0.5: " + " / ".join(f"{np.median([abs(v) for i, v in rel_t.items() if m_(ce[i])]):.2f} (n {sum(m_(ce[i]) for i in rel_t)})"
-        for m_ in (lambda x: x < 0.3, lambda x: 0.3 <= x < 0.5, lambda x: x >= 0.5)))
     qa = np.abs(np.r_[Qm[[i for i in pe if im[i]]], Qp[pe]]); qa = qa[qa > 0]
     mag_norm = mcolors.LogNorm(vmin=np.percentile(qa, 3), vmax=np.percentile(qa, 99))
     mag_cmap = mcolors.ListedColormap(matplotlib.colormaps["viridis"](np.linspace(0.18, 1.0, 256)))
-    cor_norm = mcolors.TwoSlopeNorm(0, -REL_LIM, REL_LIM); cor_cmap = matplotlib.colormaps["RdBu_r"]
     sub = img[r0:r1, c0:c1]; vlo, vhi = np.percentile(sub, 1), np.percentile(sub, 99.7) * 1.25
+    jpos = tile_xy([[G.nodes[NODE]["x"], G.nodes[NODE]["y"]]])[0]
 
     def draw_map(ax, kind, title):
         ax.imshow(img * 0.55, cmap="gray", vmin=vlo, vmax=vhi, interpolation="nearest")
@@ -259,62 +291,66 @@ def main():
                 ax.plot(q[:, 1], q[:, 0], color="white", lw=0.4, alpha=0.3, zorder=2)
         for i in pe:
             e = E[i]; q = path[e]; lw = lw_of(e)
-            if kind != "rec" and not im[i]:
+            if kind == "meas" and not im[i]:
                 ax.plot(q[:, 1], q[:, 0], color="#d0d0d0", lw=lw, ls=(0, (1.0, 1.0)), zorder=3); continue
-            if kind == "corr":
-                col = cor_cmap(cor_norm(np.clip(rel_t.get(i, 0.0), -REL_LIM, REL_LIM)))
-            else:
-                col = mag_cmap(mag_norm(max(abs(Qm[i] if kind == "meas" else Qp[i]), mag_norm.vmin)))
+            col = mag_cmap(mag_norm(max(abs(Qm[i] if kind == "meas" else Qp[i]), mag_norm.vmin)))
             ax.plot(q[:, 1], q[:, 0], color=col, lw=lw, zorder=4, solid_capstyle="round")
         if kind == "meas":
             for n, (p, zm, _) in imb.items():
                 if np.isfinite(zm):
                     ax.scatter(p[1], p[0], s=Z_S * min(abs(zm), 4) ** 2, facecolor="none", edgecolor="#c51b8a", linewidth=0.6, zorder=7)
-        ax.set_title(title, fontsize=8, color=INK, pad=3)
+        ax.scatter(jpos[1], jpos[0], s=60, marker="s", facecolor="none", edgecolor="white", linewidth=1.0, zorder=8)
+        ax.set_title(title, fontsize=9, color=INK, pad=3)
         return ax
 
-    maps = [("meas", "Measured"), ("rec", "Reconciled")] + ([("corr", "Relative change")] if VARIANT == "three" else [])
-    bot = fig.add_gridspec(1, len(maps) + 2, left=0.035, right=0.985, top=0.44, bottom=0.165,
-                           width_ratios=[1] * len(maps) + [0.22, 0.95], wspace=0.07)
-    axs = [draw_map(fig.add_subplot(bot[k]), kd, tt) for k, (kd, tt) in enumerate(maps)]
+    bot = fig.add_gridspec(1, 4, left=0.02, right=0.985, top=0.335, bottom=0.135, width_ratios=[1, 1, 0.16, 1.32], wspace=0.06)
+    axs = [draw_map(fig.add_subplot(bot[k]), kd, tt) for k, (kd, tt) in enumerate((("meas", "Measured y"), ("rec", "Reconciled Q′")))]
     scalebar(axs[0], box, um=100)
-    axs[0].text(-0.06, 1.03, "c", transform=axs[0].transAxes, **{**head, "fontsize": 10})
     fig.canvas.draw()
-    def hbar(x0, x1, y0, norm, cmap, label, **kw):
-        cax = fig.add_axes([x0, y0, x1 - x0, 0.011])
-        cb = plt.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax, orientation="horizontal", **kw)
-        cb.set_label(label, fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8, length=2, pad=1, which="both"); cb.outline.set_linewidth(0.4)
-        return cb
     P0, P1 = axs[0].get_position(), axs[1].get_position()
-    hbar(P0.x0 + 0.05 * P0.width, P1.x1 - 0.05 * P1.width, P0.y0 - 0.045, mag_norm, mag_cmap, "|flux| (nL/s)")
-    if VARIANT == "three":
-        P2 = axs[2].get_position()
-        cb = hbar(P2.x0 + 0.08 * P2.width, P2.x1 - 0.08 * P2.width, P2.y0 - 0.04, cor_norm, cor_cmap, "relative change in |flux|",
-                  ticks=[-REL_LIM, 0, REL_LIM])
-        cb.ax.set_xticklabels([f"−{REL_LIM:.0%}", "0", f"+{REL_LIM:.0%}"])
-    # key, under the measured map's colour bar
-    ky = P0.y0 - 0.125
+    cax = fig.add_axes([P0.x0 + 0.05 * P0.width, P0.y0 - 0.032, P1.x1 - P0.x0 - 0.1 * P0.width, 0.010])
+    cb = plt.colorbar(cm.ScalarMappable(norm=mag_norm, cmap=mag_cmap), cax=cax, orientation="horizontal")
+    cb.set_label("|flux| (nL/s)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8, length=2, pad=1, which="both"); cb.outline.set_linewidth(0.4)
+    ky = P0.y0 - 0.1
     fig.lines.append(matplotlib.lines.Line2D([P0.x0, P0.x0 + 0.025], [ky, ky], transform=fig.transFigure, color="#9a9a9a", lw=1.4, ls=(0, (1.0, 1.0))))
     fig.text(P0.x0 + 0.03, ky, "not imaged", fontsize=8, color=INK, va="center")
-    fig.add_artist(matplotlib.lines.Line2D([P0.x0 + 0.122], [ky], transform=fig.transFigure, marker="o", ms=np.sqrt(Z_S * 4), mfc="none", mec="#c51b8a", mew=0.6, ls=""))
-    fig.text(P0.x0 + 0.135, ky, "junction residual |z| = 2", fontsize=8, color=INK, va="center")
+    fig.add_artist(matplotlib.lines.Line2D([P0.x0 + 0.125], [ky], transform=fig.transFigure, marker="o", ms=np.sqrt(Z_S * 4), mfc="none", mec="#c51b8a", mew=0.6, ls=""))
+    fig.text(P0.x0 + 0.138, ky, "junction imbalance |z| = 2", fontsize=8, color=INK, va="center")
+    fig.add_artist(matplotlib.lines.Line2D([P0.x0 + 0.335], [ky], transform=fig.transFigure, marker="s", ms=5, mfc="none", mec="0.35", mew=0.9, ls=""))
+    fig.text(P0.x0 + 0.347, ky, "junction in c", fontsize=8, color=INK, va="center")
 
-    # correction vs reliability (all imaged vessels, network-wide), tile-30 vessels as small points
-    axq = fig.add_subplot(bot[-1]); allim = im & (np.abs(Qm) > 0)
-    ca, ra = ce[allim], np.abs(Qp[allim] - Qm[allim]) / np.maximum(np.abs(Qm[allim]), QF); qs = np.quantile(ca, np.linspace(0, 1, 7))
-    xm, ym, lo_, hi_ = [], [], [], []
-    for a_, b_ in zip(qs[:-1], qs[1:]):
-        s_ = (ca >= a_) & (ca <= b_); xm.append(np.median(ca[s_])); v_ = ra[s_]
-        ym.append(np.median(v_)); lo_.append(np.quantile(v_, 0.25)); hi_.append(np.quantile(v_, 0.75))
-    xm, ym = np.array(xm), np.array(ym)
-    axq.vlines(xm, lo_, hi_, color=INK, lw=0.8, zorder=2)
-    axq.plot(xm, ym, "o-", color=INK, ms=3.5, lw=1.0, zorder=3, label="all vessels")
-    log("  network: median |ΔQ|/|Q| by c sextile " + ", ".join(f"c≈{x:.2f}: {y:.2f}" for x, y in zip(xm, ym)))
-    axq.set_xlabel("Reliability score c", fontsize=8, labelpad=1); axq.set_ylabel("|Q′ − y| / |y|", fontsize=8, labelpad=2)
-    axq.set_ylim(0, 1.0); axq.set_xlim(0.1, 1.15); axq.tick_params(labelsize=8)
+    # f: validation against independent repeat recordings (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
+    V = json.loads((P.RESULTS / "dc_weighting_validation.json").read_text()); axf = fig.add_subplot(bot[3])
+    kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("uniform", "1/$c^2$", "1/($c^2y^2$)", "calibrated")
+    xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
+    axf.axhspan(*raw["err_ci"], color="0.88", lw=0, zorder=0)
+    axf.axhline(raw["err"], color="0.55", lw=0.8, ls=(0, (3, 2)), zorder=1)
+    axf.text(-0.42, raw["err"] + 0.02, "second recording of the same vessel", fontsize=8, color="0.4", va="bottom", ha="left")
+    for test, dx, mk, lab in (("measured", -0.13, "o", "measured vessel"), ("imputed", 0.13, "D", "hidden vessel, imputed\n(% = correct direction)")):
+        r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
+        fc = ["white" if test == "measured" else ("#2a6fb0" if k == "calibrated" else "0.45") for k in kinds]
+        ec = ["#2a6fb0" if k == "calibrated" else "0.45" for k in kinds]
+        axf.vlines(xs + dx, ci_[:, 0], ci_[:, 1], color=ec, lw=0.9, zorder=2)
+        axf.scatter(xs + dx, e_, marker=mk, s=22, facecolors=fc, edgecolors=ec, linewidths=1.0, zorder=3, label=lab)
+        if test == "imputed":
+            for x_, q in zip(xs + dx, r_):
+                axf.text(x_, q["err_ci"][1] + 0.025, f"{100 * q['dir']:.0f}%", ha="center", va="bottom", fontsize=8, color="0.3")
+    axf.set_xticks(xs); axf.set_xticklabels(xl, fontsize=8); axf.set_xlim(-0.5, len(kinds) - 0.5)
+    axf.set_ylim(0, max(0.85, axf.get_ylim()[1])); axf.set_ylabel("error vs independent\nrecording, median |log ratio|", fontsize=8, labelpad=1)
+    axf.set_xlabel("weights $w_k$", fontsize=8, labelpad=1); axf.tick_params(labelsize=8)
+    axf.legend(loc="lower left", frameon=False, fontsize=8, handletextpad=0.2, borderaxespad=0.1)
+    axf.set_title("Validation (trusted references, c < 0.5)", fontsize=9, pad=3, color=INK)
     for s_ in ("top", "right"):
-        axq.spines[s_].set_visible(False)
+        axf.spines[s_].set_visible(False)
+    log("  f: " + "; ".join(f"{k} meas {V['measured'][k]['trusted']['err']:.3f} imp {V['imputed'][k]['trusted']['err']:.3f} ({100 * V['imputed'][k]['trusted']['dir']:.0f}%)" for k in kinds)
+        + f"; raw repeat {raw['err']:.3f}")
 
+    # panel letters on a grid: column 1 = a, c, d; b and f share the right column; e above its map
+    fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv = fig.transFigure.inverted(); tb = lambda a_: inv.transform(a_.get_tightbbox(rr_))
+    xL = 0.005; xR = min(tb(axb)[0, 0], tb(axf)[0, 0]) - 0.01
+    yT = max(tb(axA[0])[1, 1], tb(axb)[1, 1]); yB = max(tb(a_)[1, 1] for a_ in axs + [axf])
+    for x_, y_, l_ in ((xL, yT, "a"), (xR, yT, "b"), (xL, tb(axE)[1, 1], "c"), (xL, yB, "d"), (tb(axs[1])[0, 0] - 0.005, yB, "e"), (xR, yB, "f")):
+        fig.text(x_, min(y_ + 0.004, 0.985), l_, **LET)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     plos_style.save(fig, OUT)
     log(f"wrote {OUT}.png/.pdf")

@@ -7,7 +7,7 @@
 #   bash scripts/reproduce_paper.sh            # results + figures   (~5 min on a laptop)
 #   bash scripts/reproduce_paper.sh --figures  # figures only, from existing results
 #
-# Steps: DC reconciliation → aligned pulsatile (AC) field → distensibility fit → Figs 1–10 → figures/latest/.
+# Steps: DC reconciliation → weighting validation → aligned pulsatile (AC) field → distensibility fit → Figs 1–10 → figures/latest/.
 # Point RESULTS and FIGURES at your own folders so a frozen release is never modified.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -18,6 +18,7 @@ run() { echo; echo "=== $* ==="; "$PY" "$@"; }
 if [[ "${1:-}" != "--figures" ]]; then
   mkdir -p "${PLEXUSFLOW_RESULTS:-$PLEXUSFLOW_STAGE/results}"
   run scripts/dc_reconcile.py          # reliability model + reconciled mean flows   → reliability_model_v1.json, dc_reconciled_v2.pkl
+  run scripts/dc_validate_weighting.py # weighting validation vs repeat recordings   → dc_weighting_validation.json (Fig 6f)
   run scripts/ac_field.py              # tile-synchronised harmonic field (paper preset) → ac_field_v7.pkl
   run scripts/mech/ac_estimate.py      # profiled distensibility fit                 → ac_estimate_v8.json
 fi
