@@ -20,16 +20,17 @@ def _locate_stitch_script() -> Path:
     env = os.environ.get("PLEXUSFLOW_STITCH_SCRIPT")
     if env:
         return Path(env).expanduser()
-    candidates = [
-        Path.home() / "Library/CloudStorage/GoogleDrive-amayer@flatironinstitute.org/"
-                       "My Drive/Python/Yolk Sac Code/PerTileFlow/scripts/plexus_stitch_v0.py",
-        Path(__file__).resolve().parents[4] / "PerTileFlow/scripts/plexus_stitch_v0.py",
+    root = os.environ.get("PERTILEFLOW_ROOT")
+    candidates = ([Path(root).expanduser() / "scripts/plexus_stitch_v0.py"] if root else []) + [
+        Path(__file__).resolve().parents[4] / "PerTileFlow/scripts/plexus_stitch_v0.py",     # sibling checkout
     ]
     for c in candidates:
         if c.exists():
             return c
     raise FileNotFoundError(
-        "plexus_stitch_v0.py not found. Set $PLEXUSFLOW_STITCH_SCRIPT to its path.")
+        "plexus_stitch_v0.py not found. This interactive step uses the PerTileFlow GUI (not distributed with plexusflow); "
+        "set $PLEXUSFLOW_STITCH_SCRIPT to the script or $PERTILEFLOW_ROOT to a PerTileFlow checkout. Its outputs are included in the "
+        "data release, so the analysis does not need it.")
 
 
 def launch_stitcher(cfg: StageConfig, tile_source: str = "std_clahe") -> int:

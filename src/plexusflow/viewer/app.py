@@ -34,14 +34,10 @@ from pathlib import Path
 # Simulate tab still uses pertile.analysis.transmission_line (~6k lines,
 # port deferred per memory/plexusflow_pertile_port_2026-08-21).  Make
 # `pertile` importable from any CWD by prepending the PerTileFlow root
-# to sys.path here.  Candidate paths cover both the Drive checkout and
-# an optional PERTILEFLOW_ROOT env override.  Silently no-ops on machines
-# where the checkout isn't present.
+# to sys.path here: $PERTILEFLOW_ROOT, else a sibling PerTileFlow checkout.
+# Silently no-ops where neither exists (the Simulate tab is then unavailable).
 _pertile_candidates = [
     os.environ.get('PERTILEFLOW_ROOT'),
-    str(Path.home() / 'Library' / 'CloudStorage'
-        / 'GoogleDrive-amayer@flatironinstitute.org'
-        / 'My Drive' / 'Python' / 'Yolk Sac Code' / 'PerTileFlow'),
     str(Path(__file__).resolve().parents[4] / 'PerTileFlow'),
 ]
 for _cand in _pertile_candidates:

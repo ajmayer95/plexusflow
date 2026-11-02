@@ -17,16 +17,17 @@ def _locate_threshold_script() -> Path:
     env = os.environ.get("PLEXUSFLOW_THRESHOLD_SCRIPT")
     if env:
         return Path(env).expanduser()
-    candidates = [
-        Path.home() / "Library/CloudStorage/GoogleDrive-amayer@flatironinstitute.org/"
-                       "My Drive/Python/Yolk Sac Code/PerTileFlow/scripts/plexus_threshold.py",
-        Path(__file__).resolve().parents[4] / "PerTileFlow/scripts/plexus_threshold.py",
+    root = os.environ.get("PERTILEFLOW_ROOT")
+    candidates = ([Path(root).expanduser() / "scripts/plexus_threshold.py"] if root else []) + [
+        Path(__file__).resolve().parents[4] / "PerTileFlow/scripts/plexus_threshold.py",     # sibling checkout
     ]
     for c in candidates:
         if c.exists():
             return c
     raise FileNotFoundError(
-        "plexus_threshold.py not found. Set $PLEXUSFLOW_THRESHOLD_SCRIPT.")
+        "plexus_threshold.py not found. This interactive step uses the PerTileFlow GUI (not distributed with plexusflow); "
+        "set $PLEXUSFLOW_THRESHOLD_SCRIPT to the script or $PERTILEFLOW_ROOT to a PerTileFlow checkout. Its outputs are included in the "
+        "data release, so the analysis does not need it.")
 
 
 def launch_mask_editor(cfg: StageConfig,

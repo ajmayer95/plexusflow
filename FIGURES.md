@@ -23,5 +23,5 @@ After re-rendering, `python3 scripts/collect_figures.py` copies Figs 1–10 to `
 
 Supplementary figures are written by the same scripts (`*_S_*` / `*_supp_*` files in the same output folder).
 
-Superseded versions kept for reference: `make_figure2_registration_old.py`, `make_figure3_meanflow_old.py`,
-`make_figure4_pulsatile_old.py`, `make_figure6v3.py`. The script for Figs 8–9 (`make_figure7.py`) still carries older numbering; it writes `figures/fig8/` and `figures/fig9/`.
+The script for Figs 8–9 (`make_figure7.py`) still carries older numbering; it writes `figures/fig8/` and `figures/fig9/`.
+Superseded figure versions are in the git history (removed before the public release).
