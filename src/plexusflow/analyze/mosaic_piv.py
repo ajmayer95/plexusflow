@@ -23,6 +23,7 @@ kloosterman, harmonic}`` + ``plexusflow.io.tiff``).  No pertile
 dependency.
 """
 from __future__ import annotations
+import warnings
 
 import pickle
 import time
@@ -890,10 +891,17 @@ def analyze_stage(cfg: StageConfig,
                 print(f"[sanity pre-pass] corrected cached f0 on {_n0} tile(s) before measuring")
         except Exception as _e:
             print(f"[sanity pre-pass] skipped: {_e}")
+    _f0_warned: set = set()
+
     def _f0(tid):
         v = f0_by_tile.get(tid, f0_by_tile.get(str(tid)))
-        return float(v) if v is not None and np.isfinite(float(v)) \
-            else float(default_f0_hz)
+        if v is not None and np.isfinite(float(v)):
+            return float(v)
+        if tid not in _f0_warned:                 # a wrong f0 silently corrupts every harmonic and Kloosterman fit of the tile
+            _f0_warned.add(tid)
+            warnings.warn(f"tile {tid}: no heart rate in G.graph['tile_f0_piv']; using default_f0_hz={default_f0_hz} Hz. "
+                          "Check this tile (e.g. 15-somite embryos beat at ~0.6-1.2 Hz).", RuntimeWarning, stacklevel=2)
+        return float(default_f0_hz)
 
     def _estimate_tile_f0(stack: np.ndarray, cand_edges: list,
                            geom_, tid_, ridge_mask_, ridge_edt_,
@@ -953,6 +961,8 @@ def analyze_stage(cfg: StageConfig,
                 return float(f0)
             if vessel_f0s:
                 return float(np.median(vessel_f0s))
+        warnings.warn(f"tile {tid_}: heart rate could not be estimated from any vessel; using default_f0_hz={default_f0_hz} Hz",
+                      RuntimeWarning, stacklevel=2)
         return float(default_f0_hz)
 
     # Parallelism (joblib+loky over vessels within each tile).  Set cv2
