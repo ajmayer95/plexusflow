@@ -118,6 +118,12 @@ class StageConfig:
     of_dt_by_tile: dict = field(default_factory=dict)
     # Tiles never used for flow measurement (e.g. no detectable flow); their stored measurements are dropped on analyze.
     exclude_tiles: list = field(default_factory=list)
+    # Pulsatile (AC) analysis — per-stage choices read by scripts/ac_field.py and scripts/mech/ac_estimate.py when the
+    # corresponding command-line flag is not given (None = the 21S paper default).
+    ac_ref_tile: Optional[int] = None          # tile whose heart rate centres the f0 band and fixes the phase gauge (21S: 21)
+    ac_f0_band: Optional[float] = None         # ± fraction of the reference tile's f0 kept (21S: 0.21; large = all beating tiles)
+    ac_veins: str = "mean"                     # vein forcing: "mean" (one shared stub waveform) or "own" (each vein its stub)
+    ac_gauge_block: list = field(default_factory=list)   # tiles sharing one extra, freely fitted gauge offset (weakly linked block)
 
     # ----- resolved paths (populated in __post_init__) -----
     tiles_std_clahe_dir: Path = field(init=False)

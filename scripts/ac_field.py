@@ -19,10 +19,10 @@ from plexusflow.reconcile import carved_domain
 def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--ref-tile", type=int, default=REF_TILE,
-                    help=f"reference tile for the f0 band and the phase gauge (default {REF_TILE}, the 21S choice)")
-    ap.add_argument("--f0-band", type=float, default=CANONICAL_F0_BAND,
-                    help=f"keep tiles whose heart rate is within ± this fraction of the reference tile's (default {CANONICAL_F0_BAND}); "
+    ap.add_argument("--ref-tile", type=int, default=None,
+                    help=f"reference tile for the f0 band and the phase gauge (default: plexusflow.yaml ac_ref_tile, else {REF_TILE})")
+    ap.add_argument("--f0-band", type=float, default=None,
+                    help=f"keep tiles whose heart rate is within ± this fraction of the reference tile's (default: plexusflow.yaml ac_f0_band, else {CANONICAL_F0_BAND}); "
                          "large (e.g. 10) = every tile with a beat — for stages whose rate wanders between tiles (15S)")
     ap.add_argument("--sync-da", action=argparse.BooleanOptionalAction, default=True,
                     help="also synchronise on the dorsal-aorta stubs (outside the carve; default on)")
@@ -34,7 +34,13 @@ def main():
     ap.add_argument("--cont-lambda", type=float, default=CS["cont_lambda"], help="weight of plexus seam-continuity pairs in the sync (0 = off; 1 = calibrated)")
     ap.add_argument("--sync-weight", choices=("rho", "detect", "kappa"), default=CS["sync_weight"],
                     help="pair weights: kappa = fitted von Mises precision (paper), rho = ρ_aρ_b, detect = detected in both")
-    args = ap.parse_args(); ref = args.ref_tile
+    args = ap.parse_args()
+    from plexusflow.config import StageConfig
+    cfg = StageConfig.load(paths.STAGE)                      # per-stage defaults (plexusflow.yaml)
+    ref = args.ref_tile if args.ref_tile is not None else (cfg.ac_ref_tile or REF_TILE)
+    if args.f0_band is None:
+        args.f0_band = cfg.ac_f0_band if cfg.ac_f0_band is not None else CANONICAL_F0_BAND
+    print(f"reference tile {ref}, f0 band ±{args.f0_band:g}")
     G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
     extra = None
     if args.sync_da:

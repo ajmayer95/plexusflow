@@ -27,8 +27,8 @@ def log(m):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--veins", choices=("mean", "own", "local"), default="mean",
-                    help="vein forcing: one shared stub waveform (21S), each node its own stub (27S), or the local ratio")
+    ap.add_argument("--veins", choices=("mean", "own", "local"), default=None,
+                    help="vein forcing: one shared stub waveform (21S), each node its own stub (27S), or the local ratio (default: plexusflow.yaml ac_veins, else mean)")
     ap.add_argument("--fit-veins", action="store_true", help="free the L/R vein group corrections (default: pinned)")
     ap.add_argument("--eta", type=float, nargs="+", default=[0.0], help="η grid (default 0: purely elastic wall)")
     ap.add_argument("--weights", choices=("waveform", "c"), default="waveform")
@@ -40,6 +40,12 @@ def main():
     ap.add_argument("--field", default="ac_field_v7", help="results/<field>.pkl (default ac_field_v7 = scripts/ac_field.py defaults)")
     ap.add_argument("--gauge-block", default=None, help="tiles sharing one extra gauge offset with a flat prior, e.g. 15,18,19,20,29,30,31,32,33,34")
     a = ap.parse_args()
+    from plexusflow.config import StageConfig
+    _cfg = StageConfig.load(paths.STAGE)                     # per-stage defaults (plexusflow.yaml)
+    if a.veins is None:
+        a.veins = _cfg.ac_veins
+    if a.gauge_block is None and _cfg.ac_gauge_block:
+        a.gauge_block = ",".join(str(int(t)) for t in _cfg.ac_gauge_block)
     G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
     A = pickle.loads((paths.RESULTS / f"{a.field}.pkl").read_bytes())
     if "var_phi" not in A:
