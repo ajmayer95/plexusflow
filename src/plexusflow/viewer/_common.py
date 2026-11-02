@@ -249,6 +249,17 @@ PROPERTY_DEFS += [
 HARMONIC_KEYS = ['DC', 'H1', 'H2', 'H3']
 HARMONIC_LABELS = {'DC': 'DC', 'H1': 'H₁', 'H2': 'H₂', 'H3': 'H₃'}
 # Phase at DC is undefined; harmonic-class is already H1-resolved → skip.
+_SUPPRESSED_SEEN: set = set()
+
+
+def _note_suppressed(where: str, exc: BaseException) -> None:
+    """Report (once per site) an exception the viewer deliberately survives on a computation path, instead of
+    swallowing it silently: the result shown is then partial, and the user should know why."""
+    if where in _SUPPRESSED_SEEN:
+        return
+    _SUPPRESSED_SEEN.add(where)
+    print(f"  ⚠ viewer: {where} failed ({type(exc).__name__}: {exc}); continuing without it", file=sys.stderr)
+
 def _safe_float(val) -> Optional[float]:
     """Coerce a candidate value to float, returning None for missing /
     non-numeric / non-finite inputs.  Used by the field resolver."""
@@ -568,8 +579,8 @@ def _measurement_usable(m: Optional[dict]) -> bool:
     Schema-agnostic: works on both legacy (quality_tier present) and
     canonical (quality_tier dropped) graphs.
 
-    On canonical: usable if Q_t exists and Q_H1_snr_db is finite.
-    On legacy:    usable if quality_tier ≠ 'X' and fit_success.
+    Usable if fit_success is not explicitly False and Q_t exists.  (The old pertile quality-tier gate was
+    never importable here and has been removed; behaviour is unchanged.)
     """
     if m is None:
         return False
@@ -579,14 +590,6 @@ def _measurement_usable(m: Optional[dict]) -> bool:
     # unless explicitly failed" default here by falling back to the raw dict.
     if 'fit_success' in m and not mv.fit_success:
         return False
-    # Tier gate — computed on the fly if not stored.
-    try:
-        from ..analysis.quality import quality_tier as _qt_of
-        if _qt_of(m) == 'X':
-            return False
-        return True
-    except Exception:
-        pass
     # Canonical gate: require Q_t + finite H1 SNR
     if mv.Q_t is None:  # v4 migration: was m.get('Q_t') is None
         return False
@@ -621,11 +624,7 @@ def _best_measurement(piv_list: Optional[list]) -> Optional[dict]:
         if snr_h1 is not None and np.isfinite(float(snr_h1)):
             return (1, float(snr_h1))   # tier 1 = canonical
         # Legacy: tier (computed on the fly if not stored) + snr_f0
-        try:
-            from ..analysis.quality import quality_tier as _qt_of
-            tier = _qt_of(m)
-        except Exception:
-            tier = m.get('quality_tier', 'X')
+        tier = m.get('quality_tier', 'X')
         # v4 migration: snr_f0 → snr.h1_db (same physical quantity in v3)
         return (0,
                 QUALITY_RANK.get(tier, 0),

@@ -4,6 +4,7 @@ Mixin of plexusflow.viewer.app.ReadOnlyMosaicViewer (methods moved verbatim from
 from __future__ import annotations
 
 from ._common import (  # noqa: F401
+    _note_suppressed,
     Dict,
     List,
     SIM_FIELD_MAP,
@@ -574,8 +575,8 @@ class SimulateMixin:
             if _bch is not None:
                 try:
                     qa_default += float(np.asarray(_bch, dtype=complex)[0].real)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _note_suppressed(f"default arterial inflow from bc_harmonics of node {_an}", _e)
         if not (np.isfinite(qa_default) and qa_default > 0):
             qa_default = 1.0
         self._sim_qa_spin.setValue(qa_default)

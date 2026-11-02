@@ -24,6 +24,7 @@ Or from Python:
 from __future__ import annotations
 
 from ._common import (  # noqa: F401 - re-exported: app.py was the single viewer module
+    _note_suppressed,
     CATEGORICAL_FIELDS,
     DEFAULT_FIELDS,
     Dict,
@@ -2650,31 +2651,6 @@ class ReadOnlyMosaicViewer(SimulateMixin, InferenceMixin, EditMixin, OpticalFlow
         self._of_pipeline_btn.clicked.connect(self._show_of_pipeline_figures)
         inspect_lay.addWidget(self._of_pipeline_btn)
 
-        # Independent OpenPIV estimate on the same edge, for OF-vs-PIV comparison.
-        self._piv_compare_btn = QPushButton("Compute PIV vs OF (OpenPIV)")
-        self._piv_compare_btn.setEnabled(False)
-        self._piv_compare_btn.setToolTip(
-            "After 'Compute fresh PIV/OF', run OpenPIV ensemble (16-px windows, "
-            "50% overlap, phase-sorted correlation averaging) on the SAME frames + "
-            "centerline + tangent + R.  dt is auto-tuned so peak displacement ≈ "
-            "10 px (Poelma optimum).  Pops a comparison figure — Q(t) overlay, "
-            "profile shapes, sig2noise field, harmonic summary.")
-        self._piv_compare_btn.clicked.connect(self._on_run_piv_comparison_clicked)
-        inspect_lay.addWidget(self._piv_compare_btn)
-
-        # Winsize sweep — runs PIV at 4 window sizes on the same edge and
-        # plots recovered Q vs winsize.  Answers "should we use smaller
-        # windows on this vessel?" empirically for the current data.
-        self._piv_sweep_btn = QPushButton("PIV winsize sweep (8, 12, 16, 24)")
-        self._piv_sweep_btn.setEnabled(False)
-        self._piv_sweep_btn.setToolTip(
-            "After 'Compute PIV vs OF', run OpenPIV at winsize ∈ {8, 12, "
-            "16, 24} on the same edge and plot Q vs winsize.  Small windows "
-            "have better spatial resolution but lower correlation SNR; "
-            "large windows the reverse.  This sweep shows the tradeoff "
-            "empirically for THIS vessel's speckle.  ~40 s.")
-        self._piv_sweep_btn.clicked.connect(self._on_run_piv_sweep_clicked)
-        inspect_lay.addWidget(self._piv_sweep_btn)
 
         # Comparison set — accumulate edges across multiple clicks and
         # overlay their Q(t)s on a single figure.  Useful for comparing
@@ -4100,8 +4076,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, InferenceMixin, EditMixin, OpticalFlow
         # the source).
         try:
             self._update_carve_boundary_markers()
-        except Exception:
-            pass
+        except Exception as _e:
+            _note_suppressed("carve boundary markers on source change", _e)
         # Tile-harmonic cache must be rebuilt against the new source's Q_t
         if hasattr(self, '_tile_harmonic_cache'):
             self._tile_harmonic_cache.clear()

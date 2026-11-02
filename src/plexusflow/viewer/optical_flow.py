@@ -4,6 +4,7 @@ Mixin of plexusflow.viewer.app.ReadOnlyMosaicViewer (methods moved verbatim from
 from __future__ import annotations
 
 from ._common import (  # noqa: F401
+    _note_suppressed,
     TILE_RAW_HEIGHT,
     TILE_RAW_WIDTH,
     np,
@@ -544,8 +545,8 @@ class OpticalFlowMixin:
                 _pz = 0.35 * max(np.ptp(_bx), np.ptp(_by), 1.0)
                 ax.set_xlim(_bx.min() - _pz, _bx.max() + _pz)
                 ax.set_ylim(_by.max() + _pz, _by.min() - _pz)
-            except Exception:
-                pass
+            except Exception as _e:
+                _note_suppressed("OF pipeline figure: tile-frame zoom", _e)
         else:
             ax.text(0.5, 0.5, 'no frames', transform=ax.transAxes,
                     ha='center', va='center', color='gray')
@@ -712,8 +713,8 @@ class OpticalFlowMixin:
                 a0 = float(hr.get('a0', np.nan))
                 amp1 = float(hr.get('amp1', np.nan))
                 fitsig = np.asarray(hr.get('signal', []), float)
-            except Exception:
-                pass
+            except Exception as _e:
+                _note_suppressed("OF pipeline figure: harmonic fit of Q(t)", _e)
             ax.plot(t_s, Qraw, color='#c2c2c2', lw=0.7,
                     label='Q(t) (canonical scale)')
             if fitsig.size == Qraw.size:
@@ -1012,159 +1013,6 @@ class OpticalFlowMixin:
             import traceback; traceback.print_exc()
             self._info_box.setPlainText(
                 f"OF pipeline figure failed: {type(e).__name__}: {e}")
-
-
-    def _on_run_piv_comparison_clicked(self):
-        """Run OpenPIV ensemble on the same edge as the last fresh OF run
-        and pop the OF-vs-PIV comparison figure.  Uses the OF result to
-        auto-tune dt (target 10 px peak displacement, Poelma optimum) and
-        to supply the shared tangent field so integration is apples-to-apples.
-        """
-        data = getattr(self, '_last_of_pipeline', None)
-        if not data or 'frames' not in data:
-            self._info_box.setPlainText(
-                "Run 'Compute fresh PIV/OF' on an edge first — the PIV "
-                "comparison reuses that run's frames and geometry.")
-            return
-        of_res = data['res']
-        try:
-            from ..analysis.piv_openpiv import compute_piv_openpiv_Q
-            from ..analysis.piv_of_compare_figures import plot_piv_vs_of
-            # Peak axial velocity in px/frame (from OF mean field) for the
-            # dt auto-tune.  Fall back to abs(v0_fixed) if vfield missing.
-            vf = of_res.get('vfield_mean')
-            if vf is not None:
-                peak_v = float(np.nanpercentile(
-                    np.hypot(vf[..., 0], vf[..., 1]), 95))
-            else:
-                peak_v = abs(float(of_res.get('v0_fixed', 0.0) or 0.0))
-            # Tangent + mask from OF so only the estimator differs.
-            # CRITICAL: OF stores rr_in/cc_in/cl_used in ROI-relative
-            # coordinates (offset by roi_offset).  My PIV samples the full
-            # frame, so shift back to full-frame coords before passing.
-            r0, c0 = of_res.get('roi_offset', (0, 0))
-            tan = dict(
-                cl_used=of_res['cl_used'] + np.array([r0, c0]),
-                rr_in=of_res['rr_in'] + int(r0),
-                cc_in=of_res['cc_in'] + int(c0),
-                rho_in=of_res['rho_in'],
-                t_row_in=of_res['t_row_in'], t_col_in=of_res['t_col_in'])
-            self._info_box.setPlainText(
-                "Running OpenPIV ensemble … (~10-20 s)")
-            from qtpy.QtWidgets import QApplication
-            QApplication.processEvents()
-            piv_res = compute_piv_openpiv_Q(
-                data['frames'], data['centerline_rc'], data['r_tile'],
-                tangent_from_of=tan,
-                peak_v_hint_pxpf=peak_v,
-                dt=None,
-                windowsizes=(32, 16), overlap=(16, 8), num_iterations=2,
-                n_phase_bins=40, f0_hz=data.get('f0_hz') or 2.5,
-                frame_dt_s=data['frame_dt_s'],
-                max_pairs_per_bin=40,
-                n_bins=30, fit_fraction=0.75,
-            )
-            self._last_piv_compare = dict(of=of_res, piv=piv_res, tan=tan,
-                                           peak_v_hint=peak_v)
-            if hasattr(self, '_piv_sweep_btn'):
-                self._piv_sweep_btn.setEnabled(True)
-            plot_piv_vs_of(
-                of_res, piv_res,
-                frame_dt_s=data['frame_dt_s'],
-                v_conv=data['v_conv'], q_conv=data['q_conv'],
-                f0_hz=data.get('f0_hz') or 2.5,
-                title=data.get('title', ''),
-                stored_Qt=data.get('stored_Qt'))
-            of_qp = of_res.get('Q_pois_mean', np.nan) * data['q_conv']
-            piv_qp = piv_res.get('Q_pois_mean', np.nan) * data['q_conv']
-            of_qP = of_res.get('Q_plug_mean', np.nan) * data['q_conv']
-            piv_qP = piv_res.get('Q_plug_mean', np.nan) * data['q_conv']
-            self._info_box.setPlainText(
-                f"PIV vs OF (nL/s):\n"
-                f"  Q_pois : OF={of_qp:+.3f}  PIV={piv_qp:+.3f}\n"
-                f"  Q_plug : OF={of_qP:+.3f}  PIV={piv_qP:+.3f}   (bulk-flow "
-                f"check, resolution-independent)\n"
-                f"  dt={piv_res.get('dt_used')} frames  peak_disp="
-                f"{piv_res.get('peak_disp_seen', 0):.1f} px  "
-                f"n_win={piv_res.get('n_windows', 0)}")
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            self._info_box.setPlainText(
-                f"PIV comparison failed: {type(e).__name__}: {e}")
-
-
-    def _on_run_piv_sweep_clicked(self):
-        """Run OpenPIV at four different finest-window sizes and plot the
-        recovered Q vs winsize.  Answers whether smaller windows help on
-        THIS vessel empirically.  Reuses the last PIV-comparison inputs."""
-        data = getattr(self, '_last_of_pipeline', None)
-        cmp = getattr(self, '_last_piv_compare', None)
-        if not data or not cmp or 'frames' not in data:
-            self._info_box.setPlainText(
-                "Run 'Compute PIV vs OF' first — sweep reuses those inputs.")
-            return
-        try:
-            from ..analysis.piv_openpiv import compute_piv_openpiv_Q
-            import matplotlib.pyplot as plt
-            from qtpy.QtWidgets import QApplication
-            sweep_specs = [
-                # (finest_ws, coarser_ws, overlap_tuple, n_iter, label)
-                (8,  16, (8, 4),  2, '8'),
-                (12, 24, (12, 6), 2, '12'),
-                (16, 32, (16, 8), 2, '16'),
-                (24, 48, (24, 12), 2, '24'),
-            ]
-            results = []
-            for i, (fw, cw, ov, ni, lbl) in enumerate(sweep_specs):
-                self._info_box.setPlainText(
-                    f"PIV sweep {i+1}/4: winsize={lbl} …")
-                QApplication.processEvents()
-                r = compute_piv_openpiv_Q(
-                    data['frames'], data['centerline_rc'], data['r_tile'],
-                    tangent_from_of=cmp['tan'],
-                    peak_v_hint_pxpf=cmp['peak_v_hint'],
-                    dt=None,
-                    windowsizes=(cw, fw), overlap=ov, num_iterations=ni,
-                    n_phase_bins=40, f0_hz=data.get('f0_hz') or 2.5,
-                    frame_dt_s=data['frame_dt_s'], max_pairs_per_bin=40,
-                )
-                results.append((lbl, r))
-            # Plot: Q_pois and Q_plug vs winsize, plus OF reference.
-            fig, ax = plt.subplots(1, 2, figsize=(13, 5))
-            of_res = cmp['of']; q_conv = data['q_conv']
-            of_qp = of_res.get('Q_pois_mean', np.nan) * q_conv
-            of_qP = of_res.get('Q_plug_mean', np.nan) * q_conv
-            ws = [int(lbl) for lbl, _ in results]
-            q_pois = [r.get('Q_pois_mean', np.nan) * q_conv for _, r in results]
-            q_plug = [r.get('Q_plug_mean', np.nan) * q_conv for _, r in results]
-            peak_disp = [r.get('peak_disp_seen', np.nan) for _, r in results]
-            ax[0].plot(ws, q_pois, 'o-', color='C3', label='PIV Q_pois', lw=2, ms=8)
-            ax[0].plot(ws, q_plug, 's--', color='C3', label='PIV Q_plug', alpha=0.7, ms=8)
-            ax[0].axhline(of_qp, color='C0', ls='-', label=f'OF Q_pois ({of_qp:+.3f})')
-            ax[0].axhline(of_qP, color='C0', ls='--', alpha=0.7, label=f'OF Q_plug ({of_qP:+.3f})')
-            ax[0].set_xlabel('finest PIV window size (px)')
-            ax[0].set_ylabel('⟨Q⟩ (nL/s)')
-            ax[0].set_title('PIV Q vs winsize — small = better resolution, worse SNR')
-            ax[0].legend(fontsize=9); ax[0].grid(alpha=0.3)
-            ax[1].plot(ws, peak_disp, 'o-', color='k', ms=8)
-            ax[1].axhspan(10, 12, color='green', alpha=0.15, label='Poelma optimum')
-            ax[1].set_xlabel('finest PIV window size (px)')
-            ax[1].set_ylabel('peak displacement observed (px)')
-            ax[1].set_title('Peak displacement per winsize (should stay in optimum band)')
-            ax[1].legend(fontsize=9); ax[1].grid(alpha=0.3)
-            fig.suptitle(f'PIV winsize sweep — {data.get("title", "")}',
-                         fontsize=12)
-            fig.tight_layout(rect=(0, 0, 1, 0.95))
-            plt.show()
-            summary = ', '.join(
-                f'ws{lbl}: Q_pois={r.get("Q_pois_mean", np.nan) * q_conv:+.2f}'
-                for lbl, r in results)
-            self._info_box.setPlainText(
-                f"PIV sweep done. {summary}. OF Q_pois={of_qp:+.2f} nL/s.")
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            self._info_box.setPlainText(
-                f"PIV sweep failed: {type(e).__name__}: {e}")
 
 
     def _degree2_chain_edges(self, u, v):
@@ -1594,8 +1442,6 @@ class OpticalFlowMixin:
             centerline_full_rc=centerline_full_rc, r_tile=r_tile)
         if hasattr(self, '_of_pipeline_btn'):
             self._of_pipeline_btn.setEnabled(True)
-        if hasattr(self, '_piv_compare_btn'):
-            self._piv_compare_btn.setEnabled(True)
         Q_plug_nLs = unified['Q_plug_mean'] * conv
         Q_pois_nLs = unified['Q_pois_mean'] * conv       # ridge CL (reference)
         Q_pois_seg_nLs = Q_pois_seg_px * conv            # seg CL = canonical default

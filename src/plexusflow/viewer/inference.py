@@ -4,6 +4,7 @@ Mixin of plexusflow.viewer.app.ReadOnlyMosaicViewer (methods moved verbatim from
 from __future__ import annotations
 
 from ._common import (  # noqa: F401
+    _note_suppressed,
     List,
     MeasurementView,
     mcolors,
@@ -1128,8 +1129,8 @@ class InferenceMixin:
                                                        - 0.5 * (z_H2 @ z_H2))
                             except np.linalg.LinAlgError:
                                 pass
-            except Exception:
-                pass
+            except Exception as _e:
+                _note_suppressed("inference likelihood grid (remaining cells left at -inf)", _e)
         if not np.isfinite(log_L_H1).any():
             return {'error': 'Likelihood grid is all -inf — inference failed'}
         # Independent (a, s²) marginalisation per channel.  log p(D) is
@@ -1378,8 +1379,8 @@ class InferenceMixin:
                 # to Q_H1_pred) so the Compare popup can show the
                 # *inferred* DC mean alongside the measured one.
                 Q_DC_pred_full = T_DC @ b_DC
-        except Exception:
-            pass
+        except Exception as _e:
+            _note_suppressed("inference DC diagnostics", _e)
         delta_at_zero = float(
             logsumexp(log_L[j_map]) - logsumexp(log_L[0]))
         return dict(
