@@ -239,7 +239,7 @@ def main():
     cfg = (st / "plexusflow.yaml").read_text().splitlines()
     cfg = [("# " + l if l.startswith("external_") else l) for l in cfg]
     (out / "plexusflow.yaml").write_text("# Frozen release: raw videos are not included (viewer is read-only; fresh optical flow disabled).\n"
-                                         + "\n".join(cfg) + f"\nvideos_realtime_spatial_ds: {a.spatial}\n")
+                                         + "\n".join(cfg) + (f"\nvideos_realtime_spatial_ds: {a.spatial}\n" if a.preview_videos else "\n"))   # copied videos keep the stage value
     batch = G.graph.get("measurement_batch")
     (out / "README.md").write_text(f"""# {st.name} — frozen release {a.version} ({datetime.date.today()})
 
