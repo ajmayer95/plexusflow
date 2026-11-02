@@ -482,7 +482,13 @@ def _harmonic_snrs(Q_t: np.ndarray, f0: float,
 
 def _harmonic_fit_full(Q_t: np.ndarray, f0: float,
                         dt: float = 1.0/250) -> Optional[Dict[str, float]]:
-    """Like _harmonic_snrs but returns amplitudes + phases too.  σ from
+    """Like _harmonic_snrs but returns amplitudes + phases too.
+
+    Display fit: robust (Huber IRLS, analyze.harmonic.fit_harmonics).  The paper's AC field uses the plain least-squares
+    phasors of plexusflow.reconcile.harmonics; on coherent traces (ρ ≥ 0.2, 21S) the two agree to |H1| ±3 % and
+    H1 phase ≤ 2.4° (95th pct) — they differ only on noisy traces, which the analysis does not use.
+
+    σ from
     MAD (robust).  Adds `total_snr` = Var(fit)/Var(resid) — the
     per-vessel "how clean overall" scalar that's invariant to whether
     the waveform is H1-only or harmonic-rich.
