@@ -68,7 +68,7 @@ def main():
     da_stubs = [seg(e) for n in dom["DA"] for e in G.edges(n) if e not in keep and e[::-1] not in keep]
     def draw_da(ax):                                               # dorsal-aorta skeleton (excluded stubs) + termini, in arterial red
         ax.add_collection(LineCollection(da_stubs, colors=ART, linewidths=1.0, alpha=0.95, zorder=4))
-        for n, lab, dx in zip(dom["DA"], ("A$_{\mathrm{DA},1}$", "A$_{\mathrm{DA},2}$"), (-1, 1)):
+        for n, lab, dx in zip(dom["DA"], (r"A$_{\mathrm{DA},1}$", r"A$_{\mathrm{DA},2}$"), (-1, 1)):
             p_ = xy(n); ax.scatter(*p_, s=40, color=ART, edgecolor="white", linewidth=0.6, zorder=6)
             ax.text(p_[0] + dx * 22, p_[1] + 10, lab, ha="right" if dx < 0 else "left", va="center", fontsize=9, fontweight="bold",
                     color=ART, path_effects=HALO, zorder=6)

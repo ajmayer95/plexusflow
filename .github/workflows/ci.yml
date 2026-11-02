@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -28,7 +27,7 @@ jobs:
           pip install -e ".[dev]" "scikit-fem >= 10" "numba >= 0.58"   # benchmark building blocks (tests/synthetic)
 
       - name: Ruff lint
-        run: ruff check src tests
+        run: ruff check src tests scripts examples
 
       - name: Pytest
-        run: pytest -v --cov=plexusflow --cov-report=term
+        run: pytest -v --cov=plexusflow --cov=plexusmech --cov-report=term

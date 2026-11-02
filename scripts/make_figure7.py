@@ -787,7 +787,7 @@ def main():
     _bad = (mX[np.ix_(iyg, ixg)] > 0.5) | (mU[np.ix_(iyg, ixg)] > 0.5) | (lab_[np.ix_(iyg, ixg)] < 0)
     fo = np.ma.masked_where(np.ma.getmaskarray(fo) | _bad, fo)
     _fv = np.ma.compressed(fo); nph.vmax = max(nph.vmax, 20 * np.ceil(_fv.max() / 20))     # no clipping of the rim
-    log(f"  (c) smoothed field: pct 50/90/98/100 = " + "/".join(f"{np.percentile(_fv, q_):.0f}" for q_ in (50, 90, 98, 100)) + f"°; share > {nph.vmax:.0f}°: {np.mean(_fv > nph.vmax):.1%}")
+    log("  (c) smoothed field: pct 50/90/98/100 = " + "/".join(f"{np.percentile(_fv, q_):.0f}" for q_ in (50, 90, 98, 100)) + f"°; share > {nph.vmax:.0f}°: {np.mean(_fv > nph.vmax):.1%}")
     axC.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.85, zorder=1, interpolation="bilinear")
     LEVc = list(np.arange(30, LEV.max() + 1, 30))                     # isochrones every 30°; 60° multiples slightly heavier
     cs = axC.contour(gx, gy, fo, levels=LEVc, colors=["0.88" if v <= 60 else "0.25" for v in LEVc],   # light on the dark low-lag basin
