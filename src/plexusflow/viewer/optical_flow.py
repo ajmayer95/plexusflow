@@ -957,49 +957,6 @@ class OpticalFlowMixin:
             show_figure(fig, position=position)
 
 
-    def _show_fig_with_toolbar(self, fig, position=None):
-        """Show a matplotlib Figure in a Qt dialog that includes the standard
-        navigation toolbar (zoom / pan / home / save) — which the bare
-        ``show_figure`` embed lacks.  Keeps the dialog alive on the viewer and
-        falls back to ``show_figure`` if the Qt toolbar path is unavailable."""
-        try:
-            from matplotlib.backends.backend_qtagg import (
-                FigureCanvasQTAgg, NavigationToolbar2QT)
-            from qtpy.QtWidgets import QDialog, QVBoxLayout, QApplication
-            from qtpy.QtCore import Qt
-            canvas = FigureCanvasQTAgg(fig)
-            dialog = QDialog()
-            _t = (fig._suptitle.get_text().split(chr(10))[0]
-                  if fig._suptitle else 'Figure')
-            dialog.setWindowTitle(_t)
-            dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowMinMaxButtonsHint)
-            lay = QVBoxLayout(dialog); lay.setContentsMargins(0, 0, 0, 0)
-            toolbar = NavigationToolbar2QT(canvas, dialog)
-            lay.addWidget(toolbar); lay.addWidget(canvas)
-            dialog.resize(int(fig.get_figwidth() * fig.dpi),
-                          int(fig.get_figheight() * fig.dpi) + 40)
-            canvas.draw(); dialog.show()
-            if position == 'top-right':
-                try:
-                    QApplication.processEvents()
-                    screen = QApplication.primaryScreen()
-                    if screen is not None:
-                        avail = screen.availableGeometry()
-                        fw = dialog.frameGeometry().width()
-                        n = len(getattr(self, '_pipeline_dialogs', []))
-                        dialog.move(int(avail.x() + avail.width() - fw - 12 - 26 * n),
-                                    int(avail.y() + 12 + 26 * n))
-                except Exception:
-                    pass
-            _d = [d for d in getattr(self, '_pipeline_dialogs', []) if d.isVisible()]
-            _d.append(dialog)
-            self._pipeline_dialogs = _d
-        except Exception as _e:
-            from .mosaic import show_figure
-            print(f"  (toolbar dialog failed, using plain canvas: {_e})")
-            show_figure(fig, position=position)
-
-
     def _show_of_pipeline_figures(self):
         """Re-open the full OF pipeline walkthrough for the last fresh OF run."""
         data = getattr(self, '_last_of_pipeline', None)

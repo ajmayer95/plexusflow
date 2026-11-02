@@ -190,34 +190,6 @@ class SimulateMixin:
         self._update_carve_boundary_markers()
 
 
-    def _classify_outlet_direction(self, o, U, A_a, V_a):
-        """Return ('in', 1.0) if `o` is the porous-side node that a
-        boundary vessel (A-anchor stub) feeds INTO the porous zone via
-        — the physical inflow port for the region.  Otherwise return
-        ('out', 1.0) because by construction of our sim, every other
-        outlet is a source (α_k ≥ 0) delivering flow OUT of the porous
-        zone into the trusted plexus.
-
-        Detection: if `o` is a direct neighbor of any A anchor via an
-        UNtagged edge (the A stub), it's the inflow port.  All other
-        outlets are outflow."""
-        for a in A_a:
-            if not self.G.has_edge(o, a): continue
-            d = self.G.edges[o, a]
-            if d.get('radial_uncertain'): continue
-            # o is on an A stub → inflow-from-A boundary
-            return 'in', 1.0
-        # V-anchor-adjacent porous nodes (unlikely in our current
-        # geometry but handled for generality) — those would also be
-        # inflow ports for the porous zone from the V side.
-        for vn in V_a:
-            if not self.G.has_edge(o, vn): continue
-            d = self.G.edges[o, vn]
-            if d.get('radial_uncertain'): continue
-            return 'in', 1.0
-        return 'out', 1.0
-
-
     def _update_carve_boundary_markers(self):
         """Add/update the 'CarveMarkers' napari points layer.  Each
         outlet gets a ★ (net flow OUT of porous), and every porous-side
@@ -2288,23 +2260,6 @@ class SimulateMixin:
                     self._src_radio_sim_carved.setToolTip("")
         except Exception:
             pass
-
-
-    # ── Custom-BC helpers ────────────────────────────────────────────
-    def _on_bc_source_change(self, _checked=None):
-        """Toggle the Custom-waveform spinboxes based on BC source.
-        The preview canvas stays live in both modes — it always shows
-        whatever waveform would actually be applied at solve time."""
-        if not hasattr(self, '_sim_custom_group'):
-            return
-        is_custom = bool(self._sim_bc_radio_custom.isChecked())
-        # Show the custom-waveform grid only in Custom mode (keeps the tab
-        # compact under the default class-waveform / measured modes).
-        self._sim_custom_group.setVisible(is_custom)
-        for sp in getattr(self, '_sim_custom_spins', {}).values():
-            sp.setEnabled(is_custom)
-        # Re-render the preview for the new mode.
-        self._refresh_custom_preview()
 
 
     def _read_custom_waveform(self):

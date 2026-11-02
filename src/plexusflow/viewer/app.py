@@ -1676,55 +1676,6 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
                   f"(compute will repeat next launch)")
 
 
-    def _discover_fields(self) -> List[str]:
-        """Keep only the fields actually present in this graph's data."""
-        found: List[str] = []
-        # Top-level edge attributes (geometry + precomputed harmonic_class).
-        for f in ('radius', 'length', 'harmonic_class'):
-            for _, _, d in self.G.edges(data=True):
-                if f in d:
-                    found.append(f); break
-        # Dissipation lives under `_meas_dissipation` (precomputed at
-        # load time); surface it as the user-facing `dissipation` field.
-        for _, _, d in self.G.edges(data=True):
-            if '_meas_dissipation' in d:
-                found.append('dissipation'); break
-        # PIV-side fields
-        for f in DEFAULT_FIELDS:
-            if f in found:
-                continue
-            for _, _, d in self.G.edges(data=True):
-                piv = d.get('measurements_piv') or []
-                if any(f in m for m in piv):
-                    found.append(f); break
-        # Categorical PIV fields (quality_tier).  harmonic_class is also
-        # categorical but lives top-level, so it's already in `found`.
-        for f in CATEGORICAL_FIELDS:
-            if f in found:
-                continue
-            for _, _, d in self.G.edges(data=True):
-                piv = d.get('measurements_piv') or []
-                if any(f in m for m in piv):
-                    found.append(f); break
-        # When a sim has been run, expose the sim-only fields — these
-        # have no measured equivalent.  Other sim outputs (mean_Q,
-        # amp_Q, PI, phase) share names with measured and route via
-        # the Source toggle, not the dropdown.
-        if getattr(self, '_sim_active', False):
-            sim_only_checks = [
-                ('pressure_mean',   '_sim_tmp_pressure_mean'),
-                ('pressure_amp',    '_sim_tmp_pressure_amp'),
-                ('pressure_amp_H2', '_sim_tmp_pressure_amp_H2'),
-                ('pressure_phase',  '_sim_tmp_phase_P'),
-                ('pressure_drop',   '_sim_tmp_pressure_drop'),
-            ]
-            for display_name, edge_key in sim_only_checks:
-                for _, _, d in self.G.edges(data=True):
-                    if edge_key in d:
-                        found.append(display_name); break
-        return found
-
-
     # ── napari + Qt UI ─────────────────────────────────────────────────
     def _setup_viewer(self):
         import napari
