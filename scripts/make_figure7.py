@@ -168,23 +168,11 @@ def main():
     # acquisition time: the camera's record time in each recording's Photron header (.cih "Date"/"Time", minute resolution), minutes
     # after the first tile; falls back to the first raw frame's file time.  (The .irg IRIG stamps are not usable — no IRIG source; they
     # jump between recordings.  Header and file times agree to ≤ 1.1 min for all 53 tiles.)
-    import glob as _glob, os as _os, re as _re
     from plexusflow.config import StageConfig as _SC
-    _cfg = _SC.load(_paths.STAGE); _rd = _os.path.expanduser(str(_cfg.external_raw_video_dir or "")); _tcih, _tfile = {}, {}
-    for t in ts:                                     # the recording the pipeline analysed: raw_video_dir_pattern with this tile id
-        _cands = _glob.glob(_os.path.join(_rd, _cfg.raw_video_dir_pattern.format(vid=t)))
-        _fs = sorted(_glob.glob(_os.path.join(sorted(_cands)[0], "*.tif")))[:1] if _cands else []
-        if _fs:
-            _tfile[t] = _os.stat(_fs[0]).st_mtime
-        _cih = _glob.glob(_os.path.join(sorted(_cands)[0], "*.cih")) if _cands else []
-        if _cih:
-            _txt = open(_cih[0], errors="ignore").read(); _md = _re.search(r"Date : (\d+)/(\d+)/(\d+)", _txt); _mt = _re.search(r"Time : (\d+):(\d+)", _txt)
-            if _md and _mt:
-                import datetime as _dtm
-                _tcih[t] = _dtm.datetime(*map(int, _md.groups()), *map(int, _mt.groups())).timestamp()
-    tacq = _tcih if all(t in _tcih for t in ts) else _tfile        # one clock for every tile (the two differ by a fixed ~3 h)
-    if all(t in tacq for t in ts):
-        _t0 = min(tacq.values()); xs_a = np.array([(tacq[t] - _t0) / 60 for t in ts]); xlab = "Acquisition time (min)"
+    from plexusflow.io.acquisition import tile_acquisition_minutes
+    tacq = tile_acquisition_minutes(_paths.STAGE, _SC.load(_paths.STAGE), ts)     # min after the first tile; {} if unavailable
+    if tacq:
+        xs_a = np.array([tacq[t] for t in ts]); xlab = "Acquisition time (min)"
     else:
         xs_a = np.array(ts, float); xlab = "acquisition order (tile)"
     xref = xs_a[ts.index(ref)]

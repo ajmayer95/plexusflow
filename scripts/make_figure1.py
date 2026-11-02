@@ -45,31 +45,6 @@ T15, ANCHORS = 15, (7, 14, 21, 17, 18, 16, 19, 20, 22)
 CORNERS = lambda H, W: np.array([[0, 0, 1], [H, 0, 1], [H, W, 1], [0, W, 1], [0, 0, 1]], float).T
 
 
-def tile_acq_minutes(raw_dir: Path, pattern: str, tids) -> dict:
-    """Elapsed acquisition time per tile (min from the first tile) from each tile's Photron .cih header.  The camera's
-    absolute date is a wrong default but its clock runs monotonically through the scan, so relative time is exact."""
-    import re, datetime as dt
-    times = {}
-    for t in tids:
-        for d in sorted(raw_dir.glob(pattern.replace("{vid}", str(int(t))).replace("{id}", str(int(t))))):
-            cs = list(d.glob("*.cih")) if d.is_dir() else []
-            if not cs:
-                continue
-            txt = cs[0].read_text(errors="ignore")
-            dm, tm = re.search(r"Date\s*:\s*([\d/]+)", txt), re.search(r"Time\s*:\s*([\d:]+)", txt)
-            if dm and tm:
-                for fmt in ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"):
-                    try:
-                        times[int(t)] = dt.datetime.strptime(dm.group(1) + " " + tm.group(1), fmt); break
-                    except ValueError:
-                        continue
-            break
-    if not times:
-        return {}
-    t0 = min(times.values())
-    return {t: (v - t0).total_seconds() / 60.0 for t, v in times.items()}
-
-
 def tile_centres(cfg, mosaic):
     """Tile centres in mosaic pixels.  positions.json is stitch-relative, so the centre cloud is anchored to the organ's
     centroid (the scan covers the organ uniformly), which removes the constant offset."""

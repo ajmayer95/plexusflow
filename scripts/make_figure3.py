@@ -66,11 +66,9 @@ def main():
     # a single representative raw frame (full resolution, same grid as the tile projection): the frame closest to the
     # movie's per-pixel median, among every 10th frame
     from plexusflow.config import StageConfig
-    RAW_DIR = Path(StageConfig.load(P).raw_video_dir).expanduser()      # raw tile movies (stage config)
-    raw = sorted((RAW_DIR / f"10x 250fps loc{TILE}_C001H001S0001").glob(f"10x 250fps loc{TILE}_C001H001S0001*.tif"))
-    stack = np.stack([tifffile.imread(str(f_)).astype(float) for f_ in raw[::10]]); med = np.median(stack, axis=0)
-    k_rep = int(np.argmin([np.mean((fr_ - med) ** 2) for fr_ in stack])); img = stack[k_rep]; img = img.mean(-1) if img.ndim == 3 else img
-    print(f"[fig3] a: raw frame {10 * k_rep + 1} of {len(raw)} (closest to the movie median)")
+    from plexusflow.io.acquisition import load_representative_frame       # raw recording, or the copy in a data release
+    img, k_frame, n_raw = load_representative_frame(P, StageConfig.load(P), TILE)
+    print(f"[fig3] a: raw frame {k_frame} of {n_raw} (closest to the movie median)")
     _, tan, nrm = _centerline_geometry(cl); clt = cl + off
     lo, hi = clt.min(0) - 2.2 * R0, clt.max(0) + 2.2 * R0; ctr = (lo + hi) / 2; h_ = (hi - lo).max() / 2
     axA = fig.add_subplot(gT[0])
