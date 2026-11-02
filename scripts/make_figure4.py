@@ -5,8 +5,9 @@ Two tiles; in each, two vessels A and B recorded in the same movie (one clock), 
   b  return toward the vitelline vein (tile 13): relative pulsatility increases A → B
 Top: the tile (max − median motion projection) with A, B and the flow-directed path between them.
 Bottom: one cardiac cycle of each vessel from its 3-harmonic fit, (Q(φ) − Q̄)/Q̄, in its own mean-flow direction
-(no cross-tile synchronisation or model involved).  Annotations: relative first-harmonic amplitude |H1|/|Q̄| for A and B, and the fundamental's phase
-difference Δφ1 = arg H1,B − arg H1,A.
+(no cross-tile synchronisation or model involved), with the fundamental's phase difference Δφ1 = arg H1,B − arg H1,A; beside
+it the normalised amplitudes Π_n = |H_n|/|Q̄| of A and B for n = 1, 2 (± standard error across beats).  H3 is fitted but not
+shown: downstream on the arterial path it is not resolved (1.3× the local off-harmonic noise, incoherent across beats).
 
 Ported from PerTileFlow/scripts/make_figure5_two_regions.py (old Fig 5); harmonic bars dropped.
 Writes figures/fig4/fig4.{png,pdf,tif}.
@@ -181,18 +182,20 @@ def main():
         if j == 0:
             axW.legend(loc="upper right", frameon=False, borderaxespad=0.1, handlelength=1.4)
         # normalised harmonic amplitudes A → B with per-beat standard errors
-        n_ = np.arange(1, 4); (pa, sa, na), (pb, sb, nb) = pis["A"], pis["B"]
+        # H1 and H2 only: H3 is fitted (waveforms above) but downstream on the arterial path it sits near the noise floor
+        NS = 2; n_ = np.arange(1, NS + 1); (pa, sa, na), (pb, sb, nb) = pis["A"], pis["B"]
+        pa, sa, pb, sb = pa[:NS], sa[:NS], pb[:NS], sb[:NS]
         fl = (pis["A_floor"], pis["B_floor"])
-        for k in range(3):
+        for k in range(NS):
             axP.plot([n_[k] - 0.12, n_[k] + 0.12], [pa[k], pb[k]], color="0.6", lw=0.8, zorder=1)
         for x_, p_, s_, c_, f_ in ((n_ - 0.12, pa, sa, COL_A, fl[0]), (n_ + 0.12, pb, sb, COL_B, fl[1])):
             axP.errorbar(x_, p_, yerr=s_, fmt="none", ecolor=c_, capsize=1.5, lw=0.8, zorder=3)
             weak = p_ < 3 * f_                               # open marker: within 3× the vessel's own off-harmonic noise floor
             axP.scatter(x_, p_, s=18, zorder=4, facecolors=np.where(weak, "white", c_), edgecolors=c_, linewidths=1.0)
-        for k in range(3):
+        for k in range(NS):
             axP.text(n_[k], max(pa[k] + sa[k], pb[k] + sb[k]) * 1.45, f"{100 * (pb[k] / pa[k] - 1):+.0f}%", ha="center", va="bottom", fontsize=8,
                      color=COL_B, path_effects=[pe.withStroke(linewidth=2, foreground="white")])
-        axP.set_yscale("log"); axP.set_ylim(0.007, 2.0); axP.set_xlim(0.35, 3.5); axP.set_xticks(n_)
+        axP.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter()); axP.set_yscale("log"); axP.set_ylim(0.03, 1.5); axP.set_xlim(0.45, 2.55); axP.set_xticks(n_)
         axP.set_xlabel("Harmonic $n$", labelpad=1); axP.set_ylabel(r"$\Pi^{(n)} = |\hat Q^{(n)}|\,/\,\bar Q$", labelpad=1)
         axP.spines[["top", "right"]].set_visible(False)
         print(f"[fig4] tile {t}: Π_A {np.round(pa, 3)} ± {np.round(sa, 3)} ({na} beats); Π_B {np.round(pb, 3)} ± {np.round(sb, 3)} ({nb} beats); "
