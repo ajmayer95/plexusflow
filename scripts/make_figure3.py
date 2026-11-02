@@ -66,11 +66,9 @@ def main():
     # a single representative raw frame (full resolution, same grid as the tile projection): the frame closest to the
     # movie's per-pixel median, among every 10th frame
     from plexusflow.config import StageConfig
-    RAW_DIR = Path(StageConfig.load(P).raw_video_dir).expanduser()      # raw tile movies (stage config)
-    raw = sorted((RAW_DIR / f"10x 250fps loc{TILE}_C001H001S0001").glob(f"10x 250fps loc{TILE}_C001H001S0001*.tif"))
-    stack = np.stack([tifffile.imread(str(f_)).astype(float) for f_ in raw[::10]]); med = np.median(stack, axis=0)
-    k_rep = int(np.argmin([np.mean((fr_ - med) ** 2) for fr_ in stack])); img = stack[k_rep]; img = img.mean(-1) if img.ndim == 3 else img
-    print(f"[fig3] a: raw frame {10 * k_rep + 1} of {len(raw)} (closest to the movie median)")
+    from plexusflow.io.acquisition import load_representative_frame       # raw recording, or the copy in a data release
+    img, k_frame, n_raw = load_representative_frame(P, StageConfig.load(P), TILE)
+    print(f"[fig3] a: raw frame {k_frame} of {n_raw} (closest to the movie median)")
     _, tan, nrm = _centerline_geometry(cl); clt = cl + off
     lo, hi = clt.min(0) - 2.2 * R0, clt.max(0) + 2.2 * R0; ctr = (lo + hi) / 2; h_ = (hi - lo).max() / 2
     axA = fig.add_subplot(gT[0])
@@ -89,12 +87,12 @@ def main():
     Pq, Uq = np.array(Pq), np.array(Uq)
     gap = np.median(np.hypot(*np.diff(cl, axis=0).T)) * 12      # px between arrow rows along the vessel
     k_ = 0.85 * gap / np.percentile(np.linalg.norm(Uq, axis=1), 98)   # longest arrow fits between rows: lengths show the profile
-    axA.quiver(Pq[:, 1], Pq[:, 0], Uq[:, 0] * k_, Uq[:, 1] * k_, angles="xy", scale_units="xy", scale=1, color="white", edgecolor=INK,
-               linewidth=0.3, width=0.009, headwidth=3.5, headlength=3.5, headaxislength=3, pivot="middle", zorder=6)
+    axA.quiver(Pq[:, 1], Pq[:, 0], Uq[:, 0] * k_, Uq[:, 1] * k_, angles="xy", scale_units="xy", scale=1, color=(1, 1, 1, 0.75), edgecolor=(0.1, 0.1, 0.1, 0.6),
+               linewidth=0.25, width=0.008, headwidth=3.5, headlength=3.5, headaxislength=3, pivot="middle", zorder=6)
     sel = np.flatnonzero(valid); picks = sel[np.linspace(2, len(sel) - 3, 5).astype(int)]
     for j, i in enumerate(picks):
         p = clt[i] + R0 * 1.9 * nrm[i]
-        axA.text(p[1], p[0], str(j + 1), color="white", fontsize=8, fontweight="bold", ha="center", va="center", zorder=6, path_effects=HALO)
+        axA.text(p[1], p[0], str(j + 1), color="0.92", fontsize=8, ha="center", va="center", zorder=6, path_effects=[pe.withStroke(linewidth=1.2, foreground="0.15")])
     x0, x1 = axA.get_xlim(); y0, y1 = axA.get_ylim(); L = 20 / PX_SIZE_UM; xe = x0 + 0.95 * (x1 - x0); ya = y0 + 0.07 * (y1 - y0)
     axA.plot([xe - L, xe], [ya, ya], color="white", lw=2, solid_capstyle="butt", path_effects=HALO)
     axA.annotate("20 µm", (xe, ya), xytext=(0, 2), textcoords="offset points", ha="right", va="bottom", color="white", fontsize=8, path_effects=HALO)
@@ -128,7 +126,7 @@ def main():
 
     # d: Q(t) + harmonic model
     axD = fig.add_subplot(gB[0])
-    axD.plot(t, q, color=MEAS, lw=0.5, label="Measured")
+    axD.plot(t, q, color=MEAS, lw=0.5, label="Estimated flux")
     tt = np.linspace(0, t[-1], 2000); axD.plot(tt, model(tt), color=MODEL, lw=1.1, label="Harmonic model")
     axD.axhline(a0, color="0.7", lw=0.5, ls="--")
     axD.set_xlim(0, t[-1]); axD.set_xlabel("Time (s)", labelpad=1); axD.set_ylabel("Flux (nL/s)", labelpad=1)
@@ -142,13 +140,17 @@ def main():
     t_lo, t_hi = tb[np.argmin(Qm)], tb[np.argmax(Qm)]
     for tt_, col in ((t_lo, "#7fb3d5"), (t_hi, "#c0392b")):
         axD.plot(tt_, model(np.array([tt_]))[0], "o", ms=4, color=col, mec="white", mew=0.5, zorder=6)
-    yl = axD.get_ylim(); axD.set_ylim(yl[0], yl[0] + 1.65 * (yl[1] - yl[0])); axD.set_yticks([0.2, 0.4, 0.6])     # headroom: inset + equation above the trace
-    axI = axD.inset_axes([0.66, 0.66, 0.22, 0.3]); rr = np.linspace(-R_seg, R_seg, 100)
+    for tt_, col, nm, dy in ((t_lo, "#5d8fb3", "trough", -1), (t_hi, "#c0392b", "peak", 1)):
+        axD.annotate(nm, (tt_, model(np.array([tt_]))[0]), xytext=(-5, 3 * dy), textcoords="offset points", fontsize=8, color=col, zorder=6,
+                     ha="right", va="bottom" if dy > 0 else "center")
+    yl = axD.get_ylim(); axD.set_ylim(yl[0], yl[0] + 1.85 * (yl[1] - yl[0])); axD.set_yticks([0.2, 0.4, 0.6])     # headroom: inset + equation above the trace
+    axI = axD.inset_axes([0.66, 0.68, 0.22, 0.26]); rr = np.linspace(-R_seg, R_seg, 100)
     for tt_, col in ((t_lo, "#7fb3d5"), (t_hi, "#c0392b")):
         axI.plot(rr, model(np.array([tt_]))[0] / a0 * (1 - (rr / R_seg) ** 2), color=col, lw=1.1)
     axI.set_xlim(-1.1 * R_seg, 1.1 * R_seg); axI.set_ylim(0, None); axI.set_xticks([-round(R_seg), 0, round(R_seg)])
     axI.set_xlabel("ρ (µm)", labelpad=0); axI.set_ylabel(r"$v/\langle v_{\rm CL}\rangle$", labelpad=1)
     axI.tick_params(length=2, pad=1); axI.spines[["top", "right"]].set_visible(False)
+    axI.set_title("profile at peak / trough", fontsize=8, pad=2)
     axD.text(0.03, 0.9, r"$Q(t) = \bar Q\,v_{\rm CL}(t)\,/\,\langle v_{\rm CL}\rangle$", transform=axD.transAxes, ha="left", va="top", fontsize=8,
              bbox=dict(fc="white", ec="none", alpha=0.85, pad=1))
 
@@ -159,10 +161,10 @@ def main():
     bins_ = np.linspace(0, 1, 41); sel_ = np.isin(cyc, full); idx_ = np.clip(np.digitize(ph[sel_], bins_) - 1, 0, 39)
     mu = np.array([q[sel_][idx_ == b].mean() for b in range(40)]); sd = np.array([q[sel_][idx_ == b].std() for b in range(40)])
     bc_ = 0.5 * (bins_[:-1] + bins_[1:])
-    axE.fill_between(bc_, mu - sd, mu + sd, color="0.85", lw=0); axE.plot(bc_, mu, "o", ms=1.8, color=MEAS, mew=0)
+    axE.fill_between(bc_, mu - sd, mu + sd, color="0.72", alpha=0.6, lw=0); axE.plot(bc_, mu, "o", ms=1.8, color=MEAS, mew=0)
     pp = np.linspace(0, 1, 300); axE.plot(pp, model(pp / f0), color=MODEL, lw=1.3)
     axE.set_xlim(0, 1); axE.tick_params(labelbottom=False); axE.set_ylabel("Flux (nL/s)", labelpad=1); axE.spines[["top", "right"]].set_visible(False)
-    axE.text(0.03, 0.04, f"mean ± s.d., {nb} beats", transform=axE.transAxes, ha="left", va="bottom", fontsize=8, color="0.35")
+    axE.text(0.3, 0.97, f"mean ± s.d., {nb} beats", transform=axE.transAxes, ha="left", va="top", fontsize=8, color="0.25")
     letter(axE, "e", -0.3, 1.05)
     axK = fig.add_subplot(gE[1], sharex=axE)
     for k, nm in zip((1, 2, 3), ("Fundamental", "2nd", "3rd")):

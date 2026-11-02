@@ -31,7 +31,7 @@ REL = os.environ.get("PLEXUSFLOW_TEST_RELEASE")
 @pytest.mark.skipif(not REL, reason="set PLEXUSFLOW_TEST_RELEASE to an extracted release folder")
 def test_real_release_round_trip():
     R = load_release(REL)
-    assert R.schema_version == 2
+    assert R.schema_version in (2, 3)
     before = {p: p.stat().st_mtime for p in Path(REL).rglob("*") if p.is_file()}
     dom = R.domain                                  # checks carved edge order against the results
     assert len(dom["edges"]) == len(R.dc["Qp"]) == len(R.ac["elig"])

@@ -8,12 +8,13 @@ fitted radius, slices outside $[0.5, 1.5]\times$ the median rejected; $f_{e,\alp
 kept).  A measurement where Kloosterman fails is treated as unimaged — there is no fallback estimator.
 
 **Reliability.**  Each measurement gets a reliability scale
-$$c_{e,\alpha}=c_T(\alpha)+c_f\,(1-f_{e,\alpha})+c_a\,(1-a_{e,\alpha}),$$
+$$c_{e,\alpha}=c_0+c_f\,(1-f_{e,\alpha})+c_a\,(1-a_{e,\alpha}),$$
 where $a$ is the speed-weighted $|\cos\theta|$ between the time-mean optical-flow vector and the centreline
 tangent within $\pm R$ (does the flow run along the traced vessel?).  The parameters are fitted by maximum
 likelihood on same-tile junction balance — at every junction whose incident segments were all measured in the
 same tile, the net flux $\sum_e s_e Q_e \sim \mathcal N(0, \sum_e Q_e^2 c_e^2 + \sigma_0^2)$ — giving
-$c_f = 0.30$, $c_a = 1.46$, $c_T$ median 0.12 (53 tiles, 4,478 junctions).  $c$ is an empirical
+$c_0 = 0.118$, $c_f = 0.316$, $c_a = 1.454$ (4,478 junctions; one $c_0$ for all tiles — per-tile terms did not improve
+held-out coverage, `scripts/dc_reconcile.py --tile-terms` reproduces the older model).  $c$ is an empirical
 relative-reliability scale, not a standard error; the labels trusted ($c<0.5$), weak ($0.5$–$0.8$) and
 untrusted ($\ge 0.8$) are for reporting only — every Kloosterman-valid measurement enters with its weight.
 
@@ -52,13 +53,16 @@ randomly permuting the radii across segments.
 ## Result
 | | |
 |---|---|
-| total inflow through the carve boundary (L / R) | 7.60 nL/s (3.30 / 4.31) |
-| vitelline-vein outflow V1 / V2 | 3.02 / 4.59 nL/s |
-| corr(\|Q′\|, \|Q^sim\|), linear / log (7,493 segments) | 0.847 / 0.730 |
-| same, trusted segments only | 0.889 |
-| same, radii shuffled across segments | 0.40 |
+| total inflow through the carve boundary (L / R) | 7.20 nL/s (2.86 / 4.34) |
+| vitelline-vein outflow V1 / V2 | 2.62 / 4.59 nL/s |
+| corr(\|Q′\|, \|Q^sim\|), linear / log (7,493 segments) | 0.837 / 0.728 |
+| same, radii shuffled across segments | 0.38 |
 | segments whose direction the conservative correction reverses | 3.1 % |
 | median relative change of a measured flux | 25 % |
+
+(`results/dc_reconciled_v2.pkl` → `metrics`; passive flow without the venous-pressure penalty.  Paper Fig 7 adds the soft
+equal-venous-pressure penalty, `plexusflow.reconcile.venous_pressure_penalty`, σ_P = 2 Pa: r_log 0.719 over measured vessels,
+0.78 and 96 % direction agreement over direction-resolved vessels, |Q′| > 2σ.)
 
 The measured calibres explain the reconciled flow pattern well beyond what topology alone gives.
 The weighting was validated on synthetic networks with known truth and on held-out real vessels
@@ -66,4 +70,4 @@ The weighting was validated on synthetic networks with known truth and on held-o
 relative error 0.29 with the reliability weights vs 0.34 for σ ∝ |Q′| alone, 0.47 for σ ∝ c|Q^meas|
 and 0.37 with the reliabilities shuffled.
 
-*Code: `plexusflow.reconcile` (driver `scripts/dc_reconcile.py`); figures `scripts/make_dc_emergent_figure_v2.py`, `scripts/make_figure8alt_v3.py`.*
+*Code: `plexusflow.reconcile` (driver `scripts/dc_reconcile.py`); figures `scripts/make_figure6.py` (reliability, reconciliation) and `scripts/make_figure7dc.py` (whole-organ DC, Fig 7).*

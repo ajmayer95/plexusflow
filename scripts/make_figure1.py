@@ -1,6 +1,6 @@
 """Figure 1 — acquisition, per-tile filtering and stitching (PLOS, 7.5 in wide).
 
-  a  imaging setup (figures/fig1/setup.png, rendered from Alex's setup.svg; BioRender elements — Created with
+  a  imaging setup (<stage>/assets/fig1_setup.png, rendered from fig1_setup.svg; BioRender elements — Created with
      BioRender.com); the yolk-sac plexus is recorded one overlapping field of view at a time
   b  one 250 fps movie per tile (stacks; tile 36 in front) → per-tile image used for registration: temporal max − median
      projection (tiles/maxmed) → background-filtered (minus a σ = 80 px Gaussian, percentile-normalised)
@@ -43,31 +43,6 @@ ACQ_TILES = (1, 2, 3)              # panel a: the first three recorded tiles
 FORCE_SEAMS = ((18, 19),)           # tile 31: one zoom where 31, 18 and 19 all overlap
 T15, ANCHORS = 15, (7, 14, 21, 17, 18, 16, 19, 20, 22)
 CORNERS = lambda H, W: np.array([[0, 0, 1], [H, 0, 1], [H, W, 1], [0, W, 1], [0, 0, 1]], float).T
-
-
-def tile_acq_minutes(raw_dir: Path, pattern: str, tids) -> dict:
-    """Elapsed acquisition time per tile (min from the first tile) from each tile's Photron .cih header.  The camera's
-    absolute date is a wrong default but its clock runs monotonically through the scan, so relative time is exact."""
-    import re, datetime as dt
-    times = {}
-    for t in tids:
-        for d in sorted(raw_dir.glob(pattern.replace("{vid}", str(int(t))).replace("{id}", str(int(t))))):
-            cs = list(d.glob("*.cih")) if d.is_dir() else []
-            if not cs:
-                continue
-            txt = cs[0].read_text(errors="ignore")
-            dm, tm = re.search(r"Date\s*:\s*([\d/]+)", txt), re.search(r"Time\s*:\s*([\d:]+)", txt)
-            if dm and tm:
-                for fmt in ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"):
-                    try:
-                        times[int(t)] = dt.datetime.strptime(dm.group(1) + " " + tm.group(1), fmt); break
-                    except ValueError:
-                        continue
-            break
-    if not times:
-        return {}
-    t0 = min(times.values())
-    return {t: (v - t0).total_seconds() / 60.0 for t, v in times.items()}
 
 
 def tile_centres(cfg, mosaic):
@@ -409,8 +384,10 @@ def main():
 
     # a: setup → one tile's movie → projection
     gA = gL[0].subgridspec(1, 2, width_ratios=[0.34, 1.0], wspace=0.04)
-    axA = fig.add_subplot(gA[0]); setup = out / "setup.png"
-    if setup.exists():
+    axA = fig.add_subplot(gA[0]); setup = P / "assets" / "fig1_setup.png"
+    if not setup.exists():
+        raise FileNotFoundError(f"{setup} missing: the drawing is an input (data release <stage>/assets/)")
+    if True:
         axA.imshow(plt.imread(str(setup)), interpolation="antialiased"); axA.axis("off")
     else:
         draw_schematic(axA)

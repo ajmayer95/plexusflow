@@ -64,3 +64,7 @@ figures/
 sandbox
 sandbox/
 .DS_Store
+
+# local assistant / personal launch notes (not part of the public repo)
+CLAUDE.md
+LAUNCH.md

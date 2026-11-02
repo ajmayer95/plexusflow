@@ -16,7 +16,8 @@ Schema 2 (data-v2, 2026-10-15):
     MANIFEST.json, plexusflow.yaml
     graph/graph_vessels_piv.gpickle, graph/export/{nodes,edges,measurements,tiles}.csv, paths.npz, traces.npz
     fuse/organ_fusion_close.tif | organ_fusion.tif, stitch/positions.json
-    results/{dc_reconciled_v2.pkl, ac_field_v2.pkl, reliability_model_v1.json, summary.json, *.csv}
+    results/{dc_reconciled_v2.pkl, ac_field_v7.pkl (schema 2: ac_field_v2.pkl), ac_estimate_v8.json (schema ≥ 3),
+             reliability_model_v1.json, summary.json, *.csv}
 """
 from __future__ import annotations
 import csv
@@ -26,8 +27,8 @@ import pickle
 from functools import cached_property
 from pathlib import Path
 
-SCHEMA_VERSION = 2
-SUPPORTED_SCHEMAS = (2,)
+SCHEMA_VERSION = 3          # 3: paper results (ac_field_v7, ac_estimate_v8) + figure inputs; 2: data-v2 (ac_field_v2)
+SUPPORTED_SCHEMAS = (2, 3)
 PHASE_SD_MAX_DEG = 30.0      # tile time gauge bootstrap SD above which phases are not compared across tiles
 
 
@@ -99,7 +100,15 @@ class Release:
 
     @cached_property
     def ac(self) -> dict:
-        return pickle.loads(self._result("ac_field_v2.pkl").read_bytes())
+        """The tile-synchronised harmonic field (schema 3: the paper's ac_field_v7; schema 2: ac_field_v2)."""
+        return pickle.loads(self._result("ac_field_v7.pkl" if self.schema_version >= 3 else "ac_field_v2.pkl").read_bytes())
+
+    @cached_property
+    def ac_fit(self) -> dict:
+        """The profiled distensibility fit (schema ≥ 3; results/ac_estimate_v8.json)."""
+        if self.schema_version < 3:
+            raise ReleaseError(f"{self.name}: schema {self.schema_version} releases have no distensibility fit")
+        return json.loads(self._result("ac_estimate_v8.json").read_text())
 
     @cached_property
     def reliability(self) -> dict:

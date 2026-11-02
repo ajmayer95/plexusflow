@@ -109,6 +109,21 @@ One tracer/optics model (depth-saturated, 'H'-type tracers matched in density an
 in-phase pulsatility in all branches; prescribed-flux boundary conditions; 27 junctions (filters required all three edges
 in one tile).  The depth-to-width ratio of real vessels is not measurable from these 2D videos.
 
-*Code (exploratory, not part of the pipeline): `sandbox/` — `stokes_junction.py`, `stokes_fast.py`, `stokes_ensemble.py`,
-`stokes_ensemble_summary.py`, `stokes_vessel.py`, `stokes_vessel_sweep.py`, `piv_benchmark.py`, `lumen_width_calib.py`,
-`lumen_zc_fit.py`, `tracer_density.py`, `depth_vs_width.py`, `conservation_gamma.py`.  Results: `PlexusFlow21S/results/stokes_bench/`.*
+## Reproducing
+
+The benchmark is part of the package (`plexusflow.synthetic.stokes`) and runs from a **benchmark bundle**
+(`PlexusFlow21S_benchmark_v1`, ~100 MB): per-tile full-resolution backgrounds (per-pixel 10th percentile and temporal SD
+of the first 400 / 600 raw frames) with each tile's camera noise model, and the saved Stokes solutions of the 27 junctions
+and 51 single vessels.  No raw videos or mesher are needed; runs from the bundle reproduce runs from the raw data bit for bit.
+
+```bash
+pip install -e ".[bench]"
+python scripts/benchmark/vessels.py       --bundle PlexusFlow21S_benchmark_v1    # single vessels: shape, size, flattening
+python scripts/benchmark/frame_spacing.py --bundle PlexusFlow21S_benchmark_v1    # OF frame spacing, 15S-matched conditions
+python scripts/benchmark/junctions.py     --bundle PlexusFlow21S_benchmark_v1    # junction ensemble (≈ 1 h on 8 cores)
+```
+
+`scripts/benchmark/make_bundle.py` builds the bundle from a stage folder and its raw videos (`--rebuild` also re-picks the
+junctions and re-meshes / re-solves the geometry with gmsh + scikit-fem).  The PIV comparison and the lumen-width,
+depth-of-correlation and tracer-density calibrations were exploratory analyses and are not part of this repository
+(available from the author on request).

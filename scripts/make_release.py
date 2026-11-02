@@ -23,8 +23,11 @@ import numpy as np
 import plexusflow.paths as paths
 from plexusflow.release import SCHEMA_VERSION
 
-RESULTS = ("reliability_model_v1.json", "dc_reconciled_v2.pkl", "ac_field_v2.pkl")
-RESULTS_OPTIONAL = ("ac_group_bc_estimate.pkl",)
+RESULTS = ("reliability_model_v1.json", "dc_reconciled_v2.pkl", "ac_field_v7.pkl", "ac_estimate_v8.json")
+RESULTS_OPTIONAL = ()
+# inputs of the paper figures (scripts/make_figure*.py), copied as-is from the stage (core tier)
+FIGURE_INPUTS = ("fuse/organ_fusion.tif", "fuse/maxmed.tif", "fuse/probs_logit.tif", "mask/mask.tif", "tiles/maxmed", "assets")
+FIG3_TILE = 36                # its representative raw frame is stored (raw recordings are not released)
 EXTRAS = ("videos_realtime", "batch_kl_inputs")
 NODE_KEYS = ("x", "y", "boundary_type", "side")
 EDGE_KEYS = ("radius", "length", "radial_uncertain", "in_carved_network")
@@ -128,6 +131,7 @@ def prime_viewer_cache(graph_path):
     v = object.__new__(ReadOnlyMosaicViewer)
     v.G = pickle.loads(Path(graph_path).read_bytes()); v.graph_path = Path(graph_path)
     v.cache_harmonic_class = True; v.force_recompute_harmonic_class = False
+    v.workbench = True                      # write the cache into this release copy of the graph (its only writer)
     v._precompute_harmonic_classes()
 
 
@@ -158,7 +162,7 @@ def export_results(res_dir, out):
             w.writerow((D["nodes"][i], "carve", D["side"][k], scalar(D["fb"][i])))
         for i in D["out"]:
             w.writerow((D["nodes"][i], "vein", "", scalar(D["fb"][i])))
-    A = pickle.loads((res_dir / "ac_field_v2.pkl").read_bytes())
+    A = pickle.loads((res_dir / "ac_field_v7.pkl").read_bytes())
     with open(out / "ac_field_edges.csv", "w", newline="") as f:
         w = csv.writer(f); w.writerow(("u", "v", "eligible", "winner_tile", "H1_amp", "H1_phase", "H2_amp", "H2_phase", "beat_scatter_H1", "rho",
                                        "tile_gauge_sd_deg", "phase_determined"))
@@ -176,7 +180,9 @@ def export_results(res_dir, out):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--out"); ap.add_argument("--spatial", type=int, default=4)
     ap.add_argument("--frames", type=int, default=90); ap.add_argument("--no-sidecars", action="store_true")
-    ap.add_argument("--version", default="v2"); ap.add_argument("--pack", action="store_true"); a = ap.parse_args()
+    ap.add_argument("--version", default="v3"); ap.add_argument("--pack", action="store_true")
+    ap.add_argument("--preview-videos", action="store_true", help="downsample videos (--spatial/--frames) instead of copying them as used by the figures")
+    a = ap.parse_args()
     st = paths.STAGE; out = Path(a.out) if a.out else st.parent / f"{st.name}_release_{a.version}"
     if out.exists() and any(out.iterdir()):
         sys.exit(f"{out} exists and is not empty — choose another --out")
@@ -199,13 +205,28 @@ def main():
     if n_att != n_had:
         sys.exit(f"trace re-attachment mismatch: {n_att} attached vs {n_had} in the stage graph")
     (out / "fuse").mkdir()
-    for f in ("organ_fusion_close.tif", "organ_fusion.tif"):      # one mosaic (the viewer's first choice)
-        if (st / "fuse" / f).exists():
-            shutil.copy2(st / "fuse" / f, out / "fuse" / f); break
+    if (st / "fuse" / "organ_fusion_close.tif").exists():          # viewer / Figs 7, 9, 10 background (organ_fusion.tif: figure inputs)
+        shutil.copy2(st / "fuse" / "organ_fusion_close.tif", out / "fuse" / "organ_fusion_close.tif")
     (out / "stitch").mkdir()
     for f in ("positions.json", "provenance.json"):
         shutil.copy2(st / "stitch" / f, out / "stitch" / f)
-    nv = downsample_videos(st / "videos_realtime", out / "videos_realtime", a.spatial, a.frames); print(f"  videos: {nv} tiles", flush=True)
+    if a.preview_videos:                                           # small viewer-only copy (data-v2 behaviour)
+        nv = downsample_videos(st / "videos_realtime", out / "videos_realtime", a.spatial, a.frames); print(f"  videos (preview): {nv} tiles", flush=True)
+    else:                                                          # as used by the figures (Figs 1, 4)
+        shutil.copytree(st / "videos_realtime", out / "videos_realtime"); print("  videos: copied as-is", flush=True)
+    for rel in FIGURE_INPUTS:                                      # figure inputs (core)
+        src, dst = st / rel, out / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        (shutil.copytree if src.is_dir() else shutil.copy2)(src, dst)
+    from plexusflow.config import StageConfig
+    from plexusflow.io.acquisition import write_acquisition_times, write_representative_frame
+    cfg_ = StageConfig.load(st)
+    write_acquisition_times(out, cfg_, sorted(G.graph["tile_f0_piv"]))   # Figs 1, 8 (raw headers are not released)
+    write_representative_frame(out, cfg_, FIG3_TILE)                      # Fig 3a
+    from plexusflow.analyze.geometry import tile_video_shape, VIDEO_SHAPES_FILE
+    (out / VIDEO_SHAPES_FILE).write_text(json.dumps({str(t): list(tile_video_shape(cfg_, t)) for t in sorted(G.graph["tile_f0_piv"])
+                                                      if tile_video_shape(cfg_, t)}))              # tile geometry (raw not released)
+    print(f"  figure inputs: {', '.join(FIGURE_INPUTS)}, acquisition_times.json, tile_video_shapes.json, raw_subset/", flush=True)
     (out / "results").mkdir()
     for f in RESULTS:
         shutil.copy2(paths.RESULTS / f, out / "results" / f)
@@ -218,22 +239,25 @@ def main():
     cfg = (st / "plexusflow.yaml").read_text().splitlines()
     cfg = [("# " + l if l.startswith("external_") else l) for l in cfg]
     (out / "plexusflow.yaml").write_text("# Frozen release: raw videos are not included (viewer is read-only; fresh optical flow disabled).\n"
-                                         + "\n".join(cfg) + f"\nvideos_realtime_spatial_ds: {a.spatial}\n")
+                                         + "\n".join(cfg) + (f"\nvideos_realtime_spatial_ds: {a.spatial}\n" if a.preview_videos else "\n"))   # copied videos keep the stage value
     batch = G.graph.get("measurement_batch")
     (out / "README.md").write_text(f"""# {st.name} — frozen release {a.version} ({datetime.date.today()})
 
 Self-contained snapshot of the {st.name.replace("PlexusFlow", "")} yolk-sac vessel-flow analysis: the measured vessel graph,
-everything the read-only viewer needs, and the final DC / AC results.  No mask or graph editing and no raw videos — the graph is frozen.
+everything the read-only viewer needs, the final DC / AC results and the inputs of every paper figure.  No raw videos — the graph is frozen.
 
-Two downloads, same root folder (extract both to merge): **core** (graph, exports, mosaic, results) is all the analysis
-needs; **extras** adds viewer video playback and the Kloosterman inputs.
+Two downloads, same root folder (extract both to merge): **core** (graph, exports, mosaic, results, figure inputs) is all
+the analysis needs; **extras** adds the per-tile realtime videos (viewer playback, Figs 1 and 4) and the Kloosterman inputs
+(Figs 3 and 6, refitting the reliability model).  All ten paper figures need both.
 
 | folder | tier | contents |
 |---|---|---|
 | `graph/` | core | `graph_vessels_piv.gpickle` (networkx; includes the viewer's derived per-edge harmonic cache; Q(t) traces are re-attached from `export/traces.npz` on load) and `export/` — the same graph as CSV + npz, plus per-tile heart rates (see `export/SCHEMA.md`) |
 | `fuse/`, `stitch/` | core | organ mosaic and tile placement |
-| `results/` | core | final DC reconciliation, AC (waveform) field, reliability model; CSV exports and `summary.json` |
-| `videos_realtime/` | extras | every tile, {a.spatial}× downsampled in space, {a.frames} frames (display only) |
+| `results/` | core | final DC reconciliation, synchronised AC (waveform) field `ac_field_v7`, distensibility fit `ac_estimate_v8`, reliability model; CSV exports and `summary.json` |
+| `fuse/`, `mask/`, `tiles/maxmed/`, `assets/` | core | mosaic projections, segmentation probability and mask, per-tile projections, figure drawings |
+| `acquisition_times.json`, `tile_video_shapes.json`, `raw_subset/` | core | recording times and frame sizes of every tile (from the raw recordings) and the representative raw frame of tile 36 (Fig 3) |
+| `videos_realtime/` | extras | every tile's realtime video as used by the figures and the viewer |
 | `batch_kl_inputs/` | extras | Kloosterman sidecars (time-mean flow per vessel) — refit the reliability model without videos |
 
 **Use** (code: https://github.com/ajmayer95/plexusflow, commit `{commit}`; Python ≥ 3.10).  Paste-safe commands:
@@ -243,13 +267,14 @@ cd plexusflow
 git checkout {commit[:10]}
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[figures]"
 export PLEXUSFLOW_STAGE="/path/to/{out.name}"
 export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results
 export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
-python examples/quickstart.py
+bash scripts/reproduce_paper.sh
 ```
-Then `python scripts/dc_reconcile.py` and `python scripts/ac_field.py` reproduce `results/`; for the read-only viewer,
+`reproduce_paper.sh` re-derives `results/` and draws Figs 1–10 into `$PLEXUSFLOW_FIGURES` (about 4 minutes; `--figures` to skip
+the analysis); `python examples/quickstart.py` is a one-minute tour of the DC reconciliation.  For the read-only viewer,
 `pip install -e ".[gui]"` and `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"`.  This folder is never written to:
 outputs go to PLEXUSFLOW_RESULTS / PLEXUSFLOW_FIGURES.
 No Python?  `graph/export/` (CSV + npz, see `SCHEMA.md`) and the CSVs in `results/` contain everything.

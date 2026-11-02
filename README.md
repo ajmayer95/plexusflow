@@ -1,173 +1,113 @@
 # plexusflow
 
-**Reproducible whole-organ vascular reconstruction from spatially tiled flow microscopy.**
+**Whole-organ blood-flow reconstruction from tiled high-speed microscopy of a planar vascular network.**
 
-`plexusflow` converts overlapping microscopy tiles into an analysis-ready
-whole-organ vascular graph with calibrated, edge-resolved flow
-measurements and documented uncertainty. It is designed for planar
-vascular / tubular networks (e.g. embryonic yolk-sac vasculature) imaged
-in overlapping fields of view.
+`plexusflow` turns overlapping 250 fps bright-field movies of the embryonic yolk-sac plexus into a vessel graph with a
+measured, mass-conserving mean flow and a synchronised pulsatile (harmonic) field on every vessel. `plexusmech` fits a
+distributed RC network model of the wall mechanics to that field. This repository contains both packages, the
+analysis drivers and the scripts that produce every figure of the paper.
 
-## Status
+> **Paper:** A. Mayer *et al.*, *title*, PLOS Computational Biology (in review). <!-- TODO: title, DOI on acceptance -->
+> **Code archive:** [doi:10.5281/zenodo.TODO](https://doi.org/10.5281/zenodo.TODO) ·
+> **Data:** [doi:10.5281/zenodo.TODO](https://doi.org/10.5281/zenodo.TODO)
 
-Pre-alpha. Under active development. APIs unstable.
+## What is in the repository
+
+| Package / folder | Contents |
+|---|---|
+| `src/plexusflow/` | reconstruction: tile preprocessing and stitching, mosaic fusion, mask → graph (`mve`, `vectorize`), per-vessel optical-flow flux (`analyze`), mean-flow reliability model and conservative reconciliation (`reconcile`), tile-synchronised harmonic field (`ac`), known-truth Stokes benchmark (`synthetic`), data-release loader (`release`), napari viewer (`viewer`) |
+| `src/plexusmech/` | modelling: two-port RC / transmission-line network (`ac.model`, `tl`), composite likelihood and profiled fit of wall distensibility (`ac.profile`) |
+| `scripts/` | analysis drivers (`dc_reconcile.py`, `ac_field.py`, `mech/ac_estimate.py`), figure scripts (`make_figure*.py`, see [FIGURES.md](FIGURES.md)), benchmark drivers (`benchmark/`), `reproduce_paper.sh` |
+| `docs/` | methods notes: [pipeline](docs/pipeline.md), [mean-flow method](docs/dc_method.md), [synthetic validation](docs/synthetic_validation.md) |
+| `tests/` | unit and regression tests (`pytest`) |
+
+`plexusmech` imports `plexusflow`, never the reverse (enforced by `tests/test_package_boundary.py`).
 
 ## Install
 
+Python ≥ 3.10.
+
+```bash
+git clone https://github.com/ajmayer95/plexusflow.git
+cd plexusflow
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[figures]"                 # library + everything the figure scripts need
+```
+
+The exact environment in which the tests and all figures were verified is pinned in `requirements-lock.txt`
+(`pip install -r requirements-lock.txt && pip install -e . --no-deps`). Optional extras: `gui` (napari viewer and
+editors), `vectorize` ([net3](https://github.com/ajmayer95/net3), mask → graph), `bench` (Stokes benchmark), `dev`
+(pytest, ruff).
+
+## Reproducing the paper
+
+1. Download and extract the data release (21-somite embryo) from Zenodo (link above). It contains the measured vessel
+   graph, the stitched mosaic and masks, per-tile projections and the inputs of every figure.
+2. Point the code at it. There is no default location: every script stops with a clear message if
+   `PLEXUSFLOW_STAGE` is unset.
+
+   ```bash
+   export PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S_release       # read-only is fine
+   export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results       # derived results (default <stage>/results)
+   export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures       # figures (default <stage>/figures)
+   ```
+3. Run everything (about 4 minutes on a laptop):
+
+   ```bash
+   bash scripts/reproduce_paper.sh             # results, then Figs 1–10 → $PLEXUSFLOW_FIGURES/latest/
+   bash scripts/reproduce_paper.sh --figures   # figures only, from existing results
+   ```
+
+| Step | Script | Output (in `$PLEXUSFLOW_RESULTS`) |
+|---|---|---|
+| reliability model + conservative mean flow | `scripts/dc_reconcile.py` | `reliability_model_v1.json`, `dc_reconciled_v2.pkl` |
+| tile-synchronised harmonic field | `scripts/ac_field.py` | `ac_field_v7.pkl` |
+| profiled distensibility fit | `scripts/mech/ac_estimate.py` | `ac_estimate_v8.json` |
+| Figures 1–10 | `scripts/make_figure*.py` ([FIGURES.md](FIGURES.md)) | `$PLEXUSFLOW_FIGURES/figN/` |
+
+Script defaults are the settings used in the paper (`plexusflow.ac.field.CANONICAL_SYNC` for the phase
+synchronisation). A run from a clean environment reproduces the published mean flows bit for bit, the harmonic field to
+10⁻⁵ and the fitted distensibility exactly; profiled-objective values far from the optimum can differ by < 0.5 %
+(warm-started local optimisation).
+
+## Running the pipeline on new data
+
+The upstream steps work on a *stage folder* (raw-tile movies in, graph and measurements out), each a `plexusflow`
+sub-command with `--help`:
+
+```bash
+plexusflow init        STAGE        # folder layout + plexusflow.yaml
+plexusflow preprocess  STAGE        # per-tile projections from the raw movies
+plexusflow stitch      STAGE        # interactive tile placement (PerTileFlow GUI, see docs/pipeline.md)
+plexusflow fuse        STAGE        # feather-blended mosaic
+plexusflow mve         STAGE        # mask → vectorise → edit (napari, needs [gui,vectorize])
+plexusflow condense    STAGE        # one edge per vessel
+plexusflow analyze     STAGE        # optical flow → Q(t) → harmonics per vessel and tile
+plexusflow info        STAGE        # which artefacts exist
+plexusflow view        STAGE        # read-only viewer (measured and reconciled flow, video overlay)
+```
+
+then the analysis drivers above. See [docs/pipeline.md](docs/pipeline.md) for the coordinate frames and outputs of each step.
+
+## Tests
+
 ```bash
 pip install -e ".[dev]"
+pytest                    # unit + regression tests (DC network, reliability fit, AC profile, package boundary, benchmark)
+ruff check src tests scripts examples
 ```
 
-Optional backends and interfaces:
+`tests/test_release.py` additionally checks a data release when `PLEXUSFLOW_TEST_RELEASE` points at one.
 
-```bash
-pip install -e ".[gui]"       # napari-based interactive editor
-pip install -e ".[sam2]"      # SAM2 segmentation backend
-pip install -e ".[ilastik]"   # ilastik output loader
-```
+## Citation
 
-## Pipeline
+Please cite the paper and the archived code version ([CITATION.cff](CITATION.cff)).
 
-```text
-raw tiles
-   ↓
-ingest ─────────── tile discovery + metadata
-   ↓
-register ───────── pose-graph global alignment
-   ↓
-segment ────────── pluggable backends (threshold / ilastik / SAM2)
-   ↓
-fuse ───────────── probability fusion in global coords
-   ↓
-vectorize ──────── centerline extraction + graph build
-   ↓
-edit ───────────── mask / graph correction (napari)
-   ↓
-measure ────────── local flow estimation per edge   [Phase 2]
-   ↓
-harmonize ──────── cross-tile calibration           [Phase 3]
-   ↓
-qc ─────────────── metrics + HTML report
-```
+## Authors and acknowledgements
 
-Every stage is idempotent, resumable, and callable from both Python and
-the CLI.
-
-```bash
-plexusflow register  project.yaml
-plexusflow segment   project.yaml --backend ilastik
-plexusflow fuse      project.yaml
-plexusflow vectorize project.yaml
-plexusflow qc        project.yaml
-```
-
-```python
-from plexusflow import Project
-proj = Project.load("project.yaml")
-proj.register().segment().fuse().vectorize()
-proj.qc().write_report("qc/report.html")
-```
-
-## Authors
-
-- **Alex Mayer** — Katifori Lab, Center for Computational Biology,
-  Flatiron Institute.
+Alex Mayer — Katifori Lab, Center for Computational Biology, Flatiron Institute. Imaging: Siavash Ghaffari, Elizabeth
+A. V. Jones lab. <!-- TODO: confirm acknowledgement wording and affiliations -->
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-## Quickstart for collaborators (frozen data releases)
-
-Frozen data releases for 15, 21 and 27 somites are attached to the GitHub release
-[`data-v2`](https://github.com/ajmayer95/plexusflow/releases/tag/data-v2) (repository access required). Each stage has a
-**core** archive (graph, exports, mosaic, final results; 62–103 MB) and an optional **extras** archive (viewer video
-playback, Kloosterman inputs); both extract into the same folder.  You need Python ≥ 3.10 and the GitHub CLI (`gh`).
-
-Paste-safe commands (zsh does not accept `#` comments interactively, so none are inline):
-
-```bash
-gh release download data-v2 --repo ajmayer95/plexusflow --pattern 'PlexusFlow21S_release_v2.core.tar.gz'
-tar -xzf PlexusFlow21S_release_v2.core.tar.gz
-git clone https://github.com/ajmayer95/plexusflow.git
-cd plexusflow
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-export PLEXUSFLOW_STAGE="$PWD/../PlexusFlow21S_release_v2"
-export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results
-export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
-python examples/quickstart.py
-```
-
-| Command | What it does |
-|---|---|
-| `python examples/quickstart.py` | load graph → reliability fit → DC reconciliation → 2 plots |
-| `python scripts/dc_reconcile.py` | full DC pipeline (writes `reliability_model_v1.json`, `dc_reconciled_v2.pkl`) |
-| `python scripts/ac_field.py --ref-tile 21` | aligned waveform (AC) field — 27S: `--ref-tile 43`; 15S: `--ref-tile 15 --f0-band 10` |
-| `python scripts/make_figure8alt_v3.py`, `python scripts/make_figure_ac_field.py` | DC figure (measured vs Poiseuille) and the measured AC field (after the two above) |
-| `python scripts/mech/make_figure9alt_v3.py` | modelling: measured vs RC-network AC field (`plexusmech`) |
-| `python scripts/mech/ac_estimate.py` | modelling: joint (D, η) estimate — slow (tens of minutes) |
-| `pip install -e ".[gui]"` then `plexusflow view "$PLEXUSFLOW_STAGE"` | read-only viewer (napari; video playback needs the extras archive) |
-
-From Python, a release is opened with `plexusflow.release.load_release(path)` (graph, DC and AC results, carved
-network, tiles, checksum verification); modelling code should go through it rather than reading files directly.
-
-Working without Python: `graph/export/` in a release holds the graph, every measurement and the per-tile heart rates as
-CSV + npz (`SCHEMA.md` explains the columns); `results/` holds the reconciled flows and the waveform field as CSV.
-
-Reproducibility: each release records the code commit it was built with (`MANIFEST.json`).  Re-running the scripts in a
-fresh environment reproduces the reconciled flows of every vessel not flagged `unstable` to ≤ 0.6 % with no direction
-changes (`results/dc_reconciled_edges.csv`: `Q_reconciled_sd`, `unstable` — weakly determined loop and near-zero flows,
-0.03–0.12 % of vessels), and the tile phases of every tile with `phase_determined` waveforms exactly.  Waveform phases are
-only comparable across tiles whose phase uncertainty is ≤ 30° (`results/summary.json`: `tile_time_gauge_sd_deg`).
-
-## Repository layout (2026-10)
-
-```text
-src/plexusflow/      measurement → conservative flow field (paper 1)
-  analyze/       optical flow + Kloosterman per-vessel batch (per-measurement `quality` record)
-  reconcile/     DC: reliability scale, carve, carved network, reliability-weighted IRLS projection, passive flow
-  ac/            AC: Option-A harmonic field (tile time gauge, junction residuals, phase-determined vessels)
-  release.py     read-only loader for frozen data releases (schema-versioned)
-  viewer/        napari viewer: `plexusflow view` (read-only) / `plexusflow workbench` (fresh OF, tagging, edits)
-  legacy/        2026-09 tile_normalize / KCL path, kept to reproduce old figures; unused by pipeline and viewer
-  ...            graph I/O, CLI and the upstream stages
-src/plexusmech/      modelling on top of a reconstruction (paper 2) — imports plexusflow, never the reverse
-  ac/            two-port network model, likelihood, group-corrected (D, η) estimate
-  tl/            transmission-line simulator (`plexusmech simulate`); viewer/ backend for the Simulate tab
-scripts/         pipeline drivers, run in order:
-  dc_reconcile.py                  → results/reliability_model_v1.json, results/dc_reconciled_v2.pkl
-  ac_field.py                      → results/ac_field_v2.pkl
-  make_dc_emergent_figure_v2.py, make_figure8alt_v3.py, make_figure_ac_field.py     reconstruction figures
-  make_release.py                  → frozen, self-contained data release of a stage
-  mech/ac_estimate.py              → results/ac_group_bc_estimate.pkl, figures/ac/
-  mech/make_figure9alt_v3.py       measured vs RC-network figure
-examples/        quickstart.py — graph → reconciliation → plots
-docs/            methods notes (docs/dc_method.md)
-```
-
-Only pipeline code is committed.  Diagnostics, validation runs and exploration live in `sandbox/`
-(git-ignored; on the main Mac a link to a Drive folder so both machines see it).
-
-**Data is not in git.** The canonical measured graph (`graph/graph_vessels_piv.gpickle`), Kloosterman
-sidecars, figures and derived results live in the stage folder (`PlexusFlow21S/`, synced via Google Drive);
-raw videos stay on the acquisition machine. Point the code at the stage folder once per machine:
-
-```bash
-export PLEXUSFLOW_STAGE="/path/to/PlexusFlow21S"     # add to ~/.zshrc; default = the Drive path on the main Mac
-```
-
-`plexusflow.paths` provides `STAGE`, `RESULTS` (= `<stage>/results`, or `$PLEXUSFLOW_RESULTS`), `GRAPH`, `FIGURES`.
-Derived results are regenerated by code and shared between machines through the stage folder.
-
-## Workflow
-
-Two machines: code syncs through GitHub, data through the stage folder.
-`git pull` when you start, commit as you go, `git push` when you stop.
-
-- `main` holds only finished, working code. Work happens on branches (`git switch -c <topic>`);
-  commit freely there, merge to `main` by pull request when satisfied.
-- Diagnostics and exploration go in `sandbox/` (git-ignored), never in a commit.  When the pipeline needs
-  something from a diagnostic, move that function into `src/plexusflow/`.
-- Data versions are published separately with a checksum; results record the graph version they came from.

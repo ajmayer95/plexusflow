@@ -77,10 +77,10 @@ Each command has --help and accepts overrides. Common ones:
 
 ## Prerequisites
 
-* PerTileFlow's `scripts/plexus_stitch_v0.py` and `plexus_threshold.py`
-  reachable (auto-detected in the default location; override via
-  `PLEXUSFLOW_STITCH_SCRIPT` and `PLEXUSFLOW_THRESHOLD_SCRIPT`).
-* net3 installed with the [gui] extra for the graph editor.
+* The interactive stitcher and mask editor are PerTileFlow GUIs (not distributed here): set `PERTILEFLOW_ROOT` to a
+  PerTileFlow checkout, or `PLEXUSFLOW_STITCH_SCRIPT` / `PLEXUSFLOW_THRESHOLD_SCRIPT` to the scripts.  Their outputs
+  (`stitch/positions.json`, `mask/mask.tif`) are part of the data release, so the analysis does not need them.
+* net3 (`pip install -e ".[vectorize]"`, from github.com/ajmayer95/net3) for vectorisation and the graph editor.
 * napari, tifffile, scipy, numpy, scikit-image for the fuse/mask paths.
 
 ## Coordinate provenance

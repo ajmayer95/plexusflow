@@ -1,4 +1,4 @@
-"""Figure 5 — effective vascular domain.  a: anatomical schematic (figures/fig5/anatomy.png, from Alex's anatomy.svg).  b: the domain on the mosaic: retained (carved) network vs excluded vessels, and the effective boundaries —
+"""Figure 5 — effective vascular domain.  a: anatomical schematic (<stage>/assets/fig5_anatomy.png, rendered from fig5_anatomy.svg).  b: the domain on the mosaic: retained (carved) network vs excluded vessels, and the effective boundaries —
 arterial cut vertices grouped as A1 (left) / A2 (right) and the vitelline-vein outlets V1 / V2.
 
 Writes figures/fig_domain/fig_domain.{png,pdf,tif}.
@@ -49,7 +49,7 @@ def main():
             ax.add_collection(LineCollection(exc, colors=EXC, linewidths=1.8, alpha=0.95, zorder=3))
         if show_A:
             nL, nR = int(np.sum(side == "L")), int(np.sum(side == "R"))
-            for s_, lab, dx in (("L", r"$A^{\mathrm{L}}_{1\ldots%d}$" % nL, -1), ("R", r"$A^{\mathrm{R}}_{1\ldots%d}$" % nR, 1)):
+            for s_, lab, dx in (("L", r"$A_{\mathrm{L}}$", -1), ("R", r"$A_{\mathrm{R}}$", 1)):   # 21 / 14 individual cut nodes: caption
                 P_ = np.array([xy(n) for n, s in zip(inj, side) if s == s_])
                 ax.scatter(*P_.T, s=18, color=ART, edgecolor="white", linewidth=0.5, zorder=5)
                 ax.text(P_[:, 0].max() + 40 if dx < 0 else P_[:, 0].min() - 40, P_[:, 1].mean(), lab, ha="left" if dx < 0 else "right", va="center",
@@ -68,30 +68,41 @@ def main():
     da_stubs = [seg(e) for n in dom["DA"] for e in G.edges(n) if e not in keep and e[::-1] not in keep]
     def draw_da(ax):                                               # dorsal-aorta skeleton (excluded stubs) + termini, in arterial red
         ax.add_collection(LineCollection(da_stubs, colors=ART, linewidths=1.0, alpha=0.95, zorder=4))
-        for n, lab, dx in zip(dom["DA"], ("A$_{\mathrm{true},1}$", "A$_{\mathrm{true},2}$"), (-1, 1)):
+        for n, lab, dx in zip(dom["DA"], (r"A$_{\mathrm{DA},1}$", r"A$_{\mathrm{DA},2}$"), (-1, 1)):
             p_ = xy(n); ax.scatter(*p_, s=40, color=ART, edgecolor="white", linewidth=0.6, zorder=6)
             ax.text(p_[0] + dx * 22, p_[1] + 10, lab, ha="right" if dx < 0 else "left", va="center", fontsize=9, fontweight="bold",
                     color=ART, path_effects=HALO, zorder=6)
     fig = plt.figure(figsize=(5.2, 4.3))                       # a full height left; b, c stacked right
     gs = fig.add_gridspec(2, 2, width_ratios=[1.15, 1.0], hspace=0.14, wspace=0.05, left=0.01, right=0.99, top=0.93, bottom=0.01)
-    axA = fig.add_subplot(gs[:, 0]); sch = _paths.FIGURES / "fig5" / "anatomy.png"     # Alex's drawing (figures/fig5/anatomy.svg)
-    if sch.exists():
+    axA = fig.add_subplot(gs[:, 0]); sch = _paths.STAGE / "assets" / "fig5_anatomy.png"     # drawing (assets/fig5_anatomy.svg), an input
+    if not sch.exists():
+        raise FileNotFoundError(f"{sch} missing: the drawing is an input (data release <stage>/assets/)")
+    if True:
         axA.imshow(plt.imread(str(sch)), interpolation="antialiased")
         # anatomical labels on the cartoon (pixel coordinates of anatomy.png, 2412 × 3015)
-        k_ = 1.5075; lab_kw = dict(fontsize=8, color=INK, ha="center", va="center", arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"))
-        axA.annotate("Heart", (840 * k_, 230 * k_), xytext=(1300 * k_, 230 * k_), **lab_kw)
-        axA.annotate("Left vitelline\nvein", (380 * k_, 690 * k_), xytext=(240 * k_, 470 * k_), **lab_kw)      # image left = embryo left
-        axA.annotate("Right vitelline\nvein", (1250 * k_, 690 * k_), xytext=(1400 * k_, 470 * k_), **lab_kw)   # (heart loops to image right)
-        axA.annotate("Dorsal\naortae", (700 * k_, 900 * k_), xytext=(320 * k_, 950 * k_), **lab_kw)
-        axA.annotate("", (890 * k_, 900 * k_), xytext=(420 * k_, 940 * k_), arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"))
-        axA.annotate("Developing\nvitelline arteries", (560 * k_, 1700 * k_), xytext=(800 * k_, 2080 * k_), **lab_kw)
-        axA.annotate("", (1090 * k_, 1700 * k_), xytext=(860 * k_, 2040 * k_), arrowprops=dict(arrowstyle="-", lw=0.6, color="0.3"))
+        # label coordinates were laid out on the old raster (stretched to 2412 × 3015); the current raster keeps the drawing's
+        # true aspect (2412 × H), so y is rescaled by H/3015
+        k_ = 1.5075; ky_ = plt.imread(str(sch)).shape[0] / 3015
+        P_ = lambda x, y: (x * k_, y * k_ * ky_)
+        lab_kw = dict(fontsize=8, color=INK, ha="center", va="center", arrowprops=dict(arrowstyle="-", lw=0.5, color="0.5"))
+        axA.annotate("Heart", P_(840, 230), xytext=P_(1300, 230), **lab_kw)
+        axA.annotate("Left vitelline\nvein", P_(380, 690), xytext=P_(240, 470), **lab_kw)      # image left = embryo left
+        axA.annotate("Right vitelline\nvein", P_(1250, 690), xytext=P_(1400, 470), **lab_kw)   # (heart loops to image right)
+        axA.annotate("Dorsal\naortae", P_(700, 900), xytext=P_(320, 950), **lab_kw)
+        axA.annotate("", P_(890, 900), xytext=P_(420, 940), arrowprops=dict(arrowstyle="-", lw=0.5, color="0.5"))
+        axA.annotate("Developing\nvitelline arteries", P_(560, 1700), xytext=P_(800, 2080), **lab_kw)
+        axA.annotate("", P_(1090, 1700), xytext=P_(860, 2040), arrowprops=dict(arrowstyle="-", lw=0.5, color="0.5"))
     axA.axis("off")
     half_a = 0.62 * max(np.ptp(Pa[:, 0]), np.ptp(Pa[:, 1])); ca = Pa.mean(0)
     Pda = np.array([xy(n) for n in dom["DA"]])                       # dorsal-aorta stub ends sit just below the veins
     cv = np.array([Pv[:, 0].mean(), (Pv[:, 1].min() + Pda[:, 1].max()) / 2 + 40]); half_v = 0.62 * (Pda[:, 1].max() + 120 - Pv[:, 1].min())
     axB = fig.add_subplot(gs[1, 1]); crop(axB, ca, half_a, True, False, 200, show_exc=False); axB.set_title("Effective arterial boundaries", fontsize=9, pad=3)
-    axC = fig.add_subplot(gs[0, 1]); crop(axC, cv, half_v, False, True, 100, show_exc=False); draw_da(axC); axC.set_title("True boundaries", fontsize=9, pad=3)
+    axC = fig.add_subplot(gs[0, 1]); crop(axC, cv, half_v, False, True, 100, show_exc=False); draw_da(axC); axC.set_title("Anatomical boundaries", fontsize=9, pad=3)
+    yb = axC.get_position().y1 + 0.015
+    fig.text(0.01, yb, "a", fontsize=12, fontweight="bold", ha="left", va="bottom")                         # level with b
+    fig.text(0.5 * (axA.get_position().x0 + axA.get_position().x1), yb + 0.003, "Computational domain", fontsize=9, ha="center", va="bottom")
+    for ax_, l_ in ((axC, "b"), (axB, "c")):
+        ax_.text(-0.02, 1.015, l_, transform=ax_.transAxes, fontsize=12, fontweight="bold", ha="right", va="bottom")
     plos_style.save(fig, _paths.FIGURES / "fig5" / "fig5")
 
 

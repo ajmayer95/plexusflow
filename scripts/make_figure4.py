@@ -22,6 +22,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch
+import matplotlib.patheffects as pe
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src")); sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plexusflow.paths as _paths
@@ -73,9 +74,12 @@ def tile_panel(ax, G, cfg, geom, R):
         rc = graph_to_tile_batch(p, geom, t) / ds; pts.append(rc); ax.plot(rc[:, 1], rc[:, 0], color=PATHCOL, lw=2.2, zorder=3)
     if pts:
         allp = np.vstack(pts)
-        for f in (0.3, 0.55, 0.8):                                     # two direction arrowheads along the path
-            i = int(f * (len(allp) - 1)); a_, b_ = allp[max(i - 2, 0)], allp[min(i + 2, len(allp) - 1)]
-            ax.add_patch(FancyArrowPatch(a_[::-1], b_[::-1], arrowstyle="-|>", mutation_scale=11, color=INK, lw=0.8, zorder=4))
+        cum = np.r_[0, np.cumsum(np.hypot(*np.diff(allp, axis=0).T))]; w = 0.08 * cum[-1]       # tangent over ±8 % of the path
+        for f in ((0.5,) if cum[-1] < 150 else (0.3, 0.7)):                                      # direction arrowheads along the path
+            i = int(np.searchsorted(cum, f * cum[-1])); i0, i1 = np.searchsorted(cum, cum[i] - w), min(np.searchsorted(cum, cum[i] + w), len(allp) - 1)
+            d_ = allp[i1] - allp[i0]; d_ = d_ / np.linalg.norm(d_); a_, b_ = allp[i] - 16 * d_, allp[i] + 16 * d_
+            ax.add_patch(FancyArrowPatch(a_[::-1], b_[::-1], arrowstyle="-|>", mutation_scale=11, color=INK, lw=1.4, zorder=4, shrinkA=0, shrinkB=0,
+                                          path_effects=[pe.withStroke(linewidth=2.4, foreground="white")]))
     for e, col, nm in ((R["A"], COL_A, "A"), (R["B"], COL_B, "B")):
         rc = graph_to_tile_batch(np.asarray(G.edges[e]["path"], float), geom, t) / ds
         ax.plot(rc[:, 1], rc[:, 0], color="white", lw=3.4, zorder=5); ax.plot(rc[:, 1], rc[:, 0], color=col, lw=2.0, zorder=6)
@@ -87,7 +91,7 @@ def tile_panel(ax, G, cfg, geom, R):
     ax.text(0.95 * W, 0.08 * H, "200 µm", color="white", ha="right", va="bottom", fontsize=8)
     ax.set_xlim(0, W); ax.set_ylim(H, 0); ax.set_xticks([]); ax.set_yticks([])
     for s in ax.spines.values():
-        s.set_color(R["col"]); s.set_linewidth(1.5)
+        s.set_color("0.35"); s.set_linewidth(0.6)
 
 
 def locator(ax, geom):
@@ -107,7 +111,7 @@ def locator(ax, geom):
 def main():
     plos_style.apply()
     P = _paths.STAGE; G = _paths.load_graph(); tf0 = G.graph["tile_f0_piv"]; cfg = StageConfig.load(P)
-    shapes = {i: tile_video_shape(cfg, i) for i in cfg.discover_raw_tile_ids()}
+    shapes = {i: tile_video_shape(cfg, i) for i in (cfg.discover_raw_tile_ids() or sorted(G.graph['tile_f0_piv']))}
     geom = load_tile_geometry(cfg, video_shapes={k: v for k, v in shapes.items() if v is not None})
 
     fig = plt.figure(figsize=(5.2, 4.6))                     # text-column width; no organ locator
