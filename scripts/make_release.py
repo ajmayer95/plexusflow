@@ -131,6 +131,7 @@ def prime_viewer_cache(graph_path):
     v = object.__new__(ReadOnlyMosaicViewer)
     v.G = pickle.loads(Path(graph_path).read_bytes()); v.graph_path = Path(graph_path)
     v.cache_harmonic_class = True; v.force_recompute_harmonic_class = False
+    v.workbench = True                      # write the cache into this release copy of the graph (its only writer)
     v._precompute_harmonic_classes()
 
 
