@@ -5,7 +5,7 @@ The representative vessel (edge 75489–75638) in its own tile (36), the tile of
      sample points), the centreline from the mapped graph and every 5th cross-section
   b  axial-speed profiles across five cross-sections and their Poiseuille fits v(ρ) = v_CL (1 − ρ²/R_s²)
   c  per-cross-section mean flux Q̄_s = (π/2) R_s² v_CL,s along the vessel (radius R_s on the right axis); the vessel's mean
-     flow is their median (Kloosterman et al. 2014)
+     flow is the mean of the sections within 0.5–1.5× their median (Kloosterman et al. 2014)
   d  Q(t) over the recording (250 fps) and its harmonic model Q̂(t) = Q̄ + Σ_k Re(H_k e^{2πik f0 t}), k = 1..3
   e  every beat folded on the cardiac phase (grey) against the model, and the model's fundamental / 2nd / 3rd harmonic
 
@@ -118,7 +118,7 @@ def main():
     # c: per-section mean flux + radius
     axC = fig.add_subplot(gT[2])
     axC.plot(arc[valid], Qs[valid], "o-", ms=2.0, lw=0.6, color=INK, zorder=3, label="Cross-sections")
-    axC.axhline(Qbar, color=VCOL, lw=1.0, ls="--", zorder=2, label=f"Median {Qbar:.2f} nL/s")
+    axC.axhline(Qbar, color=VCOL, lw=1.0, ls="--", zorder=2, label=f"Vessel mean {Qbar:.2f} nL/s")
     axC.set_ylim(0, np.nanmax(Qs[valid]) * 1.3); axC.set_xlabel("Distance along vessel (µm)", labelpad=1)
     axC.set_ylabel("Mean flux (nL/s)", labelpad=1); axC.spines[["top", "right"]].set_visible(False)
     axC.legend(loc="lower center", frameon=False, borderaxespad=0.2, handlelength=1.5, labelspacing=0.2)
