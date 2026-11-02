@@ -46,6 +46,7 @@ def version() -> None:
 def info(stage_root: Path = typer.Argument(...,
                         help="Stage folder (e.g. PlexusFlow21S/)")) -> None:
     """Show resolved paths + which artifacts exist for this stage."""
+    stage_root = _require_stage(stage_root)
     cfg = StageConfig.load(stage_root)
     typer.echo(cfg.summary())
     n_raw = len(cfg.discover_raw_tile_ids())
@@ -53,6 +54,38 @@ def info(stage_root: Path = typer.Argument(...,
     n_max = len(cfg.discover_tile_ids('maxmed'))    if cfg.tiles_maxmed_dir.exists() else 0
     n_prb = len(cfg.discover_tile_ids('probs'))     if cfg.tiles_probs_dir.exists() else 0
     typer.echo(f"  tile counts: raw={n_raw}, std_clahe={n_std}, maxmed={n_max}, probs={n_prb}")
+    typer.echo("  analysis:")
+    for line in _analysis_summary(Path(cfg.root)):
+        typer.echo(line)
+
+
+def _require_stage(stage_root: Path) -> Path:
+    """Exit with a one-line message (no traceback) unless stage_root is an existing folder."""
+    p = Path(stage_root).expanduser()
+    if not p.is_dir():
+        typer.echo(f"error: {p} is not a folder. Pass a stage folder or an extracted data release.", err=True)
+        raise typer.Exit(1)
+    return p
+
+
+def _analysis_summary(root: Path) -> list[str]:
+    """Measured graph, derived results and (for a data release) its manifest."""
+    import json
+    out = []
+    mf = root / "MANIFEST.json"
+    if mf.exists():
+        m = json.loads(mf.read_text())
+        out.append(f"  data release: {m.get('name', root.name)}, schema {m.get('schema_version', '?')}, "
+                   f"code {str(m.get('code_commit', '?'))[:10]} (read-only)")
+    g = root / "graph" / "graph_vessels_piv.gpickle"
+    out.append(f"    {'✓' if g.exists() else ' '} measured graph   {g}")
+    res = root / "results"
+    for f in ("reliability_model_v1.json", "dc_reconciled_v2.pkl", "ac_field_v7.pkl", "ac_estimate_v8.json"):
+        out.append(f"    {'✓' if (res / f).exists() else ' '} results/{f}")
+    vr = root / "videos_realtime"
+    n_v = len(list(vr.glob("*.tif"))) if vr.is_dir() else 0
+    out.append(f"  realtime videos: {n_v}  (viewer playback, Figs 1 and 4)")
+    return out
 
 
 @app.command()
@@ -274,10 +307,10 @@ def condense(stage_root: Path = typer.Argument(...),
               out: Path = typer.Option(None,
                     help='Output .gpickle (default: graph/graph_vessels.gpickle)')
               ) -> None:
-    """Contract every degree-2 chain in the edited graph into one vessel
-    edge (with concatenated centerline `path`).  Preserves nodes flagged
-    `true_tip=True` or with `boundary_type` set as chain endpoints.
-    Writes to graph/graph_vessels.gpickle by default."""
+    """Merge each chain of degree-2 nodes into one vessel edge.
+
+    The merged edge keeps the concatenated centreline `path`.  Nodes flagged `true_tip=True` or with
+    `boundary_type` set stay as chain endpoints.  Writes graph/graph_vessels.gpickle by default."""
     from .analyze import condense_stage
     cfg = StageConfig.load(stage_root)
     condense_stage(cfg, src_path=src, out_path=out)
@@ -475,8 +508,13 @@ def _launch_viewer(stage_root: Path, field: str, mode: str) -> None:
     """Resolve graph + fuse image + tile positions + per-tile videos from the stage folder's StageConfig and open
     the mosaic viewer in the given capability mode ('view' or 'workbench')."""
     from .viewer import ReadOnlyMosaicViewer
+    stage_root = _require_stage(stage_root)
     cfg = StageConfig.load(stage_root)
     graph_path = cfg.graph_piv_path if cfg.graph_piv_path.exists() else cfg.graph_vessels_path
+    if not graph_path.exists():
+        typer.echo(f"error: no vessel graph in {stage_root} (looked for {cfg.graph_piv_path.name} and "
+                   f"{cfg.graph_vessels_path.name} in graph/). Run `plexusflow info {stage_root}` to see what is there.", err=True)
+        raise typer.Exit(1)
     tiff_path = None
     # Prefer the exterior-zeroed organ fusion (plexus + embryo space, background
     # masked out) when present — cleaner background than the raw feathered fusion.
