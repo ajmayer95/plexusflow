@@ -6,8 +6,9 @@ Two tiles; in each, two vessels A and B recorded in the same movie (one clock), 
 Top: the tile (max − median motion projection) with A, B and the flow-directed path between them.
 Bottom: one cardiac cycle of each vessel from its 3-harmonic fit, (Q(φ) − Q̄)/Q̄, in its own mean-flow direction
 (no cross-tile synchronisation or model involved), with the fundamental's phase difference Δφ1 = arg H1,B − arg H1,A; beside
-it the normalised amplitudes Π_n = |H_n|/|Q̄| of A and B for n = 1, 2 (± standard error across beats).  H3 is fitted but not
-shown: downstream on the arterial path it is not resolved (1.3× the local off-harmonic noise, incoherent across beats).
+it the normalised amplitudes Π_n = |H_n|/|Q̄| of A and B for n = 1–3 (± standard error across beats; open marker = within 3× the
+vessel's off-harmonic noise floor).  Both example paths were chosen so that H3 is resolved at A and B (≥ 3× local
+off-harmonic noise, Θ31 = φ3 − 3φ1 coherent across beats).
 
 Ported from PerTileFlow/scripts/make_figure5_two_regions.py (old Fig 5); harmonic bars dropped.
 Writes figures/fig4/fig4.{png,pdf,tif}.
@@ -32,7 +33,7 @@ from plexusflow.analyze.geometry import load_tile_geometry, tile_video_shape, gr
 from plexusflow.reconcile.harmonics import phasors, FS
 import plos_style
 
-REGIONS = [dict(tile=27, A=(58635, 58696), B=(59043, 59075), title="Arterial-side path", short="arterial side", col="#00838f"),
+REGIONS = [dict(tile=27, A=(72113, 72119), B=(75201, 75266), title="Arterial-side path", short="arterial side", col="#00838f"),
            dict(tile=13, A=(57078, 57118), B=(53492, 53651), title="Venous-return path", short="venous return", col="#7b3f99")]
 COL_A, COL_B, PATHCOL, INK = "#2166ac", "#d73027", "#f0ad00", "#1a1a1a"
 PX_UM = 1.7
@@ -182,8 +183,7 @@ def main():
         if j == 0:
             axW.legend(loc="upper right", frameon=False, borderaxespad=0.1, handlelength=1.4)
         # normalised harmonic amplitudes A → B with per-beat standard errors
-        # H1 and H2 only: H3 is fitted (waveforms above) but downstream on the arterial path it sits near the noise floor
-        NS = 2; n_ = np.arange(1, NS + 1); (pa, sa, na), (pb, sb, nb) = pis["A"], pis["B"]
+        NS = 3; n_ = np.arange(1, NS + 1); (pa, sa, na), (pb, sb, nb) = pis["A"], pis["B"]
         pa, sa, pb, sb = pa[:NS], sa[:NS], pb[:NS], sb[:NS]
         fl = (pis["A_floor"], pis["B_floor"])
         for k in range(NS):
@@ -195,7 +195,7 @@ def main():
         for k in range(NS):
             axP.text(n_[k], max(pa[k] + sa[k], pb[k] + sb[k]) * 1.45, f"{100 * (pb[k] / pa[k] - 1):+.0f}%", ha="center", va="bottom", fontsize=8,
                      color=COL_B, path_effects=[pe.withStroke(linewidth=2, foreground="white")])
-        axP.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter()); axP.set_yscale("log"); axP.set_ylim(0.03, 1.5); axP.set_xlim(0.45, 2.55); axP.set_xticks(n_)
+        axP.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter()); axP.set_yscale("log"); axP.set_ylim(0.015, 1.5); axP.set_xlim(0.3, 3.55); axP.set_xticks(n_)
         axP.set_xlabel("Harmonic $n$", labelpad=1); axP.set_ylabel(r"$\Pi^{(n)} = |\hat Q^{(n)}|\,/\,\bar Q$", labelpad=1)
         axP.spines[["top", "right"]].set_visible(False)
         print(f"[fig4] tile {t}: Π_A {np.round(pa, 3)} ± {np.round(sa, 3)} ({na} beats); Π_B {np.round(pb, 3)} ± {np.round(sb, 3)} ({nb} beats); "
