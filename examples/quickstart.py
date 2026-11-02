@@ -1,6 +1,6 @@
 """Quickstart: from a frozen release to a reconciled flow field and two plots.
 
-    export PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S_release_v1      # the downloaded release (read-only)
+    export PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S_release         # the downloaded release (read-only)
     export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results          # your own output folders
     export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
     python examples/quickstart.py

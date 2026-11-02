@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Reproduce every derived result and all main-text figures of the paper from a data release.
+#
+#   export PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S_release      # the extracted data release (read-only is fine)
+#   export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results      # where derived results go (default <stage>/results)
+#   export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures      # where figures go (default <stage>/figures)
+#   bash scripts/reproduce_paper.sh            # results + figures   (~5 min on a laptop)
+#   bash scripts/reproduce_paper.sh --figures  # figures only, from existing results
+#
+# Steps: DC reconciliation → aligned pulsatile (AC) field → distensibility fit → Figs 1–10 → figures/latest/.
+# Point RESULTS and FIGURES at your own folders so a frozen release is never modified.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+: "${PLEXUSFLOW_STAGE:?set PLEXUSFLOW_STAGE to the extracted data release (see README)}"
+PY=${PYTHON:-python3}
+run() { echo; echo "=== $* ==="; "$PY" "$@"; }
+
+if [[ "${1:-}" != "--figures" ]]; then
+  mkdir -p "${PLEXUSFLOW_RESULTS:-$PLEXUSFLOW_STAGE/results}"
+  run scripts/dc_reconcile.py          # reliability model + reconciled mean flows   → reliability_model_v1.json, dc_reconciled_v2.pkl
+  run scripts/ac_field.py              # tile-synchronised harmonic field (paper preset) → ac_field_v7.pkl
+  run scripts/mech/ac_estimate.py      # profiled distensibility fit                 → ac_estimate_v8.json
+fi
+
+for f in 1 2 3 4 5 6 7dc 7 10; do      # make_figure7dc.py = Fig 7; make_figure7.py = Figs 8 and 9
+  run "scripts/make_figure$f.py"
+done
+run scripts/collect_figures.py         # copies Fig1–Fig10 to <figures>/latest/

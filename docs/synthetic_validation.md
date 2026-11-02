@@ -125,5 +125,5 @@ python scripts/benchmark/junctions.py     --bundle PlexusFlow21S_benchmark_v1   
 
 `scripts/benchmark/make_bundle.py` builds the bundle from a stage folder and its raw videos (`--rebuild` also re-picks the
 junctions and re-meshes / re-solves the geometry with gmsh + scikit-fem).  The PIV comparison and the lumen-width,
-depth-of-correlation and tracer-density calibrations remain exploratory scripts (`sandbox/`: `piv_benchmark.py`,
-`lumen_width_calib.py`, `lumen_zc_fit.py`, `tracer_density.py`, `depth_vs_width.py`, `conservation_gamma.py`).
+depth-of-correlation and tracer-density calibrations were exploratory analyses and are not part of this repository
+(available from the author on request).
