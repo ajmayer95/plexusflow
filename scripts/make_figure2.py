@@ -3,8 +3,9 @@
   a  one crop through the pipeline: projection → ilastik vessel probability → curated mask → vectorized graph
      (net3; edges coloured by radius); the crop is boxed in b
   b  the whole-organ vessel graph, coloured by radius
-  c  the graph mapped back into one tile's own recorded frame (tile 36, its max − median projection): every edge path
-     transformed by the inverse of the tile's registration affine
+  c  the same graph mapped back into one tile's own recorded frame (tile 36, its unaltered projection): every edge path
+     transformed by the inverse T⁻¹ of the tile's registration affine; the recording itself is not resampled.  Three
+     numbered junctions mark the same places in b and c
 
 Inputs: fuse/maxmed.tif, fuse/probs_logit.tif, mask/mask.tif, the canonical graph, tiles/maxmed, stitch geometry.
 Writes figures/fig2/fig2.{png,pdf,tif}.
@@ -179,7 +180,6 @@ def main():
         ax.set_title(ttl, fontsize=8, pad=2)
         if k < 3:
             ax.annotate("", xy=(1.06, 0.5), xytext=(1.0, 0.5), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.7, color=INK, mutation_scale=6))
-    letter(top[0], "a", -0.12)
     fig.canvas.draw(); pG = top[3].get_position()                      # compact radius colorbar right of the whole-organ graph
     cax = fig.add_axes([pG.x1 + 0.012, pG.y0 + 0.12 * pG.height, 0.014, 0.76 * pG.height])
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax, ticks=[10, 20, 30, 40])
@@ -187,25 +187,50 @@ def main():
     scalebar(top[0], 1000, PX_UM, x_frac=0.22, y_frac=1.0, color=INK, halo=False)
 
     # bottom row: b graph close-up (radius bars) · c mosaic space around the tile · A⁻¹ · d the tile's own frame
-    gB = gs[1, :].subgridspec(1, 4, width_ratios=[0.0001, 1.2, 0.2, 1.1], wspace=0.05)
+    gB = gs[1, :].subgridspec(1, 4, width_ratios=[0.0001, 1.15, 0.3, 1.05], wspace=0.05)
 
-    # c: mosaic space — fused image + graph around tile 36, its footprint as placed (rotated, scaled)
+    # landmarks shown in both b and c: three well-separated junctions (degree ≥ 3) inside the tile, with the widest incident
+    # vessels (easy to recognise); mosaic position (x, H − y) and their position in the tile's own frame
+    LINE = "#00b8e6"
+    cand = []
+    for n_, d_ in G.nodes(data=True):
+        if G.degree(n_) < 3 or "x" not in d_:
+            continue
+        rc_ = graph_to_tile_batch(np.array([[d_["x"], d_["y"]]], float), geom, args.tile)[0]
+        if 0.15 * Ht < rc_[0] < 0.85 * Ht and 0.15 * Wt < rc_[1] < 0.85 * Wt:
+            w_ = max(float(G.edges[e_].get("radius") or 0) for e_ in G.edges(n_))
+            cand.append((w_, (d_["x"], Hm - d_["y"]), rc_))
+    cand.sort(key=lambda c_: -c_[0]); marks = []
+    for w_, xy_, rc_ in cand:
+        if all(np.hypot(*(np.subtract(rc_, m_[2]))) > 0.35 * min(Ht, Wt) for m_ in marks):
+            marks.append((w_, xy_, rc_))
+        if len(marks) == 3:
+            break
+    def landmarks(ax_, pts_):
+        for k_, (x_, y_) in enumerate(pts_):
+            ax_.plot(x_, y_, "o", ms=8.5, mfc="white", mec=INK, mew=0.9, zorder=8)
+            ax_.text(x_, y_, str(k_ + 1), ha="center", va="center", fontsize=7, fontweight="bold", color=INK, zorder=9)
+    print("[fig2] landmarks (mosaic col, row): " + ", ".join(f"({m_[1][0]:.0f}, {m_[1][1]:.0f})" for m_ in marks))
+
+    # b: mosaic space — fused image + graph around the tile, its footprint as placed
     axm = fig.add_subplot(gB[1]); m_ = 0.18 * max(Ht, Wt) / ds
     X0, X1, Y0, Y1 = tcx[:4].min() - m_, tcx[:4].max() + m_, tcy[:4].min() - m_, tcy[:4].max() + m_
     r0, r1, c0, c1 = int(max(Y0, 0)), int(min(Y1, Hm)), int(max(X0, 0)), int(min(X1, Wm))
     reg = mm[r0:r1, c0:c1]
     axm.imshow(reg, cmap="gray", vmin=np.percentile(reg, 1), vmax=np.percentile(reg, 99.5), extent=(c0, c1, r1, r0), interpolation="antialiased")
     near = [k for k, s_ in enumerate(segs) if ((s_[:, 0] > c0) & (s_[:, 0] < c1) & (s_[:, 1] > r0) & (s_[:, 1] < r1)).any()]
-    axm.add_collection(LineCollection([segs[k] for k in near], colors=rcol(rad_um[near]), linewidths=lw_of(rad_um[near]) * 0.8, alpha=0.85))
+    axm.add_collection(LineCollection([segs[k] for k in near], colors=LINE, linewidths=0.4, alpha=0.9))     # same graph, same colour as c
     axm.plot(tcx, tcy, color="#ffd23f", lw=1.2, zorder=6)
     axm.plot(tcx[0], tcy[0], "o", ms=4, color="#ffd23f", zorder=7)                         # tile origin corner, to read the rotation
     axm.set_xlim(c0, c1); axm.set_ylim(r1, r0); axm.set_aspect("equal"); frame(axm, False)
-    axm.set_title("Mosaic coordinates", fontsize=8, pad=2); letter(axm, "b"); scalebar(axm, 200, PX_UM)
+    landmarks(axm, [m_[1] for m_ in marks])
+    axm.set_title("Mosaic coordinates (X, Y)", fontsize=8, pad=2); scalebar(axm, 200, PX_UM)
 
     # arrow: the inverse of the tile's registration
     axa = fig.add_subplot(gB[2]); axa.axis("off"); axa.set_xlim(0, 1); axa.set_ylim(0, 1)
-    axa.annotate("", xy=(0.95, 0.5), xytext=(0.05, 0.5), arrowprops=dict(arrowstyle="-|>", lw=1.0, color=INK, mutation_scale=10))
-    axa.text(0.5, 0.56, f"$A_{{{args.tile}}}^{{-1}}$", ha="center", va="bottom", fontsize=9)
+    axa.annotate("", xy=(0.97, 0.5), xytext=(0.03, 0.5), arrowprops=dict(arrowstyle="-|>", lw=1.4, color=INK, mutation_scale=12))
+    axa.text(0.5, 0.56, f"$T_{{{args.tile}}}^{{-1}}$", ha="center", va="bottom", fontsize=9)
+    axa.text(0.5, 0.44, "inverse\nregistration", ha="center", va="top", fontsize=8, linespacing=1.0, color="0.25")
 
     # d: the tile's own frame (its recorded movie's projection) with the graph mapped in
     axC = fig.add_subplot(gB[3])
@@ -222,12 +247,20 @@ def main():
     mt = warp_mask_to_tile(mask, geom, args.tile)                      # the tile-level vessel mask used for flow
     ov = np.zeros((Ht, Wt, 4)); ov[mt] = (0.0, 0.78, 1.0, 0.2)
     axC.imshow(ov, interpolation="nearest", zorder=3)
-    axC.add_collection(LineCollection(loc, colors="#00b8e6", linewidths=0.35, alpha=0.9, zorder=4))
+    axC.add_collection(LineCollection(loc, colors=LINE, linewidths=0.4, alpha=0.9, zorder=4))
+    landmarks(axC, [(m_[2][1], m_[2][0]) for m_ in marks])
     axC.plot([0, Wt, Wt, 0, 0], [0, 0, Ht, Ht, 0], color="#ffd23f", lw=0.9, zorder=6, clip_on=False)
     axC.plot(0, 0, "o", ms=4, color="#ffd23f", zorder=7, clip_on=False)
     axC.set_xlim(0, Wt); axC.set_ylim(Ht, 0); axC.set_aspect("equal"); frame(axC, False)
-    axC.set_title(f"Original tile {args.tile}", fontsize=8, pad=2); letter(axC, "c"); scalebar(axC, 200, PX_UM)
+    axC.set_title(f"Tile {args.tile} recording (x, y)", fontsize=8, pad=2); scalebar(axC, 200, PX_UM)
     print(f"[fig2] tile {args.tile}: {len(loc)} edges mapped into its frame")
+    # panel letters on a grid: a above b in one column, b and c on one baseline (above their titles)
+    fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv_ = fig.transFigure.inverted()
+    tb = lambda ax_: inv_.transform(ax_.get_tightbbox(rr_))
+    xl = min(tb(top[0])[0, 0], tb(axm)[0, 0]) - 0.005; yb = max(tb(axm)[1, 1], tb(axC)[1, 1]) + 0.004
+    fig.text(xl, min(tb(top[0])[1, 1] + 0.004, 0.99), "a", fontsize=12, fontweight="bold", va="bottom", ha="left")
+    fig.text(xl, yb, "b", fontsize=12, fontweight="bold", va="bottom", ha="left")
+    fig.text(tb(axC)[0, 0] - 0.005, yb, "c", fontsize=12, fontweight="bold", va="bottom", ha="left")
     plos_style.save(fig, _paths.FIGURES / "fig2" / args.out_name)
 
 
