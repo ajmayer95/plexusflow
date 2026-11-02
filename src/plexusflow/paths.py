@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-__all__ = ["STAGE", "RESULTS", "GRAPH", "FIGURES", "MOSAIC", "load_graph", "attach_external_traces", "StageNotSetError"]
+__all__ = ["load_graph", "attach_external_traces", "StageNotSetError"]   # STAGE, RESULTS, GRAPH, FIGURES, MOSAIC: lazy (__getattr__)
 
 
 class StageNotSetError(RuntimeError):
