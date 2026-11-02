@@ -96,7 +96,6 @@ def main():
     x0, x1 = axA.get_xlim(); y0, y1 = axA.get_ylim(); L = 20 / PX_SIZE_UM; xe = x0 + 0.95 * (x1 - x0); ya = y0 + 0.07 * (y1 - y0)
     axA.plot([xe - L, xe], [ya, ya], color="white", lw=2, solid_capstyle="butt", path_effects=HALO)
     axA.annotate("20 µm", (xe, ya), xytext=(0, 2), textcoords="offset points", ha="right", va="bottom", color="white", fontsize=8, path_effects=HALO)
-    letter(axA, "a", -0.04)
 
     # b: profiles + Poiseuille fits
     axB = fig.add_subplot(gT[1]); rho = np.asarray(res["rho"], float) * PX_SIZE_UM; prof = np.asarray(res["per_slice_profiles"], float) * UMS
@@ -113,7 +112,6 @@ def main():
     axB.set_yticks([0, step]); axB.set_yticklabels(["0", f"{step:.0f}"]); axB.spines[["top", "right"]].set_visible(False)
     axB.plot([], [], "o", ms=2.5, color=INK, label="Optical flow"); axB.plot([], [], color="#2b70b4", lw=1.0, label="Parabolic fit")
     axB.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, borderaxespad=0.2, handlelength=1.2, columnspacing=0.8)
-    letter(axB, "b", -0.3)
 
     # c: per-section mean flux + radius
     axC = fig.add_subplot(gT[2])
@@ -122,7 +120,6 @@ def main():
     axC.set_ylim(0, np.nanmax(Qs[valid]) * 1.3); axC.set_xlabel("Distance along vessel (µm)", labelpad=1)
     axC.set_ylabel("Mean flux (nL/s)", labelpad=1); axC.spines[["top", "right"]].set_visible(False)
     axC.legend(loc="lower center", frameon=False, borderaxespad=0.2, handlelength=1.5, labelspacing=0.2)
-    letter(axC, "c", -0.3)
 
     # d: Q(t) + harmonic model
     axD = fig.add_subplot(gB[0])
@@ -132,7 +129,6 @@ def main():
     axD.set_xlim(0, t[-1]); axD.set_xlabel("Time (s)", labelpad=1); axD.set_ylabel("Flux (nL/s)", labelpad=1)
     axD.spines[["top", "right"]].set_visible(False)
     axD.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, borderaxespad=0.2, handlelength=1.5)
-    letter(axD, "d", -0.1)
     # inset: the per-frame fit — one parabola of FIXED (segmented) radius whose amplitude v_CL(t) follows the waveform.
     # Reconstructed from stored quantities only: v_CL(t)/<v_CL> = Q(t)/Q̄ (no raw points shown).
     R_seg = float(G.edges[EDGE].get("radius") or np.nan) * PX_SIZE_UM
@@ -165,7 +161,6 @@ def main():
     pp = np.linspace(0, 1, 300); axE.plot(pp, model(pp / f0), color=MODEL, lw=1.3)
     axE.set_xlim(0, 1); axE.tick_params(labelbottom=False); axE.set_ylabel("Flux (nL/s)", labelpad=1); axE.spines[["top", "right"]].set_visible(False)
     axE.text(0.3, 0.97, f"mean ± s.d., {nb} beats", transform=axE.transAxes, ha="left", va="top", fontsize=8, color="0.25")
-    letter(axE, "e", -0.3, 1.05)
     axK = fig.add_subplot(gE[1], sharex=axE)
     for k, nm in zip((1, 2, 3), ("Fundamental", "2nd", "3rd")):
         axK.plot(pp, model(pp / f0, (k,)), color=HCOL[k - 1], lw=1.0, label=nm)
@@ -173,6 +168,15 @@ def main():
     axK.spines[["top", "right"]].set_visible(False)
     axK.legend(loc="lower center", bbox_to_anchor=(0.5, 0.97), ncol=3, frameon=False, borderaxespad=0.1, handlelength=1.0, columnspacing=0.6)
     axK.set_xticks([0, 0.5, 1])
+    # panel letters on a grid: a/b/c share the top row's y, d/e the bottom row's; a and d share x; each sits just left of
+    # its panel's y-axis label (the outer edge of the axes' tight bounding box)
+    fig.canvas.draw(); rr = fig.canvas.get_renderer(); inv = fig.transFigure.inverted()
+    edge = lambda ax_: inv.transform(ax_.get_tightbbox(rr))           # [[x0, y0], [x1, y1]] in figure fraction
+    tops = {k: max(edge(ax_)[1, 1] for ax_ in row) for k, row in (("top", (axA, axB, axC)), ("bot", (axD, axE)))}
+    x_left = min(edge(axA)[0, 0], edge(axD)[0, 0]) - 0.005
+    for ax_, l_, row in ((axA, "a", "top"), (axB, "b", "top"), (axC, "c", "top"), (axD, "d", "bot"), (axE, "e", "bot")):
+        x_ = x_left if l_ in "ad" else edge(ax_)[0, 0] - 0.005
+        fig.text(x_, min(tops[row] + 0.004, 0.993), l_, fontsize=12, fontweight="bold", va="top" if tops[row] + 0.004 > 0.95 else "bottom", ha="left")
     plos_style.save(fig, _paths.FIGURES / "fig3" / "fig3")
 
 
