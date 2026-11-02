@@ -9,9 +9,9 @@ import pytest
 def test_viewer_imports_without_napari_and_keeps_its_methods():
     from plexusflow.viewer.app import ReadOnlyMosaicViewer
     from plexusflow.viewer.simulate import SimulateMixin
-    from plexusflow.viewer.inference import InferenceMixin
-    assert issubclass(ReadOnlyMosaicViewer, SimulateMixin) and issubclass(ReadOnlyMosaicViewer, InferenceMixin)
-    for m in ("_setup_panel", "_refresh_edges", "_run_simulation", "_inference_run", "_on_run_optical_flow_clicked",
+    from plexusflow.viewer.edit import EditMixin
+    assert issubclass(ReadOnlyMosaicViewer, SimulateMixin) and issubclass(ReadOnlyMosaicViewer, EditMixin)
+    for m in ("_setup_panel", "_refresh_edges", "_run_simulation", "_on_run_optical_flow_clicked",
               "_plot_selected_qt", "_save_graph_edits", "run"):
         assert callable(getattr(ReadOnlyMosaicViewer, m)), m
 

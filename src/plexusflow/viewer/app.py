@@ -76,13 +76,12 @@ from ._common import (  # noqa: F401 - re-exported: app.py was the single viewer
     sys,
 )
 from .simulate import SimulateMixin
-from .inference import InferenceMixin
 from .edit import EditMixin
 from .optical_flow import OpticalFlowMixin
 from .timeseries import TimeseriesMixin
 
 
-class ReadOnlyMosaicViewer(SimulateMixin, InferenceMixin, EditMixin, OpticalFlowMixin, TimeseriesMixin):
+class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, TimeseriesMixin):
     """napari-based mosaic viewer with field colouring + edge inspection.
 
     Two capability levels (``mode``):
