@@ -63,6 +63,12 @@ def beat_pi(m, f0, K=3):
     return np.abs(H) / abs(a0), per.std(0, ddof=1) / np.sqrt(len(per)), len(per)
 
 
+def noise_floor(m, f0):
+    """Median amplitude at off-harmonic frequencies (k + ½)·f0, k = 1..5, relative to |Q̄|: the trace's noise floor on the Π scale."""
+    q = np.asarray(m["Q_t"], float); t = np.arange(len(q)) / FS; a0 = q.mean()
+    return float(np.median([abs(2 * np.mean((q - a0) * np.exp(-2j * np.pi * (k + 0.5) * f0 * t))) for k in range(1, 6)]) / abs(a0))
+
+
 def tile_panel(ax, G, cfg, geom, R):
     t = R["tile"]; ds = float(cfg.videos_realtime_spatial_ds)
     v = tifffile.imread(str(next(Path(cfg.videos_realtime_dir).glob(f"*loc{t}_realtime.tif")))).astype(np.float32)
@@ -122,15 +128,15 @@ def context(ax, G, geom, paths_):
         tg = geom.tiles[R["tile"]]; Hr, Wr = tg.video_shape
         fp = np.array([[0, 0, 1], [0, Wr, 1], [Hr, Wr, 1], [Hr, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
         fp = fp[:, :2] / geom.downsample - [geom.y0, geom.x0]; fps[R["tile"]] = fp
-        ax.plot(fp[:, 1], fp[:, 0], color=R["col"], lw=1.4, zorder=4)
+        ax.plot(fp[:, 1], fp[:, 0], color=R["col"], lw=2.0, zorder=4)
         for e in paths_[R["tile"]] + [R["A"], R["B"]]:
             e = e if G.has_edge(*e) else e[::-1]; q = np.asarray(G.edges[e]["path"], float)
             col = COL_A if e in (R["A"], R["A"][::-1]) else (COL_B if e in (R["B"], R["B"][::-1]) else PATHCOL)
             ax.plot(q[:, 0], Hm - q[:, 1], color=col, lw=1.6, zorder=5, solid_capstyle="round")
-        c = fp[:4].mean(0)
-        below = R is REGIONS[0]                          # arterial label under its footprint (the venous tile sits above it)
-        ax.text(c[1], fp[:, 0].max() + 50 if below else fp[:, 0].min() - 50, R["short"], color=R["col"], fontsize=8, ha="center",
-                va="top" if below else "bottom",
+        right = R is REGIONS[0]                          # tile number beside its footprint, on the side of its enlarged panel
+        k = int(np.argmax(fp[:4, 1])) if right else int(np.argmin(fp[:4, 1]))
+        ax.text(fp[k, 1] + (25 if right else -25), fp[k, 0], f"tile {R['tile']}", color=R["col"], fontsize=8, ha="left" if right else "right",
+                va="center", fontweight="bold",
                 path_effects=[pe.withStroke(linewidth=2, foreground="white")])
     ys, xs = np.nonzero(~out); ax.set_xlim(xs.min() - 30, xs.max() + 30); ax.set_ylim(ys.max() + 30, ys.min() - 30)
     ax.set_aspect("equal"); ax.axis("off")
@@ -159,11 +165,11 @@ def main():
         fp = fps[R["tile"]]; axT = tiles_ax[R["tile"]]; left = R is REGIONS[0]
         k = int(np.argmin(fp[:4, 1])) if left else int(np.argmax(fp[:4, 1]))
         fig.add_artist(ConnectionPatch(xyA=(fp[k, 1], fp[k, 0]), coordsA=axM.transData, xyB=(1.0 if left else 0.0, 0.5),
-                                       coordsB=axT.transAxes, color=R["col"], lw=0.8, ls=(0, (3, 2))))
+                                       coordsB=axT.transAxes, color=R["col"], lw=0.6, alpha=0.45, ls=(0, (3, 2))))
     for j, R in enumerate(REGIONS):
         t = R["tile"]; f0 = float(tf0[t]); axW = fig.add_subplot(gBs[j][0]); axP = fig.add_subplot(gBs[j][1]); h, pis = {}, {}
         for e, c_, nm in ((R["A"], COL_A, "A"), (R["B"], COL_B, "B")):
-            m = meas(G, e, t); qb, H = flow_frame(m, f0); pis[nm] = beat_pi(m, f0); h[nm] = H
+            m = meas(G, e, t); qb, H = flow_frame(m, f0); pis[nm] = beat_pi(m, f0); h[nm] = H; pis[nm + "_floor"] = noise_floor(m, f0)
             w = sum((H[k - 1] * np.exp(2j * np.pi * k * ph)).real for k in (1, 2, 3)) / qb
             axW.plot(ph, w, color=c_, lw=1.4, label=f"Vessel {nm}")
         dphi = np.degrees(np.angle(h["B"][0] * np.conj(h["A"][0])))
@@ -176,18 +182,21 @@ def main():
             axW.legend(loc="upper right", frameon=False, borderaxespad=0.1, handlelength=1.4)
         # normalised harmonic amplitudes A → B with per-beat standard errors
         n_ = np.arange(1, 4); (pa, sa, na), (pb, sb, nb) = pis["A"], pis["B"]
+        fl = (pis["A_floor"], pis["B_floor"])
         for k in range(3):
             axP.plot([n_[k] - 0.12, n_[k] + 0.12], [pa[k], pb[k]], color="0.6", lw=0.8, zorder=1)
-        axP.errorbar(n_ - 0.12, pa, yerr=sa, fmt="o", ms=4, color=COL_A, capsize=1.5, lw=0.8, zorder=3)
-        axP.errorbar(n_ + 0.12, pb, yerr=sb, fmt="o", ms=4, color=COL_B, capsize=1.5, lw=0.8, zorder=3)
+        for x_, p_, s_, c_, f_ in ((n_ - 0.12, pa, sa, COL_A, fl[0]), (n_ + 0.12, pb, sb, COL_B, fl[1])):
+            axP.errorbar(x_, p_, yerr=s_, fmt="none", ecolor=c_, capsize=1.5, lw=0.8, zorder=3)
+            weak = p_ < 3 * f_                               # open marker: within 3× the vessel's own off-harmonic noise floor
+            axP.scatter(x_, p_, s=18, zorder=4, facecolors=np.where(weak, "white", c_), edgecolors=c_, linewidths=1.0)
         for k in range(3):
-            axP.text(n_[k], max(pa[k], pb[k]) * 1.35, f"{100 * (pb[k] / pa[k] - 1):+.0f}%", ha="center", va="bottom", fontsize=8,
+            axP.text(n_[k], max(pa[k] + sa[k], pb[k] + sb[k]) * 1.45, f"{100 * (pb[k] / pa[k] - 1):+.0f}%", ha="center", va="bottom", fontsize=8,
                      color=COL_B, path_effects=[pe.withStroke(linewidth=2, foreground="white")])
         axP.set_yscale("log"); axP.set_ylim(0.007, 2.0); axP.set_xlim(0.35, 3.5); axP.set_xticks(n_)
         axP.set_xlabel("Harmonic $n$", labelpad=1); axP.set_ylabel(r"$\Pi^{(n)} = |\hat Q^{(n)}|\,/\,\bar Q$", labelpad=1)
         axP.spines[["top", "right"]].set_visible(False)
         print(f"[fig4] tile {t}: Π_A {np.round(pa, 3)} ± {np.round(sa, 3)} ({na} beats); Π_B {np.round(pb, 3)} ± {np.round(sb, 3)} ({nb} beats); "
-              f"change {np.round(100 * (pb / pa - 1))}%; Δφ1 {dphi:+.0f}°")
+              f"change {np.round(100 * (pb / pa - 1))}%; Δφ1 {dphi:+.0f}°; noise floor A {fl[0]:.4f} B {fl[1]:.4f}")
         rows[j] = (axW, axP)
     # panel letters on a grid
     fig.canvas.draw(); rr = fig.canvas.get_renderer(); inv = fig.transFigure.inverted(); tb = lambda a_: inv.transform(a_.get_tightbbox(rr))
