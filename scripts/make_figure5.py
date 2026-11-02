@@ -1,4 +1,4 @@
-"""Figure 5 — effective vascular domain.  a: anatomical schematic (figures/fig5/anatomy.png, from Alex's anatomy.svg).  b: the domain on the mosaic: retained (carved) network vs excluded vessels, and the effective boundaries —
+"""Figure 5 — effective vascular domain.  a: anatomical schematic (<stage>/assets/fig5_anatomy.png, rendered from fig5_anatomy.svg).  b: the domain on the mosaic: retained (carved) network vs excluded vessels, and the effective boundaries —
 arterial cut vertices grouped as A1 (left) / A2 (right) and the vitelline-vein outlets V1 / V2.
 
 Writes figures/fig_domain/fig_domain.{png,pdf,tif}.
@@ -74,8 +74,10 @@ def main():
                     color=ART, path_effects=HALO, zorder=6)
     fig = plt.figure(figsize=(5.2, 4.3))                       # a full height left; b, c stacked right
     gs = fig.add_gridspec(2, 2, width_ratios=[1.15, 1.0], hspace=0.14, wspace=0.05, left=0.01, right=0.99, top=0.93, bottom=0.01)
-    axA = fig.add_subplot(gs[:, 0]); sch = _paths.FIGURES / "fig5" / "anatomy.png"     # Alex's drawing (figures/fig5/anatomy.svg)
-    if sch.exists():
+    axA = fig.add_subplot(gs[:, 0]); sch = _paths.STAGE / "assets" / "fig5_anatomy.png"     # drawing (assets/fig5_anatomy.svg), an input
+    if not sch.exists():
+        raise FileNotFoundError(f"{sch} missing: the drawing is an input (data release <stage>/assets/)")
+    if True:
         axA.imshow(plt.imread(str(sch)), interpolation="antialiased")
         # anatomical labels on the cartoon (pixel coordinates of anatomy.png, 2412 × 3015)
         # label coordinates were laid out on the old raster (stretched to 2412 × 3015); the current raster keeps the drawing's

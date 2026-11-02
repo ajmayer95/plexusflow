@@ -1,6 +1,6 @@
 """Figure 1 — acquisition, per-tile filtering and stitching (PLOS, 7.5 in wide).
 
-  a  imaging setup (figures/fig1/setup.png, rendered from Alex's setup.svg; BioRender elements — Created with
+  a  imaging setup (<stage>/assets/fig1_setup.png, rendered from fig1_setup.svg; BioRender elements — Created with
      BioRender.com); the yolk-sac plexus is recorded one overlapping field of view at a time
   b  one 250 fps movie per tile (stacks; tile 36 in front) → per-tile image used for registration: temporal max − median
      projection (tiles/maxmed) → background-filtered (minus a σ = 80 px Gaussian, percentile-normalised)
@@ -409,8 +409,10 @@ def main():
 
     # a: setup → one tile's movie → projection
     gA = gL[0].subgridspec(1, 2, width_ratios=[0.34, 1.0], wspace=0.04)
-    axA = fig.add_subplot(gA[0]); setup = out / "setup.png"
-    if setup.exists():
+    axA = fig.add_subplot(gA[0]); setup = P / "assets" / "fig1_setup.png"
+    if not setup.exists():
+        raise FileNotFoundError(f"{setup} missing: the drawing is an input (data release <stage>/assets/)")
+    if True:
         axA.imshow(plt.imread(str(setup)), interpolation="antialiased"); axA.axis("off")
     else:
         draw_schematic(axA)
