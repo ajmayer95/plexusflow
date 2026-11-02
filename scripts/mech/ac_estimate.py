@@ -6,8 +6,8 @@ Defaults = the frozen 2026-10-19 method: measurement-supported vessels (|Q'|/|a0
 ratio with L/R group corrections; veins pinned to the stub waveforms (--veins mean: one shared waveform, 21S; own: each
 vein node its own stub, 27S); latent tile gauge; waveform-based weights; η = 0 (pass --eta 0 0.2 0.4 … to estimate it).
 The stub waveforms are gauge-corrected with the fitted tile corrections, so the fit is run twice (--gauge-passes).
-Writes results/ac_estimate_v3.json (D, η, profile, fitted boundary forcing per node, tile gauge corrections — the input of
-make_figure10.py --bc-json) and figures/ac/ac_estimate_v3.png.
+Writes results/ac_estimate_v8.json (D, η, profile, fitted boundary forcing per node, tile gauge corrections — the input of
+make_figure10.py --bc-json) and figures/ac/ac_estimate_v8.png.
 """
 import sys
 from pathlib import Path
@@ -36,8 +36,8 @@ def main():
     ap.add_argument("--d-range", type=float, nargs=3, default=[2.5e-4, 8.0e-4, 21], metavar=("MIN", "MAX", "N"))
     ap.add_argument("--gauge-passes", type=int, default=2)
     ap.add_argument("--n-jobs", type=int, default=8)
-    ap.add_argument("--out", default="ac_estimate_v3")
-    ap.add_argument("--field", default="ac_field_v7", help="results/<field>.pkl (canonical: ac_field_v5_cont)")
+    ap.add_argument("--out", default="ac_estimate_v8", help="results/<out>.json (default ac_estimate_v8, the paper fit)")
+    ap.add_argument("--field", default="ac_field_v7", help="results/<field>.pkl (default ac_field_v7 = scripts/ac_field.py defaults)")
     ap.add_argument("--gauge-block", default=None, help="tiles sharing one extra gauge offset with a flat prior, e.g. 15,18,19,20,29,30,31,32,33,34")
     a = ap.parse_args()
     G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())

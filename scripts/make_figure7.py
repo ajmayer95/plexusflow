@@ -90,8 +90,8 @@ def main():
     # canonical sync (frozen 2026-10-23) = results/ac_field_v7: von Mises synchronization with fitted precision curves κ(ρaρb) for
     # repeat-vessel and plexus seam-continuity pairs, repeat pairs required to agree on mean-flow direction, DA anchor
     # (scripts/ac_field.py --sync-da --sync-da-min-rho 0.5 --sync-da-weight 100 --sync-weight kappa --cont-lambda 1 --sign-check)
-    F = build_ac_field(G, dc, sync_extra_edges=da_edges, sync_extra_min_rho=0.5, sync_extra_weight=100.0, f0_band=BAND,
-                       sync_weight="kappa", cont_lambda=1.0, sign_check=True)
+    from plexusflow.ac.field import CANONICAL_SYNC
+    F = build_ac_field(G, dc, sync_extra_edges=da_edges, f0_band=BAND, **CANONICAL_SYNC)
     meas, psi, pairs, sd = F["_meas"], F["psi"], F["_pairs"], F["gauge_sd_deg"]
     pairs = [(e, a, b) for e, a, b in pairs if e not in set(da_edges)]          # validation on carved vessels only
     tf0, ref, f_ref, band = G.graph["tile_f0_piv"], F["ref_tile"], F["f_ref"], set(F["band"])

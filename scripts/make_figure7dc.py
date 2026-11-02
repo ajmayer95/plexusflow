@@ -1,29 +1,19 @@
-"""Figure 8 alt v3 — fig8v4 layout on the FINAL DC reconciliation (2026-10-08).
+"""Figure 7 — whole-organ DC: reconstructed reference field Q′ vs the passive Poiseuille prediction Q_sim.
 
-Identical panels to fig8alt v2; data now from results/dc_reconciled_v2.pkl (scripts/dc_reconcile_v2.py):
-re-batched Kloosterman-valid measurements, per-edge winner = smallest reliability c, reliability-weighted
-IRLS (w = 1/(c²|Q'|² + σ0²)), emergent carve/V boundary, consensus radii.  (Below: v2 description.)
+Inputs: results/dc_reconciled_v2.pkl (scripts/dc_reconcile.py: reliability-weighted IRLS projection of the measured mean
+flows onto mass conservation on the carved network, emergent boundary fluxes f = BQ′) and the canonical graph.
+Passive model: conductance K = r⁴/ℓ (consensus radii), the emergent boundary fluxes imposed at every boundary vertex, and a
+soft equal-pressure penalty at the two vitelline-vein outlets (plexusflow.reconcile.venous_pressure_penalty, σ_P = 2 Pa;
+FIG7_SIGMA_P=inf renders the unpenalised variant).
 
-Figure 8 alt v2 — fig8v4 layout on the conservative projection (locked DC method).
-
-Same six panels as make_figure8v4.py, but every field comes from the locked DC
-method (docs/dc_method.md) instead of the fitted-outlet carved sim:
-
-  data      winner-take-all on harmonic coherence ρ (K=3), raw oriented mean, no gains
-  domain    carved network (porous zones + DA stubs removed); boundary = 35 carve-boundary
-            vertices + V1/V2
-  Q'        IRLS-weighted conservative projection (σ = 0.2|Q'| + σ0, 6 iterations)
-  boundary  EMERGENT  f = B Q'  (nothing fitted)
-  Q_sim     passive Poiseuille, K = r⁴/ℓ, consensus radii, f imposed at every boundary vertex
-
-  A  conservative mean-flow field |Q'| (unimaged/imputed edges drawn faint)
-  B  passive-network prediction |Q_sim| + emergent carve-boundary injections (circles)
-  C  local error E_e = log10(|Q_sim|/|Q'|) on measured edges, direction mismatches marked
-  D  measured (Q') vs predicted hexbin, r_log, P(direction agree | filtered), n
-  E  true vs uniform vs shuffled radii (solved on the fly; shuffle = mean ± sd of 10)
-  F  agreement vs minimum hop distance from the driven carve boundary
-
-Paper Fig 6 (PLOS, 7.5 × 7.6 in; panels a–f as A–F above).  Writes figures/fig8alt_v3/fig8alt_v3.{png,pdf,tif}.  Writes nothing to any graph.
+  a  Q′ on direction-resolved vessels (|Q′| > 2σ_e), measured-uncertain and unmeasured vessels in two greys, boundary-flux
+     key, direction arrows, posterior rim flow divide (stagnation point)
+  b  Q_sim on the same vessels, arterial / venous boundary markers, the model's own divide
+  c  local agreement log10(|Q_sim|/|Q′|) on resolved vessels (clipped ±1), direction mismatches marked
+  d  measured vs predicted |Q| (log hexbin): r_log on all measured and on resolved vessels, direction agreement
+  e  radius controls: true vs uniform vs shuffled radii (r_log, all measured vessels)
+SI: fig7_S_boundary_distance, fig7_S_threshold (k = 0–3σ), fig7_S_forcing (arterial-inflow redistributions).
+Writes figures/fig7/; nothing to any graph.
 """
 from __future__ import annotations
 import sys
@@ -66,23 +56,14 @@ def main():
     rec = dict(length=D['length'])
     Qp, Qs, fb, imaged, r = D['Qp'], D['Qs'], D['fb'], D['imaged'], D['radius']
     K = r ** 4 / D['length']; nodes = dom['nodes']
-    # passive model with a soft equal-pressure penalty at the two vitelline-vein outlets: the outflow split (f_V1, f_V2) is
-    # chosen to minimise Σ_V (f_V − f_V^meas)²/σ_V² + (P_V1 − P_V2)²/σ_P², σ_V = stub-flow uncertainty (dc_reconciled sigma)
-    import scipy.sparse.linalg as spla
-    from plexusflow.reconcile.network import _gauge_nodes
-    MU, PX, NL = 3.5e-3, 1.7e-6, 1e-12
-    Kp = np.pi * (r * PX) ** 4 / (8 * MU * D['length'] * PX); Bm = dom['B']; Lp = (Bm @ sp.diags(Kp) @ Bm.T).tocsc()
-    v1, v2 = dom['out']; free = np.setdiff1d(np.arange(Bm.shape[0]), [v1]); lu = spla.splu(Lp[free][:, free])
-    def pres(f):
-        p_ = np.zeros(Bm.shape[0]); p_[free] = lu.solve(f[free]); return p_
-    sV = [float(np.sqrt(np.sum(D['sigma'][Bm.tocsc()[v].nonzero()[1]] ** 2))) for v in (v1, v2)]
-    d_ = np.zeros(Bm.shape[0]); d_[v1], d_[v2] = -1.0, 1.0
-    pA, pD = pres(fb * NL), pres(d_ * NL); dP0, kk = pA[v2] - pA[v1], pD[v2] - pD[v1]
-    shift = 0.0 if not np.isfinite(SIGMA_P) else -(dP0 * kk / SIGMA_P ** 2) / (1 / sV[0] ** 2 + 1 / sV[1] ** 2 + kk ** 2 / SIGMA_P ** 2)
-    fb = fb.copy(); fb[v1] -= shift; fb[v2] += shift
+    # passive model with a soft equal-pressure penalty at the two vitelline-vein outlets (plexusflow.reconcile.venous_pressure_penalty)
+    from plexusflow.reconcile import venous_pressure_penalty
+    v1, v2 = dom['out']; Bm = dom['B']
+    fb, vp = venous_pressure_penalty(fb, dom, r, D['length'], D['sigma'], sigma_P=SIGMA_P)
+    shift, dP0, dP1 = vp['shift'], vp['dP_before'], vp['dP_after']
     Qs = passive(K, fb, dom)
     print(f"[fig7] soft venous penalty σ_P {SIGMA_P} Pa: outflow V1 {fb[v1]:.2f}, V2 {fb[v2]:.2f} nL/s (shift {shift:+.2f}); "
-          f"P_V2 − P_V1 {dP0 + kk * shift:+.2f} Pa (was {dP0:+.2f})")
+          f"P_V2 − P_V1 {dP1:+.2f} Pa (was {dP0:+.2f})")
     print(f"[fig7] carved: {len(idx)} edges ({int(imaged.sum())} measured); "
           f"Σ in {fb[dom['inj']].sum():.2f}; V {fb[dom['out']]}")
 

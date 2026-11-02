@@ -10,7 +10,7 @@ Modules:
 Driver: ``scripts/dc_reconcile.py``.
 """
 from .reliability import measurement_table, same_tile_junctions, fit_reliability, c_of
-from .network import carved_domain, project, emergent, passive, metrics
+from .network import carved_domain, project, emergent, passive, metrics, venous_pressure_penalty
 from .dc import reconcile_dc
 
 __all__ = ["measurement_table", "same_tile_junctions", "fit_reliability", "c_of",

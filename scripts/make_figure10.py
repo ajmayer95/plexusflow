@@ -57,7 +57,7 @@ def auto_picks(segs, e, rho, Qp, n=6):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--picks', default=None, help='three edges "u,v;u,v;…" for panel C (default: automatic)')
-    ap.add_argument('--bc-json', default=None, help='profiled fit (D, η, boundary forcing per node), e.g. results/ac_profiled_bc_local_ratio.json')
+    ap.add_argument('--bc-json', default=None, help='profiled fit (D, η, boundary forcing, D profile); default results/ac_estimate_v8.json')
     ap.add_argument('--field', default='ac_field_v7', help='results/<field>.pkl (canonical 2026-10-23: ac_field_v5_cont, DA anchor + seam continuity)')
     ap.add_argument('--tag', default=None, help='output name suffix: fig10_<tag>')
     args = ap.parse_args()
@@ -67,7 +67,10 @@ def main():
     D = pickle.loads((_paths.RESULTS / 'dc_reconciled_v2.pkl').read_bytes())
     A = pickle.loads((_paths.RESULTS / f'{args.field}.pkl').read_bytes())
     dom = carved_domain(G); assert dom['edges'] == D['edges'] == A['edges']
-    J = json.loads(Path(args.bc_json).read_text()) if args.bc_json else None
+    bc = Path(args.bc_json) if args.bc_json else _paths.RESULTS / 'ac_estimate_v8.json'
+    J = json.loads(bc.read_text()) if bc.exists() else None
+    if J is None:
+        print(f'[fig10] {bc} not found: falling back to D = {D_MAIN:g}, no profile panel (run scripts/mech/ac_estimate.py)')
     gcorr = (J or {}).get('gauge_correction_deg')
     if gcorr:
         dlt = np.radians(np.array([gcorr.get(str(int(t)), 0.0) if t >= 0 else 0.0 for t in A['tile']]))

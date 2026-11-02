@@ -85,6 +85,23 @@ def sync_diagnostics(pa, pb, pw, pz, nT, ref_i, psi, n_starts=50, step_deg=5.0, 
                 cut_fraction=cut, rotation=prof, rigid_rotation=rigid, weak=np.flatnonzero(weak))
 
 
+#: The synchronisation used for the paper (frozen 2026-10-23, results/ac_field_v7): von Mises pair weights with fitted
+#: precision curves κ(ρ_a ρ_b) for repeat-vessel and plexus seam-continuity pairs, repeat pairs required to agree on the
+#: mean-flow direction, and the dorsal-aorta stubs (outside the carve) as an anchor (ρ ≥ 0.5 measurements, weight ×100).
+#: Pass as ``build_ac_field(G, dc, sync_extra_edges=da_stub_edges(G), **CANONICAL_SYNC)``.
+CANONICAL_SYNC = dict(sync_weight="kappa", cont_lambda=1.0, sign_check=True, sync_extra_min_rho=0.5, sync_extra_weight=100.0)
+CANONICAL_FIELD = "ac_field_v7"     #: results/<name>.pkl written with CANONICAL_SYNC
+CANONICAL_F0_BAND = 0.21             #: heart-rate band of the paper (± fraction of the reference tile; Fig 8 "early" = below it)
+
+
+def da_stub_edges(G):
+    """Graph edges at the dorsal-aorta nodes that lie outside the carved network (they enter the synchronisation only)."""
+    from ..reconcile import carved_domain
+    dom = carved_domain(G); carved = set(dom["edges"])
+    e = [x if G.has_edge(*x) else x[::-1] for n in dom["DA"] for x in G.edges(n)]
+    return [x for x in e if x not in carved and x[::-1] not in carved]
+
+
 def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=50, sync_extra_edges=None, stitch_lambda=0.0,
                    sync_extra_min_rho=0.0, sync_extra_weight=1.0, sync_weight="rho", cont_lambda=0.0, cont_radius_um=150.0,
                    cont_radius_pct=60.0, um_per_px=1.7, sign_check=False):

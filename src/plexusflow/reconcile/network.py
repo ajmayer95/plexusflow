@@ -70,6 +70,36 @@ def passive(K, fb, dom):
     return K * (B.T @ P)
 
 
+
+MU_PA_S = 3.5e-3        #: blood viscosity (Pa·s) used for the venous-pressure penalty
+UM_PER_PX = 1.7         #: mosaic pixel size (µm); radii and lengths in the reconciliation are in pixels
+NL = 1e-12              #: 1 nL in m³
+
+
+def venous_pressure_penalty(fb, dom, radius_px, length_px, sigma, sigma_P=2.0, mu=MU_PA_S, um_per_px=UM_PER_PX):
+    """Soft equal-pressure constraint at the two vitelline-vein outlets (paper Fig 7, passive prediction).
+
+    The two outflows (f_V1, f_V2) are re-split, at a fixed total, to minimise
+        Σ_V (f_V − f_V^meas)² / σ_V²  +  (P_V1 − P_V2)² / σ_P²,
+    where P is the Poiseuille pressure for conductances πr⁴/(8μℓ) with V1 as gauge and σ_V the root-sum-square measurement
+    uncertainty of the vessels at each outlet.  Linear in the shift, so solved in closed form; σ_P = inf leaves fb as is.
+    Returns (fb_adjusted [nL/s], info dict with shift, ΔP before / after [Pa]).  Arterial boundary fluxes are untouched."""
+    B = dom["B"]; px = um_per_px * 1e-6
+    Kp = np.pi * (np.asarray(radius_px) * px) ** 4 / (8 * mu * np.asarray(length_px) * px)
+    Lp = (B @ sp.diags(Kp) @ B.T).tocsc()
+    v1, v2 = dom["out"]; free = np.setdiff1d(np.arange(B.shape[0]), [v1]); lu = spla.splu(Lp[free][:, free])
+
+    def pres(f):
+        p_ = np.zeros(B.shape[0]); p_[free] = lu.solve(f[free]); return p_
+    Bc = B.tocsc()
+    sV = [float(np.sqrt(np.sum(np.asarray(sigma)[Bc[v].nonzero()[1]] ** 2))) for v in (v1, v2)]
+    d_ = np.zeros(B.shape[0]); d_[v1], d_[v2] = -1.0, 1.0
+    pA, pD = pres(np.asarray(fb) * NL), pres(d_ * NL); dP0, kk = pA[v2] - pA[v1], pD[v2] - pD[v1]
+    shift = 0.0 if not np.isfinite(sigma_P) else -(dP0 * kk / sigma_P ** 2) / (1 / sV[0] ** 2 + 1 / sV[1] ** 2 + kk ** 2 / sigma_P ** 2)
+    out = np.array(fb, float); out[v1] -= shift; out[v2] += shift
+    return out, dict(shift=float(shift), dP_before=float(dP0), dP_after=float(dP0 + kk * shift), sigma_V=sV, sigma_P=float(sigma_P))
+
+
 def metrics(Qm, Qp, Qs, fb, dom, imaged):
     """Boundary totals, L/R split, |Q'| vs |Q_sim| correlation, loop share, movement and sign flips."""
     a, b = np.abs(Qp[imaged]), np.abs(Qs[imaged]); ok = (a > 1e-15) & (b > 1e-15)
