@@ -136,9 +136,14 @@ def fit_profile(C, c, field, d_grid=D_GRID, eta_grid=(0.0,), weights="waveform",
 
 
 def quadratic_min(d_grid, prof):
-    """Minimum of a profile by a parabola in log10 D through its three lowest grid points (grid point if not convex)."""
-    k = np.argsort(prof)[:3]; c = np.polyfit(np.log10(np.asarray(d_grid)[k]), np.asarray(prof)[k], 2)
-    return float(10 ** (-c[1] / (2 * c[0]))) if c[0] > 0 else float(np.asarray(d_grid)[np.argmin(prof)])
+    """Minimum of a profile by a parabola in log10 D through the grid minimum and its two neighbours, so the vertex is
+    bracketed (the grid point itself if the minimum is at a grid end or the three points are not convex).  Before
+    2026-11-03 the three LOWEST points were used, which can be one-sided and extrapolate past the bracket."""
+    d, p = np.asarray(d_grid, float), np.asarray(prof, float); i = int(np.argmin(p))
+    if i == 0 or i == len(p) - 1:
+        return float(d[i])
+    x = np.log10(d[i - 1:i + 2]); c = np.polyfit(x, p[i - 1:i + 2], 2)
+    return float(np.clip(10 ** (-c[1] / (2 * c[0])), d[i - 1], d[i + 1])) if c[0] > 0 else float(d[i])
 
 
 def fitted_forcing(C, x):

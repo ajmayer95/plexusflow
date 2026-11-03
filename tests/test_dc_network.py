@@ -102,3 +102,15 @@ def test_quasi_likelihood_objective_gradient_and_stationary_solution():
     Qc = project(Q, np.ones_like(Q), dom)                                     # conservative, fully imaged data → unchanged
     Qf, _ = ql_solve(Qc, Q, c, np.ones(Q.size, bool), s0, 1.0, dom)
     assert np.allclose(Qf, Q, atol=1e-9)
+
+
+def test_quadratic_min_is_bracketed():
+    """plexusmech.ac.profile.quadratic_min: the refined minimum stays between the grid neighbours of the grid minimum, even
+    when the three lowest points are one-sided (27S 2026-11-03: one-sided points extrapolated 5.3e-4 → 6.1e-4)."""
+    from plexusmech.ac.profile import quadratic_min
+    d = np.geomspace(2.5e-4, 8e-4, 21); i = int(np.argmin(np.abs(d - 5.32e-4)))
+    prof = np.full(d.size, 100.0); prof[i - 2:i + 2] = (10.4, 4.4, 0.0, 13.4)        # lowest three = i-2, i-1, i (one-sided)
+    x = quadratic_min(d, prof)
+    assert d[i - 1] <= x <= d[i + 1] and x < d[i]                                    # pulled toward the lower neighbour, not past it
+    exact = (np.log10(d) - np.log10(4e-4)) ** 2                                      # exact parabola → recovered
+    assert abs(quadratic_min(d, exact) / 4e-4 - 1) < 1e-6
