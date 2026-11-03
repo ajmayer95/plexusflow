@@ -1,8 +1,9 @@
 """DC reconciliation (final method, 2026-10-07) from the measured graph.
 
 1. Reliability scale c = c0 + c_f(1 − f) + c_a(1 − align), ML-fitted on same-tile junction balance (--tile-terms: per-tile c_T).
-2. Per edge the Kloosterman-valid measurement with the smallest c; carved network; reliability-weighted damped IRLS
-   projection onto B_I Q = 0; emergent boundary f = B Q'; passive comparison (consensus radii) + radius shuffle.
+2. Per edge the Kloosterman-valid measurement with the smallest c; carved network; quasi-likelihood reconciliation under
+   B_I Q = 0 (variance c²Q′² + σ0², projected Newton from the uniform projection; plexusflow.reconcile.dc); emergent
+   boundary f = B Q'; passive comparison (consensus radii) + radius shuffle.
 See plexusflow.reconcile.  Writes results/reliability_model_v1.json and results/dc_reconciled_v2.pkl.
 """
 import sys
@@ -33,10 +34,10 @@ def main():
     V = np.array(met["V"])
     v_txt = (f"V1/V2 {V[0]:+.2f}/{V[1]:+.2f} (L {100 * V[0] / V.sum():.1f}%)" if len(V) == 2 else
              f"{len(V)} V nodes: total {V.sum():+.2f} nL/s ({np.sum(V < 0)} withdrawing, {np.sum(V > 0)} injecting)")
-    print(f"[3] IRLS {D['n_iter']} iterations;  inflow {met['total_in']:.2f} nL/s (L {met['inj_L']:.2f} / R {met['inj_R']:.2f}, "
+    print(f"[3] quasi-likelihood: {D['n_iter']} projected-Newton steps, objective {D['objective']:.4f};  inflow {met['total_in']:.2f} nL/s (L {met['inj_L']:.2f} / R {met['inj_R']:.2f}, "
           f"withdrawing carve nodes {met['n_withdraw']});  {v_txt}")
     un = D["unstable"]
-    print(f"    reproducibility: {'converged' if D['converged'] else 'limit cycle, averaged'}; unstable vessels {un.sum()} of {len(un)} "
+    print(f"    {'converged' if D['converged'] else 'NOT converged'}; start-dependent vessels ({D['n_starts']} perturbed starts) {un.sum()} of {len(un)} "
           f"({np.sum(un & im)} measured, {np.sum(un & ~im)} unmeasured)")
     print(f"    moved median {met['move_p50']:.2f}, sign flips {met['flips']:.1%};  passive corr {met['corr_lin']:.3f} "
           f"(log {met['corr_log']:.3f}), shuffled radii {D['shuffled_corr']:.3f};  loop share {met['loop_share']:.2f}")

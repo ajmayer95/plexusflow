@@ -42,6 +42,9 @@ GAUGE_SD_MAX = 30.0     # deg: tiles with a less certain time gauge are greyed i
 OUT_DIR = _paths.FIGURES / 'fig10'                         # paper Fig 10 (was figures/fig9alt_v3/)
 
 
+PAPER_PICKS = '67236,67239;36453,36993;93211,93245'   # 21S panel e vessels (auto rule on the 2026-11-02 field)
+
+
 def auto_picks(segs, e, rho, Qp, n=6):
     """Well-measured, coherent vessels spread over the network (farthest-point sampling on midpoints)."""
     cand = np.flatnonzero(e & np.isfinite(rho))
@@ -56,7 +59,8 @@ def auto_picks(segs, e, rho, Qp, n=6):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--picks', default=None, help='three edges "u,v;u,v;…" for panel C (default: automatic)')
+    ap.add_argument('--picks', default=PAPER_PICKS, help='three edges "u,v;u,v;…" for panel e (default: the paper\'s; "auto" = '
+                    'good / typical / poor by harmonic-residual percentile 20/50/80 among well-measured vessels)')
     ap.add_argument('--bc-json', default=None, help='profiled fit (D, η, boundary forcing, D profile); default results/ac_estimate_v8.json')
     ap.add_argument('--field', default='ac_field_v7', help='results/<field>.pkl (canonical 2026-10-23: ac_field_v5_cont, DA anchor + seam continuity)')
     ap.add_argument('--tag', default=None, help='output name suffix: fig10_<tag>')
@@ -138,7 +142,7 @@ def main():
     pos = {}
     for c, (u, v) in enumerate(edges):
         pos[(u, v)] = c; pos[(v, u)] = c
-    if args.picks:
+    if args.picks and args.picks != 'auto' and all(tuple(int(x) for x in s_.split(',')) in pos for s_ in args.picks.split(';')):
         picks = [pos.get(tuple(int(x) for x in s.split(','))) for s in args.picks.split(';')]
     else:                                                       # good / typical / poor agreement among well-measured vessels
         cand = np.flatnonzero(e & np.isfinite(rho) & np.isfinite(pires))
@@ -146,7 +150,8 @@ def main():
         picks = [int(cand[np.argmin(np.abs(pires[cand] - np.percentile(pires[cand], q_)))]) for q_ in (20, 50, 80)]
     for k, c in enumerate(picks):
         print(f'  pick {k + 1}: ' + ('not in carved network' if c is None else
-                                     f'edge {edges[c]}, eligible={bool(e[c])}, ρ={rho[c]:.2f}, Q\'={Qp[c]:+.3f}'))
+                                     f'edge {edges[c]}, eligible={bool(e[c])}, ρ={rho[c]:.2f}, Q\'={Qp[c]:+.3f}, harmonic residual '
+                                     f'{pires[c]:.2f} (percentile {100 * np.mean(pires[np.isfinite(pires) & e] <= pires[c]):.0f} of eligible)'))
 
     # map extent: crop to the network (+ margin) so tall/wide embryos fill their panels
     allxy = np.vstack(segs); pad = 60

@@ -278,8 +278,9 @@ the analysis); `python examples/quickstart.py` is a one-minute tour of the DC re
 `pip install -e ".[gui]"` and `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"`.  This folder is never written to:
 outputs go to PLEXUSFLOW_RESULTS / PLEXUSFLOW_FIGURES.
 No Python?  `graph/export/` (CSV + npz, see `SCHEMA.md`) and the CSVs in `results/` contain everything.
-Reproducibility: re-running the scripts reproduces `results/` up to ~0.3 % across Python / numpy / scipy versions (the DC
-reweighting loop stops at its iteration cap, so last-digit numerical differences persist); the build environment is in `MANIFEST.json`.
+Reproducibility: re-running the scripts reproduces `results/` across Python / numpy / scipy versions up to solver tolerance
+(the DC reconciliation converges to a stationary point of an explicit objective); the build environment is in `MANIFEST.json`.
+`unstable` in `dc_reconciled_edges.csv` marks vessels whose reconciled flow depends on the solver start (direction, or > 10 %).
 Methods: `docs/dc_method.md`, `docs/synthetic_validation.md` in the code repository.  Checksums: `MANIFEST.json`.
 """)
     files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != "MANIFEST.json")

@@ -6,7 +6,7 @@ Carved vessels measured in ≥ 2 tiles provide independent references: the proje
   imputed    hide EVERY measurement of a random 10 % of the repeat-measured vessels (5 disjoint folds), reconcile the
              rest, compare the network-imputed flow with the hidden measurements (does conservation add information?)
 Weightings: uniform w = 1;  quality w = 1/c²;  measured-scale w = 1/(c² y² + s0²);  calibrated (production)
-w = 1/(c² Q′² + s0²) at the reconciled flow (reconcile_dc; one ensemble member in the imputation folds);  and 'raw'
+variance c² Q′² + s0² at the reconciled flow (reconcile_dc quasi-likelihood; no perturbed starts in the imputation folds);  and 'raw'
 (Q = y, measured test only).  Scores: median |log(|Q|/|h|)| and direction agreement, for all references and for
 trusted references (c_h < 0.5); 95 % intervals from a vessel-clustered bootstrap.
 Writes $PLEXUSFLOW_RESULTS/dc_weighting_validation.json.  ~5 min (21S).
@@ -71,7 +71,7 @@ def main(n_fold=5, frac=0.10, seed=0):
     folds = np.array_split(np.arange(len(multi)), int(round(1 / frac)))[:n_fold]; rows = {k: [] for k in KINDS}
     for fi, ix in enumerate(folds):
         hide = {multi[j] for j in ix}
-        Df = reconcile_dc(G, model, {k: m for k, m in M.items() if k[1] not in hide}, dom=dom, n_ens=1, n_shuffle=1); Ff = fields(Df, dom)
+        Df = reconcile_dc(G, model, {k: m for k, m in M.items() if k[1] not in hide}, dom=dom, n_starts=0, n_shuffle=1); Ff = fields(Df, dom)
         for e in hide:
             i = eix[e]
             for m in by_e[e]:

@@ -28,14 +28,19 @@ are removed together with the aortic stubs.  The analysis uses the remaining tru
 from the porous zones plus the two vitelline veins; mass is conserved at every other vertex.
 
 ## Conservative field and emergent boundary
-The measured field does not conserve mass.  We take the least-squares correction that does,
-$$Q'=\arg\min_Q \tfrac12\sum_e w_e\,(Q_e-Q^{\rm meas}_e)^2\quad\text{s.t.}\quad B_{\mathcal I}Q=0,$$
+The measured field does not conserve mass.  We take the conservative field that best fits the measurements under the
+reliability model, as a quasi-likelihood with the measurement variance evaluated at the reconciled flow,
+$$Q'=\arg\min_Q \sum_{e\ \rm imaged}\int_{Q^{\rm meas}_e}^{Q_e}\frac{u-Q^{\rm meas}_e}{c_e^2u^2+\sigma_0^2}\,du
+\;+\;\frac{\varepsilon}{2}\sum_{e\ \rm unimaged}Q_e^2\quad\text{s.t.}\quad B_{\mathcal I}Q=0,$$
 with $B$ the signed incidence matrix ($+1$ at the tail, $-1$ at the head) restricted to interior
-vertices $\mathcal I$.  Unimaged segments get negligible weight and are filled by the constraint.
-Weights follow the reliability model, $w_e=\sigma_e^{-2}$ with $\sigma_e^2=c_e^2\,Q'^2_e+\sigma_0^2$
-($\sigma_0$ = 1 % of the median measured flux, a floor only).  $\sigma$ is set from the reconciled field
-rather than from the measurement itself, so segments that happen to read low are not given spurious
-confidence; the field and weights are iterated from uniform weights with damping 0.3 to convergence.  The boundary
+vertices $\mathcal I$ ($\sigma_0$ = 1 % of the median measured flux, a floor only).  Near the data each term is the
+weighted square $(Q_e-Q^{\rm meas}_e)^2/2\sigma_e^2$ with $\sigma_e^2=c_e^2Q_e^2+\sigma_0^2$; setting σ from the
+reconciled rather than the measured flux means segments that happen to read low are not given spurious confidence.
+Unimaged segments are filled by the constraint; the weak ridge ε only fixes circulations that conservation cannot
+determine (loops of unimaged segments: the null space of $[B_{\mathcal I};M]$, dimension 44 in 21S, 170 vessels).
+The objective is not convex, so the start is part of the method: the uniform-weight conservative projection of the data,
+followed by projected-Newton descent (each step one weighted projection, Armijo line search) to a constrained stationary
+point.  Sensitivity to the start is reported (`unstable`, `Q_reconciled_sd`: four perturbed starts).  The boundary
 fluxes are an output, not a fit: $f=BQ'$ is non-zero only on $\mathcal B$.  No left/right symmetry
 is imposed (imposing it changes the agreement below by < 0.05 and is reported as a check).
 
