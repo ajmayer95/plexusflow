@@ -23,7 +23,7 @@ import numpy as np
 import plexusflow.paths as paths
 from plexusflow.release import SCHEMA_VERSION
 
-RESULTS = ("reliability_model_v1.json", "dc_reconciled_v2.pkl", "dc_weighting_validation.json", "dc_passive_comparison.json", "ac_field_v7.pkl", "ac_estimate_v8.json")
+RESULTS = ("reliability_model_v1.json", "dc_reconciled_v2.pkl", "dc_weighting_validation.json", "dc_passive_comparison.json", "dc_synthetic_benchmark.json", "ac_field_v7.pkl", "ac_estimate_v8.json")
 RESULTS_OPTIONAL = ()
 # inputs of the paper figures (scripts/make_figure*.py), copied as-is from the stage (core tier)
 FIGURE_INPUTS = ("fuse/organ_fusion.tif", "fuse/maxmed.tif", "fuse/probs_logit.tif", "mask/mask.tif", "tiles/maxmed", "assets")
