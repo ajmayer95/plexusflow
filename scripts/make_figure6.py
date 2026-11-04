@@ -221,84 +221,97 @@ def main():
     big = {n: v for n, v in zj.items() if abs(v[1]) > 2}
     log(f"tile {TILE}: {len(zj)} fully measured junctions, {len(big)} with |z| > 2 in the measured field; max |Σ Q′| {max(abs(v[2]) for v in zj.values()):.1e}")
 
-    fig = plt.figure(figsize=(7.5, 7.0), facecolor="white")
-    top = fig.add_gridspec(1, 2, left=0.015, right=0.985, top=0.94, bottom=0.5, wspace=0.03)
-
-    def draw_map(ax, kind, title):
-        ax.imshow(img * 0.55, cmap="gray", vmin=vlo, vmax=vhi, interpolation="nearest")
-        ax.set_xlim(c0, c1); ax.set_ylim(r1, r0); ax.set_xticks([]); ax.set_yticks([])
-        for s_ in ax.spines.values():
-            s_.set_color("#bdbdbd"); s_.set_linewidth(0.5)
-        for e, q in path.items():
-            if e not in ps:
-                ax.plot(q[:, 1], q[:, 0], color="white", lw=0.4, alpha=0.3, zorder=2)
-        for i in pe:
-            e = E[i]; q = path[e]; lw = lw_of(e)
-            if kind == "meas" and not im[i]:
-                ax.plot(q[:, 1], q[:, 0], color="#d0d0d0", lw=lw, ls=(0, (1.0, 1.0)), zorder=3); continue
-            ax.plot(q[:, 1], q[:, 0], color=mag_cmap(mag_norm(max(abs(Qm[i] if kind == "meas" else Qp[i]), mag_norm.vmin))), lw=lw, zorder=4, solid_capstyle="round")
-        if kind == "meas":
-            for n, (p_, z_, _) in big.items():
-                ax.scatter(p_[1], p_[0], s=9 * min(abs(z_), 5) ** 2, facecolor="none", edgecolor=PINK, linewidth=1.1, zorder=7)
-        ax.scatter(jpos[1], jpos[0], s=150, marker="s", facecolor="none", edgecolor="white", linewidth=1.6, zorder=8)
-        ax.set_title(title, fontsize=9, pad=3, loc="left")
-        return ax
-    axs = [draw_map(fig.add_subplot(top[0]), "meas", f"Measured: {len(big)} junctions out of balance (> 2σ)"),
-           draw_map(fig.add_subplot(top[1]), "rec", "Reconstructed: every junction balanced")]
-    scalebar(axs[0], box, um=100)
-    fig.canvas.draw(); P0, P1 = axs[0].get_position(), axs[1].get_position()
-    cb = plt.colorbar(cm.ScalarMappable(norm=mag_norm, cmap=mag_cmap), cax=fig.add_axes([P0.x0 + 0.25 * P0.width, P0.y0 - 0.03, P1.x1 - P0.x0 - 0.5 * P0.width, 0.011]),
-                      orientation="horizontal")
-    cb.set_label("|flux| (nL/s)", fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8, length=2, pad=1, which="both"); cb.outline.set_linewidth(0.4)
+    q0 = float(np.percentile(np.abs(Qm[im]), 10))                    # floor for relative changes of near-zero flows
+    rel = np.where(im, (np.abs(Qp) - np.abs(Qm)) / np.maximum(np.abs(Qm), q0), np.nan); rev = im & (np.sign(Qp) != np.sign(Qm))
+    sel_t = np.array([i for i in pe if im[i]])
+    log(f"tile {TILE}: relative change median {np.median(np.abs(rel[sel_t])):.2f}, >50 % {np.mean(np.abs(rel[sel_t]) > 0.5):.0%}, reversed {rev[sel_t].mean():.1%}; q0 {q0:.4f}")
+    fig = plt.figure(figsize=(7.5, 5.3), facecolor="white")
+    gs = fig.add_gridspec(1, 2, left=0.015, right=0.985, top=0.93, bottom=0.17, width_ratios=[1.12, 1.0], wspace=0.08)
+    # a: where the reconstruction changes the measurements
+    axM = fig.add_subplot(gs[0]); cor_norm = mcolors.TwoSlopeNorm(0, -1.0, 1.0); cor_cmap = matplotlib.colormaps["RdBu_r"]
+    axM.imshow(img * 0.55, cmap="gray", vmin=vlo, vmax=vhi, interpolation="nearest"); axM.set_xlim(c0, c1); axM.set_ylim(r1, r0)
+    axM.set_xticks([]); axM.set_yticks([])
+    for s_ in axM.spines.values():
+        s_.set_color("#bdbdbd"); s_.set_linewidth(0.5)
+    for e, q in path.items():
+        if e not in ps:
+            axM.plot(q[:, 1], q[:, 0], color="white", lw=0.4, alpha=0.3, zorder=2)
+    for i in pe:
+        e = E[i]; q = path[e]; lw = lw_of(e)
+        if not im[i]:
+            axM.plot(q[:, 1], q[:, 0], color="#c8c8c8", lw=lw, ls=(0, (1.0, 1.0)), zorder=3); continue
+        axM.plot(q[:, 1], q[:, 0], color=cor_cmap(cor_norm(np.clip(rel[i], -1, 1))), lw=lw + 0.4, zorder=4, solid_capstyle="round")
+        if rev[i]:
+            axM.plot(q[:, 1], q[:, 0], color=INK, lw=0.9, ls=(0, (2.5, 1.5)), zorder=5)
+    axM.scatter(jpos[1], jpos[0], s=230, marker="s", facecolor="none", edgecolor="white", linewidth=3.2, zorder=8)
+    axM.scatter(jpos[1], jpos[0], s=230, marker="s", facecolor="none", edgecolor="#f0ad00", linewidth=1.6, zorder=9)
+    scalebar(axM, box, um=100)
+    axM.set_title("Where the reconstruction changes the measured flows", fontsize=9, pad=3, loc="left")
+    fig.canvas.draw(); PM = axM.get_position()
+    cbx = fig.add_axes([PM.x0 + 0.1 * PM.width, PM.y0 - 0.045, 0.8 * PM.width, 0.014])
+    cb = plt.colorbar(cm.ScalarMappable(norm=cor_norm, cmap=cor_cmap), cax=cbx, orientation="horizontal", ticks=[-1, -0.5, 0, 0.5, 1])
+    cb.ax.set_xticklabels(["−100%", "−50%", "0", "+50%", "+100%"]); cb.ax.tick_params(labelsize=8, length=2, pad=1); cb.outline.set_linewidth(0.4)
+    cb.set_label("change in flow magnitude, (|Q′| − |y|) / |y|", fontsize=8, labelpad=1)
     from matplotlib.lines import Line2D
-    ky = P0.y0 - 0.088; kx = P0.x0 + 0.12 * P0.width
-    for dx, art, txt in ((0.0, Line2D([kx], [ky], marker="o", ms=8, mfc="none", mec=PINK, mew=1.1, ls="", transform=fig.transFigure), "junction imbalance > 2σ (size: |z|)"),
-                         (0.33, Line2D([kx + 0.33 - 0.012, kx + 0.33 + 0.012], [ky, ky], color="#bdbdbd", lw=2.0, ls=(0, (1, 1)), transform=fig.transFigure), "vessel not imaged"),
-                         (0.53, Line2D([kx + 0.53], [ky], marker="s", ms=8, mfc="none", mec="0.3", mew=1.4, ls="", transform=fig.transFigure), "junction shown in b")):
-        if dx:
-            art.set_xdata([kx + dx - 0.012, kx + dx + 0.012] if art.get_marker() in (None, "None", "") else [kx + dx])
-        fig.add_artist(art); fig.text(kx + dx + 0.02, ky, txt, fontsize=8, color=INK, va="center")
+    ky = PM.y0 - 0.125; kx = PM.x0 + 0.02
+    fig.add_artist(Line2D([kx, kx + 0.03], [ky, ky], color="#c8c8c8", lw=2.2, ls=(0, (1, 1)), transform=fig.transFigure))
+    fig.text(kx + 0.036, ky, "not imaged (inferred)", fontsize=8, va="center")
+    fig.add_artist(Line2D([kx + 0.24, kx + 0.27], [ky, ky], color=INK, lw=0.9, ls=(0, (2.5, 1.5)), transform=fig.transFigure))
+    fig.text(kx + 0.276, ky, "direction reversed", fontsize=8, va="center")
+    fig.add_artist(Line2D([kx + 0.45], [ky], marker="s", ms=8, mfc="none", mec="#f0ad00", mew=1.6, ls="", transform=fig.transFigure))
+    fig.text(kx + 0.465, ky, "junction in b", fontsize=8, va="center")
 
-    # b: the marked junction, before → after on each branch
-    bot = fig.add_gridspec(1, 2, left=0.015, right=0.985, top=0.35, bottom=0.07, width_ratios=[0.85, 1.15], wspace=0.2)
-    axJ = fig.add_subplot(bot[0]); axJ.set_xlim(-2.9, 2.9); axJ.set_ylim(-2.6, 2.4); axJ.set_aspect("equal"); axJ.axis("off")
-    axJ.set_title("One junction (□ in a)", **TIT)
-    pn = np.array([G.nodes[NODE]["x"], G.nodes[NODE]["y"]], float)
-    for k, ((e_, s_), yy, qq, ck) in enumerate(zip(jn, y, yp, cj)):
-        nb_ = e_[1] if e_[0] == NODE else e_[0]; d_ = np.array([G.nodes[nb_]["x"], G.nodes[nb_]["y"]], float) - pn
-        th = np.arctan2(-d_[1], d_[0]); u = np.array([np.cos(th), np.sin(th)]); cl = PINK if ck >= 0.3 else BLUE
-        axJ.plot([0, 1.4 * u[0]], [0, 1.4 * u[1]], color="0.86", lw=11, solid_capstyle="round", zorder=1)
-        a0, a1 = (0.15 * u, 1.3 * u) if yy > 0 else (1.3 * u, 0.15 * u)
-        axJ.annotate("", xy=a1, xytext=a0, arrowprops=dict(arrowstyle="-|>", color=cl, lw=2.6, mutation_scale=18, shrinkA=0, shrinkB=0), zorder=3)
-        axJ.text(*(2.0 * u), f"{abs(yy):.3f} → {abs(qq):.3f}\nc = {ck:.2f}", ha="center", va="center", fontsize=8.5, color=cl, linespacing=1.15,
-                 fontweight="bold" if ck >= 0.3 else "normal")
-    axJ.scatter([0], [0], s=40, color=INK, zorder=4)
-    axJ.text(0, -2.45, f"imbalance {abs(y.sum()):.3f} → 0 nL/s", ha="center", va="bottom", fontsize=8.5, color=INK)
+    # b: the marked junction, measured vs reconstructed, branch width ∝ flow
+    gR = gs[1].subgridspec(2, 1, height_ratios=[1.0, 1.05], hspace=0.42)
+    gb = gR[0].subgridspec(1, 2, wspace=0.0); axJs = [fig.add_subplot(gb[0]), fig.add_subplot(gb[1])]
+    pn = np.array([G.nodes[NODE]["x"], G.nodes[NODE]["y"]], float); dirs = []
+    for e_, s_ in jn:
+        nb_ = e_[1] if e_[0] == NODE else e_[0]; d_ = np.array([G.nodes[nb_]["x"], G.nodes[nb_]["y"]], float) - pn; th = np.arctan2(-d_[1], d_[0])
+        dirs.append(np.array([np.cos(th), np.sin(th)]))
+    wmax = max(np.abs(y).max(), np.abs(yp).max())
+    for ax, vals, title in ((axJs[0], y, "Measured"), (axJs[1], yp, "Reconstructed")):
+        ax.set_xlim(-2.3, 2.3); ax.set_ylim(-2.1, 2.3); ax.set_aspect("equal"); ax.axis("off")
+        for k, (u, v) in enumerate(zip(dirs, vals)):
+            cl = PINK if cj[k] >= 0.3 else BLUE
+            ax.plot([0, 1.35 * u[0]], [0, 1.35 * u[1]], color=cl, lw=1.5 + 9 * abs(v) / wmax, solid_capstyle="butt", alpha=0.85, zorder=2)
+            tip = 1.55 * u if v > 0 else 0.55 * u; tail = 0.95 * u if v > 0 else 1.45 * u            # s·y > 0: out of the junction
+            ax.annotate("", xy=tip, xytext=tail, arrowprops=dict(arrowstyle="-|>", color=INK, lw=0.9, mutation_scale=9), zorder=4)
+            lab = f"{abs(v):.3f}"
+            if ax is axJs[1]:
+                dq = abs(v) - abs(y[k]); lab += f"\n({dq:+.3f})"
+            ax.text(*(1.95 * u), lab, ha="center", va="center", fontsize=8, color=cl, linespacing=1.0, fontweight="bold" if cj[k] >= 0.3 else "normal")
+        ax.scatter([0], [0], s=28, color=INK, zorder=5); ax.set_title(title, fontsize=9, pad=0)
+    ins = [k for k in range(3) if y[k] < 0]; outs = [k for k in range(3) if y[k] > 0]
+    for ax, vals, rel_ in ((axJs[0], y, "≠"), (axJs[1], yp, "=")):
+        ax.text(0, -2.05, f"in {' + '.join(f'{abs(vals[k]):.3f}' for k in ins)} {rel_} out {' + '.join(f'{abs(vals[k]):.3f}' for k in outs)}",
+                ha="center", va="bottom", fontsize=8, color=PINK if rel_ == "≠" else INK)
+    fig.text((axJs[0].get_position().x0 + axJs[1].get_position().x1) / 2, axJs[0].get_position().y0 - 0.02,
+             "higher-uncertainty branch (c = %.2f) changes most" % cj.max(), ha="center", va="top", fontsize=8, color=PINK)
 
     # c: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
     V = json.loads((P.RESULTS / "dc_weighting_validation.json").read_text())
-    axd = fig.add_subplot(bot[1]); pos = axd.get_position(); axd.set_position([pos.x0 + 0.05, pos.y0 + 0.01, pos.width - 0.05, pos.height - 0.01])
+    axd = fig.add_subplot(gR[1]); pos = axd.get_position(); axd.set_position([pos.x0 + 0.07, pos.y0, pos.width - 0.07, pos.height])
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
-    axd.text(-0.45, raw["err"] - 0.012, "two recordings of the same vessel", fontsize=8, color=GREY, va="top", ha="left")
-    for test, dx, mk, lab in (("measured", -0.15, "o", "measured vessels"), ("imputed", 0.15, "D", "withheld vessels")):
+    axd.text(-0.5, raw["err"] - 0.015, "two recordings of the same vessel", fontsize=8, color=GREY, va="top", ha="left")
+    for test, dx, mk, lab in (("measured", -0.15, "o", "measured"), ("imputed", 0.15, "D", "withheld")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
-        axd.vlines(xs + dx, ci_[:, 0], ci_[:, 1], color=cl, lw=1.4, zorder=2)
-        axd.scatter(xs + dx, e_, marker=mk, s=48, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.5, zorder=3)
-        axd.scatter([], [], marker=mk, s=48, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.5, label=lab)
-    axd.set_xticks(xs); axd.set_xticklabels(xl, fontsize=8.5); axd.get_xticklabels()[-1].set_color(BLUE); axd.get_xticklabels()[-1].set_fontweight("bold")
+        axd.vlines(xs + dx, ci_[:, 0], ci_[:, 1], color=cl, lw=1.3, zorder=2)
+        axd.scatter(xs + dx, e_, marker=mk, s=36, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.3, zorder=3)
+        axd.scatter([], [], marker=mk, s=36, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.3, label=lab + " vessels")
+    axd.set_xticks(xs); axd.set_xticklabels(xl, fontsize=8); axd.get_xticklabels()[-1].set_color(BLUE); axd.get_xticklabels()[-1].set_fontweight("bold")
     axd.set_xlim(-0.55, len(kinds) - 0.45); axd.set_ylim(0, 0.75)
-    axd.set_ylabel("error vs independent recordings\n(median |log ratio|)", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
-    axd.legend(loc="lower left", frameon=False, fontsize=8, handletextpad=0.3, borderaxespad=0.2)
+    axd.set_ylabel("error vs independent\nrecordings, median |log ratio|", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
+    axd.legend(loc="lower left", frameon=False, fontsize=8, handletextpad=0.3, borderaxespad=0.1)
     axd.set_title("Prediction of independent recordings", **TIT)
     for s_ in ("top", "right"):
         axd.spines[s_].set_visible(False)
 
     fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv = fig.transFigure.inverted(); tb = lambda a_: inv.transform(a_.get_tightbbox(rr_))
-    yT = max(tb(a_)[1, 1] for a_ in axs); yB = max(tb(axJ)[1, 1], tb(axd)[1, 1])
-    for x_, y_, l_ in ((0.005, yT, "a"), (0.005, yB, "b"), (tb(axd)[0, 0] - 0.012, yB, "c")):
+    yT = tb(axM)[1, 1]; xr = min(tb(axJs[0])[0, 0], tb(axd)[0, 0]) - 0.01
+    for x_, y_, l_ in ((0.005, yT, "a"), (xr, yT, "b"), (xr, tb(axd)[1, 1], "c")):
         fig.text(x_, min(y_ + 0.004, 0.985), l_, **LET)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     plos_style.save(fig, OUT)
