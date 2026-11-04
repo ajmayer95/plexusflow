@@ -307,12 +307,13 @@ def main():
             continue
         r_ = sum(s_ * Qm[i_] for i_, s_ in inc); thr_ = sum(abs(Qm[i_]) for i_, _ in inc) / 2; nt_ = len({int(D["tile"][i_]) for i_, _ in inc})
         pj_ = xy(n); obst_ = np.vstack([allp] + [np.array(placed)] * 3 if placed else [allp])
-        cands_ = [pj_ + 22 * np.array([np.cos(t), np.sin(t)]) for t in np.linspace(0, 2 * np.pi, 16, endpoint=False)]
+        cands_ = [pj_ + (30 if nt_ == 1 else 22) * np.array([np.cos(t), np.sin(t)]) for t in np.linspace(0, 2 * np.pi, 16, endpoint=False)]
         lp_ = max(cands_, key=lambda c: np.min(np.linalg.norm(obst_ - c, axis=1))); placed.append(lp_)
-        axC.plot([pj_[0], lp_[0]], [pj_[1], lp_[1]], color=PINK, lw=0.9, zorder=8)
-        axC.scatter(*pj_, s=70, facecolor="none", edgecolor=PINK, linewidth=1.4, zorder=8)
-        axC.text(*lp_, f"{100 * abs(r_) / thr_:.0f}%", ha="center", va="center", fontsize=8, color=PINK, fontweight="bold", zorder=9,
-                 bbox=dict(boxstyle="round,pad=0.12", fc="white", ec=PINK, lw=0.6))
+        jcol_ = TCOL.get(int(D["tile"][inc[0][0]]), PINK) if nt_ == 1 else PINK      # single-tile junction: in that tile's colour
+        axC.plot([pj_[0], lp_[0]], [pj_[1], lp_[1]], color=jcol_, lw=0.9, zorder=8)
+        axC.scatter(*pj_, s=70, facecolor="none", edgecolor=jcol_, linewidth=1.4, zorder=8)
+        axC.text(*lp_, f"{100 * abs(r_) / thr_:.0f}%" + (f"\none tile" if nt_ == 1 else ""), ha="center", va="center", fontsize=8, linespacing=1.0,
+                 color=jcol_, fontweight="bold", zorder=9, bbox=dict(boxstyle="round,pad=0.12", fc="white", ec=jcol_, lw=0.6 if nt_ > 1 else 1.2))
         log(f"  junction {n}: imbalance of used recordings {100 * abs(r_) / thr_:.0f}% ({nt_} tile(s))")
     L_ = 50 / PX_UM; xb_, yb_ = c1_ - 8 - L_, r1_ - 8
     axC.plot([xb_, xb_ + L_], [yb_, yb_], color="white", lw=2.5, solid_capstyle="butt", zorder=8)
