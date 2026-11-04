@@ -175,7 +175,7 @@ def main():
 
     fig = plt.figure(figsize=(7.5, 6.6), facecolor='white')
     gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.8], hspace=0.16, left=0.06, right=0.9, top=0.935, bottom=0.08)
-    gT = gs[0].subgridspec(1, 2, wspace=0.08); gBm = gs[1].subgridspec(1, 3, width_ratios=[1.15, 1.0, 0.8], wspace=0.45)
+    gT = gs[0].subgridspec(1, 3, width_ratios=[1.0, 0.34, 1.0], wspace=0.04); gBm = gs[1].subgridspec(1, 3, width_ratios=[1.15, 1.0, 0.8], wspace=0.45)
     LETTERS = {}
     def letter(ax, l, title, dx=-0.02):                                      # letter + title placed on a shared row line after layout (below)
         LETTERS[l] = (ax, title)
@@ -187,20 +187,30 @@ def main():
     axA.plot([], [], color=GREY_U[:3], lw=1.2, label='measured, |Q′| < 2σ')
     axA.plot([], [], color=GREY_N[:3], lw=1.2, label='unmeasured')
     axA.plot([], [], 'D', ms=5, mfc='white', mec=INKC, mew=1.0, label='stagnation point')
-    # arterial cuts coloured by their inflow in Q′ (red scale, log); hollow = net withdrawal
+    # middle column: the arterial cuts zoomed, each cut coloured by its inflow in Q′ (red log scale; white = net withdrawal)
+    cxy_ = np.array([nxy[nodes[i_]] for i_ in dom['inj']]); pad_ = 120
+    x0i, x1i = cxy_[:, 0].min() - pad_, cxy_[:, 0].max() + pad_; y0i, y1i = cxy_[:, 1].min() - pad_, cxy_[:, 1].max() + pad_
+    axIn = fig.add_subplot(gT[1]); bg(axIn); field(axIn, Qp, True)
+    axIn.set_xlim(x0i, x1i); axIn.set_ylim(y1i, y0i); axIn.set_aspect('equal')
+    for s_ in axIn.spines.values():
+        s_.set_visible(True); s_.set_color('0.3'); s_.set_linewidth(0.8)
     fcut_ = D['fb'][dom['inj']]; pos_ = fcut_ > 0
-    nCut = mcolors.LogNorm(vmin=max(fcut_[pos_].min(), 1e-3), vmax=fcut_.max()); cCut = plt.get_cmap('Reds')
+    nCut = mcolors.LogNorm(vmin=0.01, vmax=max(fcut_.max(), 1.0))
+    cCut = mcolors.LinearSegmentedColormap.from_list('rt', plt.get_cmap('Reds')(np.linspace(0.25, 1.0, 256)))
     for i_, f_ in zip(dom['inj'], fcut_):
         if f_ > 0:
-            axA.scatter(*nxy[nodes[i_]], s=16, color=cCut(0.25 + 0.75 * nCut(f_)), edgecolor='black', linewidths=0.4, zorder=7)
+            axIn.scatter(*nxy[nodes[i_]], s=30, color=cCut(nCut(max(f_, 0.01))), edgecolor='black', linewidths=0.5, zorder=7)
         else:
-            axA.scatter(*nxy[nodes[i_]], s=12, facecolor='white', edgecolor='black', linewidths=0.6, zorder=7)
-    cbCut = axA.inset_axes([0.73, 0.94, 0.24, 0.025])
-    _cmap_trunc = mcolors.LinearSegmentedColormap.from_list('rt', cCut(np.linspace(0.25, 1.0, 256)))
-    cb_ = plt.colorbar(plt.cm.ScalarMappable(norm=nCut, cmap=_cmap_trunc), cax=cbCut, orientation='horizontal', ticks=[0.01, 0.1, 1.0])
-    cb_.ax.set_xticklabels(['0.01', '0.1', '1']); cb_.ax.minorticks_off()
-    cb_.set_label('cut inflow (nL/s)', fontsize=8, labelpad=1); cb_.ax.tick_params(labelsize=8, length=2, pad=1); cb_.outline.set_linewidth(0.4)
-    cb_.ax.xaxis.set_label_position('top')
+            axIn.scatter(*nxy[nodes[i_]], s=24, facecolor='white', edgecolor='black', linewidths=0.7, zorder=7)
+    axA.add_patch(plt.Rectangle((x0i, y0i), x1i - x0i, y1i - y0i, fill=False, ec='0.3', lw=0.8, zorder=7))
+    from matplotlib.patches import ConnectionPatch
+    for ya_ in (y0i, y1i):                                                   # box in a → zoomed panel
+        fig.add_artist(ConnectionPatch(xyA=(x1i, ya_), coordsA=axA.transData, xyB=(x0i, ya_), coordsB=axIn.transData, color='0.5', lw=0.6, ls=(0, (2, 2))))
+    axIn.set_title('Arterial cuts', fontsize=8, pad=2)
+    cbCut = axIn.inset_axes([0.05, -0.1, 0.9, 0.035])
+    cb_ = plt.colorbar(plt.cm.ScalarMappable(norm=nCut, cmap=cCut), cax=cbCut, orientation='horizontal', ticks=[0.01, 0.1, 1.0])
+    cb_.ax.set_xticklabels(['0.01', '0.1', '1']); cb_.ax.minorticks_off(); cb_.ax.tick_params(labelsize=8, length=2, pad=1); cb_.outline.set_linewidth(0.4)
+    cb_.set_label('inflow (nL/s)\n○ withdrawal', fontsize=8, labelpad=2, linespacing=1.1)
     _hs = []
     axA.legend(handles=[h_ for h_ in axA.get_legend_handles_labels()[0] if h_ not in _hs], loc='upper center', bbox_to_anchor=(0.5, 0.0), ncol=3,
                fontsize=8, frameon=False, borderaxespad=0.2, scatterpoints=1,
@@ -235,7 +245,7 @@ def main():
     axA.text(x0_ + L_ / 2, y0_ - 0.012 * Hm, '1 mm', ha='center', va='bottom', fontsize=8, zorder=8)
 
     # b
-    axB = fig.add_subplot(gT[1]); bg(axB); field(axB, Qs, False); markers(axB); mark_divide(axB, Qs, 'Q_sim', np.ones(len(Qs), bool))
+    axB = fig.add_subplot(gT[2]); bg(axB); field(axB, Qs, False); markers(axB); mark_divide(axB, Qs, 'Q_sim', np.ones(len(Qs), bool))
     for c in picked:                                         # same vessels as a, in the passive model's own direction
         if abs(Qs[c]) >= 0.01:                               # no arrow where the model's flow is negligible (direction meaningless)
             arrow(axB, c, Qs)
@@ -245,7 +255,6 @@ def main():
     inj = fb[dom['inj']]                                     # arterial cuts drawn red by markers(); net withdrawals not marked (caption)
     print(f"[fig7] arterial cuts: {int((inj < 0).sum())} net withdrawals, Σ {inj[inj < 0].sum():.2f} nL/s ({100 * -inj[inj < 0].sum() / inj[inj > 0].sum():.0f}% of inflow)")
     axB.plot([], [], 'o', ms=3.2, color='#d40000', mec='white', mew=0.3, label='arterial boundary')
-    axB.plot([], [], 'o', ms=4, mfc='white', mec='black', mew=0.6, label='withdrawing cut')
     axB.plot([], [], 's', ms=4, color='#2b35a8', mec='white', mew=0.5, label='venous outlet')
     axB.plot([], [], 'D', ms=5, mfc='white', mec=INKC, mew=1.0, label='_nolegend_')
     axB.legend(loc='upper center', bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=8, frameon=False, borderaxespad=0.2,
