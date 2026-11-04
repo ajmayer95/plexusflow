@@ -246,6 +246,9 @@ def main():
 
     # b
     axB = fig.add_subplot(gT[2]); bg(axB); field(axB, Qs, False); markers(axB); mark_divide(axB, Qs, 'Q_sim', np.ones(len(Qs), bool))
+    axB.add_patch(plt.Rectangle((x0i, y0i), x1i - x0i, y1i - y0i, fill=False, ec='0.3', lw=0.8, zorder=7))
+    for ya_ in (y0i, y1i):                                                   # zoomed panel → same box in the passive prediction
+        fig.add_artist(ConnectionPatch(xyA=(x1i, ya_), coordsA=axIn.transData, xyB=(x0i, ya_), coordsB=axB.transData, color='0.5', lw=0.6, ls=(0, (2, 2))))
     for c in picked:                                         # same vessels as a, in the passive model's own direction
         if abs(Qs[c]) >= 0.01:                               # no arrow where the model's flow is negligible (direction meaningless)
             arrow(axB, c, Qs)
