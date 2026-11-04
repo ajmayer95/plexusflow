@@ -18,6 +18,8 @@ run() { echo; echo "=== $* ==="; "$PY" "$@"; }
 if [[ "${1:-}" != "--figures" ]]; then
   mkdir -p "${PLEXUSFLOW_RESULTS:-$PLEXUSFLOW_STAGE/results}"
   run scripts/dc_reconcile.py          # reliability model + reconciled mean flows   → reliability_model_v1.json, dc_reconciled_v2.pkl
+  RES="${PLEXUSFLOW_RESULTS:-$PLEXUSFLOW_STAGE/results}"
+  if [[ -d "$RES/stokes_bench/ensemble" ]]; then run scripts/benchmark/c_truth_calibration.py; fi   # c vs known truth → c_truth_calibration.json (Fig 6b)
   run scripts/dc_validate_weighting.py # weighting validation vs repeat recordings   → dc_weighting_validation.json (Fig 6d)
   run scripts/dc_validate_passive.py   # conservation-only vs passive-constrained      → dc_passive_comparison.json (SI)
   run scripts/benchmark/dc_reconstruction.py  # known-truth benchmark, noise × radius error → dc_synthetic_benchmark.json (SI)
