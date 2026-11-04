@@ -250,36 +250,15 @@ def main():
     mos = tifffile.imread(str(ST / "fuse" / "maxmed.tif")).astype(float); mos = mos.mean(-1) if mos.ndim == 3 else mos; Hm = mos.shape[0]
     toimg = lambda q: np.column_stack([q[:, 0], Hm - q[:, 1]]); xy0 = xy; xy = lambda n: toimg(xy0(n)[None])[0]
     mids = {i: toimg(np.asarray(G.edges[E[i]]["path"], float))[len(G.edges[E[i]]["path"]) // 2] for i in pidx}
-    fig = plt.figure(figsize=(7.5, 7.6), facecolor="white")
-    gt = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.95, bottom=0.42, width_ratios=[0.85, 1.15], wspace=0.12)
-    gl = gt[0].subgridspec(2, 1, height_ratios=[1.0, 1.0], hspace=0.12)
-    axN = fig.add_subplot(gl[0]); allp = toimg(np.vstack([np.asarray(G.edges[E[i]]["path"], float) for i in pidx])); pad = 18
-    axN.set_xlim(allp[:, 0].min() - pad, allp[:, 0].max() + pad); axN.set_ylim(allp[:, 1].max() + pad, allp[:, 1].min() - pad)
-    axN.set_aspect("equal"); axN.axis("off"); qmax = np.abs(Qp[pidx]).max()
-    for i in pidx:
-        q = toimg(np.asarray(G.edges[E[i]]["path"], float))
-        if np.linalg.norm(q[0] - xy(E[i][0])) > np.linalg.norm(q[-1] - xy(E[i][0])):
-            q = q[::-1]                                                       # path from u to v; Q′ > 0 is flow u → v
-        axN.plot(q[:, 0], q[:, 1], color="0.6", lw=1.5 + 8 * abs(Qp[i]) / qmax, solid_capstyle="round", zorder=2)
-        a_ = int(0.72 * (len(q) - 1)); b_ = min(a_ + 3, len(q) - 1); d_ = q[b_] - q[a_]
-        if Qp[i] < 0:
-            d_ = -d_
-        if np.linalg.norm(d_) > 0:
-            d_ = d_ / np.linalg.norm(d_) * 9
-            axN.annotate("", xy=q[a_] + d_, xytext=q[a_] - d_, arrowprops=dict(arrowstyle="-|>", color=INK, lw=0.9, mutation_scale=10), zorder=5)
-        axN.text(*mids[i], str(num[i]), ha="center", va="center", fontsize=8, color=INK, fontweight="bold", zorder=6,
-                 bbox=dict(boxstyle="circle,pad=0.18", fc="white", ec="0.4", lw=0.6))
-    for n in pjun:
-        axN.scatter(*xy(n), s=12, color=INK, zorder=3)
-    jc = max(pjun, key=lambda n: xy(n)[0])                                 # right-most junction: label in the empty lower right
-    axN.annotate("Σ in = Σ out\nat every junction", xy(jc), xytext=(0.93, 0.5), textcoords="axes fraction", fontsize=8, color=INK, ha="center",
-                 arrowprops=dict(arrowstyle="-", color="0.4", lw=0.6), linespacing=1.0)
-    axN.set_title("Repeated vessel measurements", fontsize=9, loc="left", pad=3)
-    # the same vessels in the tissue (max-median mosaic), inside the overlap of the three tiles
-    axC = fig.add_subplot(gl[1]); cpad = 170
+    fig = plt.figure(figsize=(7.5, 6.6), facecolor="white")
+    gt = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.95, bottom=0.44, width_ratios=[0.9, 1.1], wspace=0.14)
+    gr = gt[1].subgridspec(2, 1, height_ratios=[0.85, 1.15], hspace=0.5)
+    # a: the vessels in the tissue (max − median mosaic), numbered, with flow direction and the three tile footprints
+    allp = toimg(np.vstack([np.asarray(G.edges[E[i]]["path"], float) for i in pidx]))
+    axC = fig.add_subplot(gt[0]); cpad = 150
     c0_, c1_ = int(allp[:, 0].min() - cpad), int(allp[:, 0].max() + cpad); r0_, r1_ = int(allp[:, 1].min() - cpad), int(allp[:, 1].max() + cpad)
     crop_ = mos[max(r0_, 0):r1_, max(c0_, 0):c1_]; lo_, hi_ = np.percentile(crop_[crop_ > 0], (1, 99.5))
-    axC.imshow(mos, cmap="gray", vmin=lo_, vmax=hi_, interpolation="antialiased"); axC.set_xlim(c0_, c1_); axC.set_ylim(r1_, r0_)
+    axC.imshow(mos, cmap="gray", vmin=lo_, vmax=hi_ * 1.3, interpolation="antialiased"); axC.set_xlim(c0_, c1_); axC.set_ylim(r1_, r0_)
     axC.set_aspect("equal"); axC.set_xticks([]); axC.set_yticks([])
     for s_ in axC.spines.values():
         s_.set_color("0.7"); s_.set_linewidth(0.5)
@@ -287,60 +266,69 @@ def main():
         tg = geom.tiles[int(t_)]; Hv, Wv = tg.video_shape if tg.video_shape else tifffile.imread(str(ST / "tiles" / "maxmed" / f"vid{t_}_maxmed.tif")).shape[:2]
         fp = np.array([[0, 0, 1], [0, Wv, 1], [Hv, Wv, 1], [Hv, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
         fp = fp[:, :2] / geom.downsample - [geom.y0, geom.x0]                  # (row, column) in the mosaic
-        axC.fill(fp[:, 1], fp[:, 0], color=TCOL[t_], alpha=0.07, lw=0, zorder=2)
-        axC.plot(fp[:, 1], fp[:, 0], color=TCOL[t_], lw=2.0, zorder=3)
+        axC.plot(fp[:, 1], fp[:, 0], color=TCOL[t_], lw=2.2, zorder=3)
     for i in pidx:
         q = toimg(np.asarray(G.edges[E[i]]["path"], float))
-        axC.plot(q[:, 0], q[:, 1], color="black", lw=2.6, zorder=4, solid_capstyle="round"); axC.plot(q[:, 0], q[:, 1], color="#ffd400", lw=1.4, zorder=5, solid_capstyle="round")
-    axC.text(*(allp.mean(0) + [0, -(allp[:, 1].max() - allp[:, 1].min()) / 2 - 30]), "vessels 1–9", color="#ffd400", fontsize=8, ha="center", va="bottom", zorder=5,
+        if np.linalg.norm(q[0] - xy(E[i][0])) > np.linalg.norm(q[-1] - xy(E[i][0])):
+            q = q[::-1]
+        axC.plot(q[:, 0], q[:, 1], color="black", lw=3.4, zorder=4, solid_capstyle="round"); axC.plot(q[:, 0], q[:, 1], color="#ffd400", lw=2.0, zorder=5, solid_capstyle="round")
+        a_ = int(0.75 * (len(q) - 1)); b_ = min(a_ + 3, len(q) - 1); d_ = q[b_] - q[a_]
+        if Qp[i] < 0:
+            d_ = -d_
+        if np.linalg.norm(d_) > 0:
+            d_ = d_ / np.linalg.norm(d_) * 8
+            axC.annotate("", xy=q[a_] + d_, xytext=q[a_] - d_, arrowprops=dict(arrowstyle="-|>", color="#ffd400", lw=1.0, mutation_scale=10), zorder=6)
+        axC.text(*mids[i], str(num[i]), ha="center", va="center", fontsize=8, color=INK, fontweight="bold", zorder=7,
+                 bbox=dict(boxstyle="circle,pad=0.15", fc="white", ec="black", lw=0.6))
+    L_ = 100 / PX_UM; xb_, yb_ = c1_ - 20 - L_, r1_ - 20
+    axC.plot([xb_, xb_ + L_], [yb_, yb_], color="white", lw=2.5, solid_capstyle="butt", zorder=8)
+    axC.text(xb_ + L_ / 2, yb_ - 8, "100 µm", color="white", fontsize=8, ha="center", va="bottom", zorder=8,
              path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="black")])
-    L_ = 100 / PX_UM; xb_, yb_ = c1_ - 25 - L_, r1_ - 25
-    axC.plot([xb_, xb_ + L_], [yb_, yb_], color="white", lw=2.5, solid_capstyle="butt", zorder=6)
-    axC.text(xb_ + L_ / 2, yb_ - 12, "100 µm", color="white", fontsize=8, ha="center", va="bottom", zorder=6,
-             path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="black")])
-    axC.set_title("In the tissue: overlap of tiles " + ", ".join(str(t_) for t_ in ptiles), fontsize=9, loc="left", pad=3)
-    # strip chart: each tile's recording vs the reconstruction
-    gr = gt[1].subgridspec(2, 1, height_ratios=[0.8, 1.25], hspace=0.42)
-    # waveforms: one vessel recorded in all three tiles — Q(t) per recording, its mean (the DC value), and the reconstruction
+    axC.set_title("Vessels in the overlap of three tiles", fontsize=9, loc="left", pad=3)
+
+    # b: one vessel, three recordings
     from plexusflow.reconcile.harmonics import FS as _FS
     wv = max((i for i in order if len(recs[i]) >= 3), key=lambda i: max(r[1] for r in recs[i]) / min(r[1] for r in recs[i]))
-    axW = fig.add_subplot(gr[0]); p_ = axW.get_position(); axW.set_position([p_.x0 + 0.04, p_.y0, p_.width - 0.04, p_.height])
+    axW = fig.add_subplot(gr[0]); p_ = axW.get_position(); axW.set_position([p_.x0 + 0.05, p_.y0, p_.width - 0.05, p_.height])
     sgn = np.sign(Qp[wv]) or 1.0
     for m in G.edges[E[wv]]["measurements_piv"]:
         t_ = int(m["tile_id"])
         if t_ not in TCOL or m.get("Q_t") is None:
             continue
-        q = sgn * np.asarray(m["Q_t"], float); tt = np.arange(len(q)) / _FS; sel = tt <= 2.0
-        used = t_ == int(D["tile"][wv])
-        axW.plot(tt[sel], q[sel], color=TCOL[t_], lw=1.3 if used else 0.9, alpha=1.0 if used else 0.7, zorder=3 if used else 2)
+        q = sgn * np.asarray(m["Q_t"], float); tt = np.arange(len(q)) / _FS; sel = tt <= 2.0; used = t_ == int(D["tile"][wv])
+        axW.plot(tt[sel], q[sel], color=TCOL[t_], lw=1.4 if used else 0.9, alpha=1.0 if used else 0.7, zorder=3 if used else 2)
         axW.axhline(q.mean(), color=TCOL[t_], lw=1.0, ls=(0, (3, 2)), zorder=2)
     axW.axhline(abs(Qp[wv]), color=INK, lw=2.0, zorder=4)
-    axW.set_xlim(0, 2.0); axW.set_xlabel("time (s)", fontsize=8, labelpad=1); axW.set_ylabel("flow (nL/s)", fontsize=8, labelpad=1)
+    axW.text(1.98, abs(Qp[wv]) * 0.93, "reconstructed mean flow", fontsize=8, color=INK, va="top", ha="right", zorder=6,
+             bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.5))
+    axW.set_xlim(0, 2.0); axW.set_xlabel("time since recording start (s)", fontsize=8, labelpad=1); axW.set_ylabel("flow (nL/s)", fontsize=8, labelpad=1)
     axW.tick_params(labelsize=8); axW.spines[["top", "right"]].set_visible(False)
-    axW.set_title(f"Vessel {num[wv]}: recorded three times (dashed: mean)", fontsize=9, loc="left", pad=3)
+    axW.set_title(f"Repeated recordings of vessel {num[wv]}", fontsize=9, loc="left", pad=3)
     log(f"  waveform panel: vessel {num[wv]} {E[wv]}, means " + ", ".join(f"{r[0]}: {r[1]:.3f}" for r in sorted(recs[wv])) + f"; Q′ {abs(Qp[wv]):.3f}")
+
+    # c: all nine vessels — selected recording, held-out recordings, reconstruction
     axS = fig.add_subplot(gr[1]); xs_ = np.arange(1, len(order) + 1)
-    p_ = axS.get_position(); axS.set_position([p_.x0 + 0.04, p_.y0, p_.width - 0.04, p_.height])
+    p_ = axS.get_position(); axS.set_position([p_.x0 + 0.05, p_.y0, p_.width - 0.05, p_.height])
     for k, i in enumerate(order):
         rs = recs[i]; offs = np.linspace(-0.18, 0.18, len(rs)) if len(rs) > 1 else [0.0]
         used = int(D["tile"][i])                                             # the winner (smallest c): the only recording the reconstruction uses
         assert used in [r[0] for r in rs] and min(rs, key=lambda r: r[2])[0] == used, (i, used, rs)
         for (t_, q_, c_, s_), dx in zip(sorted(rs), offs):
-            axS.scatter(k + 1 + dx, q_, s=34, facecolors=TCOL[t_] if t_ == used else "white", edgecolors=TCOL[t_], linewidths=1.3, zorder=3)
+            axS.scatter(k + 1 + dx, q_, s=30, facecolors=TCOL[t_] if t_ == used else "white", edgecolors=TCOL[t_], linewidths=1.3, zorder=3)
         axS.plot([k + 1 - 0.32, k + 1 + 0.32], [abs(Qp[i])] * 2, color=INK, lw=2.2, zorder=4, solid_capstyle="butt")
     axS.set_yscale("log"); axS.set_xticks(xs_); axS.set_xticklabels([str(x) for x in xs_], fontsize=8); axS.set_xlim(0.4, len(order) + 0.6)
-    axS.set_xlabel("Vessel ID", fontsize=8, labelpad=1); axS.set_ylabel("flow magnitude (nL/s)", fontsize=8, labelpad=1); axS.tick_params(labelsize=8)
-    axS.spines[["top", "right"]].set_visible(False); axS.set_title("Conservative reference reconstruction", fontsize=9, loc="left", pad=3)
+    axS.set_xlabel("Vessel ID", fontsize=8, labelpad=1); axS.set_ylabel("mean flow (nL/s)", fontsize=8, labelpad=1); axS.tick_params(labelsize=8)
+    axS.spines[["top", "right"]].set_visible(False); axS.set_title("Conservation-consistent reference flows", fontsize=9, loc="left", pad=3)
     from matplotlib.lines import Line2D
-    hs = [Line2D([], [], marker="o", ls="", ms=6, color=TCOL[t_], label=f"tile {t_} (t = {tmin[t_]:.0f} min)") for t_ in ptiles]
-    hs += [Line2D([], [], marker="o", ls="", ms=6, color="0.35", label="used in reconstruction"),
-           Line2D([], [], marker="o", ls="", ms=6, mfc="white", mec="0.35", mew=1.3, label="not used (held out)"),
-           Line2D([], [], color=INK, lw=2.2, label="reconstructed")]
-    fig.legend(handles=hs, loc="upper center", bbox_to_anchor=(0.55, 0.385), ncol=3, frameon=False, fontsize=8, handletextpad=0.3, columnspacing=1.6)
+    hs = [Line2D([], [], marker="s", ls="", ms=7, color=TCOL[t_], label=f"Tile {t_}") for t_ in ptiles]
+    hs += [Line2D([], [], marker="o", ls="", ms=6, color="0.35", label="Selected"),
+           Line2D([], [], marker="o", ls="", ms=6, mfc="white", mec="0.35", mew=1.3, label="Held out"),
+           Line2D([], [], color=INK, lw=2.2, label="Reconstructed")]
+    fig.legend(handles=hs, loc="upper center", bbox_to_anchor=(0.5, 0.405), ncol=6, frameon=False, fontsize=8, handletextpad=0.3, columnspacing=1.4)
 
-    # b: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
+    # d: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
     V = json.loads((P.RESULTS / "dc_weighting_validation.json").read_text())
-    axd = fig.add_axes([0.12, 0.06, 0.68, 0.24])
+    axd = fig.add_axes([0.09, 0.07, 0.88, 0.25])
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
@@ -353,12 +341,15 @@ def main():
         axd.scatter([], [], marker=mk, s=50, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.5, label=lab)
     axd.set_xticks(xs); axd.set_xticklabels(xl, fontsize=9); axd.get_xticklabels()[-1].set_color(BLUE); axd.get_xticklabels()[-1].set_fontweight("bold")
     axd.set_xlim(-0.55, len(kinds) - 0.45); axd.set_ylim(0, 0.75)
-    axd.set_ylabel("error vs independent recordings\n(median |log ratio|)", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
-    axd.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False, fontsize=8, handletextpad=0.3)
-    axd.set_title("Held-out prediction error", fontsize=10, pad=4, loc="left")
+    axd.set_ylabel("median absolute\nlog-ratio error", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
+    axd.legend(loc="upper right", frameon=False, fontsize=8, handletextpad=0.3, ncol=2)
+    axd.set_title("Prediction of independent recordings", fontsize=9, pad=4, loc="left")
     for s_ in ("top", "right"):
         axd.spines[s_].set_visible(False)
-    fig.text(0.005, 0.962, "a", **LET); fig.text(0.005, 0.315, "b", **LET)
+    fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv = fig.transFigure.inverted(); tb = lambda a_: inv.transform(a_.get_tightbbox(rr_))
+    xr = min(tb(axW)[0, 0], tb(axS)[0, 0]) - 0.012
+    for x_, y_, l_ in ((0.005, tb(axC)[1, 1], "a"), (xr, tb(axW)[1, 1], "b"), (xr, tb(axS)[1, 1], "c"), (0.005, tb(axd)[1, 1], "d")):
+        fig.text(x_, min(y_ + 0.004, 0.985), l_, **LET)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     plos_style.save(fig, OUT)
     log(f"wrote {OUT}.png/.pdf")
