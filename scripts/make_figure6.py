@@ -265,7 +265,7 @@ def main():
         s_.set_color("0.7"); s_.set_linewidth(0.5)
     placed = []
     plen_ = {i: float(np.sum(np.linalg.norm(np.diff(np.asarray(G.edges[E[i]]["path"], float), axis=0), axis=1))) for i in pidx}
-    arrow_set = set(sorted(pidx, key=lambda i: -plen_[i])[:4])                      # direction on four representative (longest) vessels
+    arrow_set = set(pidx)                                                         # direction on every vessel (reconstructed sign), kept subordinate
     for i in pidx:
         q = toimg(np.asarray(G.edges[E[i]]["path"], float))
         if np.linalg.norm(q[0] - xy(E[i][0])) > np.linalg.norm(q[-1] - xy(E[i][0])):
@@ -281,7 +281,7 @@ def main():
         if np.linalg.norm(d_) > 0 and i in arrow_set:
             i0, i1 = int(np.searchsorted(cum, 0.22 * cum[-1])), min(int(np.searchsorted(cum, 0.78 * cum[-1])), len(q) - 1)
             seg = q[i0:i1 + 1] if Qp[i] >= 0 else q[i0:i1 + 1][::-1]                    # shaft follows the vessel, head at the downstream end
-            HL_, HW_ = 8.0, 4.0                                                   # head length / half-width in mosaic pixels
+            HL_, HW_ = 6.5, 3.2                                                   # head length / half-width in mosaic pixels
             if len(seg) < 3:                                                       # short vessel: its own chord, downstream end
                 a0_, a1_ = (q[0], q[-1]) if Qp[i] >= 0 else (q[-1], q[0]); seg = np.array([a0_, a0_ + 0.85 * (a1_ - a0_)])
             # smooth the traced path (jagged pixel steps), then resample by arc length
@@ -296,9 +296,9 @@ def main():
             Ls_ = np.linspace(0, max(Lt_ - HL_, 0), 40); shaft_ = np.array([at_(L) for L in Ls_])
             if len(shaft_) and Lt_ > HL_ + 2:
                 shaft_[-1] = base_                                                 # shaft ends exactly at the head's base centre
-                axC.plot(shaft_[:, 0], shaft_[:, 1], color="black", lw=1.2, solid_capstyle="butt", zorder=6)
+                axC.plot(shaft_[:, 0], shaft_[:, 1], color="0.25", lw=1.0, solid_capstyle="butt", zorder=6)
             tri_ = np.array([tip_, base_ + HW_ * pv_, base_ - HW_ * pv_])
-            axC.add_patch(matplotlib.patches.Polygon(tri_, closed=True, fc="black", ec="white", lw=0.6, zorder=7, joinstyle="miter"))
+            axC.add_patch(matplotlib.patches.Polygon(tri_, closed=True, fc="0.25", ec="none", zorder=7))
         if np.linalg.norm(d_) > 0:
             nrm = np.array([-u_[1], u_[0]]); cands = [q[a_] + 12 * nrm, q[a_] - 12 * nrm]      # number beside the vessel, not on it
             lab_xy = max(cands, key=lambda c: min([np.linalg.norm(c - o) for o in placed] + [1e9]))
