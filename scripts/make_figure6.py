@@ -280,12 +280,17 @@ def main():
         lab_xy = mids[i]
         if np.linalg.norm(d_) > 0:
             u_ = d_ / np.linalg.norm(d_)
-            axC.annotate("", xy=q[a_] + 6 * u_, xytext=q[a_] - 6 * u_, zorder=6,
-                         arrowprops=dict(arrowstyle="-|>,head_length=0.55,head_width=0.35", fc="black", ec="white", lw=0.7, mutation_scale=12))
+            i0, i1 = int(np.searchsorted(cum, 0.22 * cum[-1])), min(int(np.searchsorted(cum, 0.78 * cum[-1])), len(q) - 1)
+            seg = q[i0:i1 + 1] if Qp[i] >= 0 else q[i0:i1 + 1][::-1]                    # shaft follows the vessel, head at the downstream end
+            for col_, lw_ in (("white", 3.0), ("black", 1.4)):
+                axC.plot(seg[:-1, 0], seg[:-1, 1], color=col_, lw=lw_, solid_capstyle="round", zorder=6)
+            axC.annotate("", xy=seg[-1], xytext=seg[-3] if len(seg) > 2 else seg[0], zorder=7,
+                         arrowprops=dict(arrowstyle="-|>,head_length=0.8,head_width=0.5", fc="black", ec="white", lw=0.6, mutation_scale=7,
+                                         shrinkA=0, shrinkB=0))
             nrm = np.array([-u_[1], u_[0]]); cands = [q[a_] + 17 * nrm, q[a_] - 17 * nrm]      # number beside the vessel, not on it
             lab_xy = max(cands, key=lambda c: min([np.linalg.norm(c - o) for o in placed] + [1e9]))
         placed.append(lab_xy)
-        axC.text(*lab_xy, str(num[i]), ha="center", va="center", fontsize=8, color=INK, fontweight="bold", zorder=7,
+        axC.text(*lab_xy, str(num[i]), ha="center", va="center", fontsize=8, color=INK, fontweight="bold", zorder=8,
                  bbox=dict(boxstyle="circle,pad=0.15", fc="white", ec="black", lw=0.6))
     L_ = 100 / PX_UM; xb_, yb_ = c1_ - 20 - L_, r1_ - 20
     axC.plot([xb_, xb_ + L_], [yb_, yb_], color="white", lw=2.5, solid_capstyle="butt", zorder=8)
