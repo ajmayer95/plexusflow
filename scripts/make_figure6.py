@@ -34,6 +34,7 @@ _ap.parse_args()
 OUT = P.FIGURES / "fig6" / "fig6"
 Z_S = 5.0                                         # junction-circle area per z²
 TILE, NODE = 30, 28329
+SHOW_IMBALANCE = False                            # Fig 6a junction-imbalance labels (off: reviewer, panel a overloaded)
 PATCH, PATCH_HOPS = 59219, 2                      # Fig 6a: 9 vessels each recorded in ≥ 2 of tiles 22/26/27; Q′ within every vessel's recordings
 import os as _os
 PATCH = int(_os.environ.get("FIG6_PATCH", PATCH)); PATCH_HOPS = int(_os.environ.get("FIG6_PATCH_HOPS", PATCH_HOPS))
@@ -263,11 +264,13 @@ def main():
     for s_ in axC.spines.values():
         s_.set_color("0.7"); s_.set_linewidth(0.5)
     placed = []
+    plen_ = {i: float(np.sum(np.linalg.norm(np.diff(np.asarray(G.edges[E[i]]["path"], float), axis=0), axis=1))) for i in pidx}
+    arrow_set = set(sorted(pidx, key=lambda i: -plen_[i])[:4])                      # direction on four representative (longest) vessels
     for i in pidx:
         q = toimg(np.asarray(G.edges[E[i]]["path"], float))
         if np.linalg.norm(q[0] - xy(E[i][0])) > np.linalg.norm(q[-1] - xy(E[i][0])):
             q = q[::-1]
-        axC.plot(q[:, 0], q[:, 1], color="black", lw=7.0, zorder=4, solid_capstyle="round"); axC.plot(q[:, 0], q[:, 1], color="#ffd400", lw=5.0, zorder=5, solid_capstyle="round")
+        axC.plot(q[:, 0], q[:, 1], color="black", lw=4.6, zorder=4, solid_capstyle="round"); axC.plot(q[:, 0], q[:, 1], color="#ffd400", lw=3.2, zorder=5, solid_capstyle="round")
         cum = np.r_[0, np.cumsum(np.linalg.norm(np.diff(q, axis=0), axis=1))]; a_ = int(np.searchsorted(cum, 0.5 * cum[-1]))
         lo_i, hi_i = max(a_ - 2, 0), min(a_ + 2, len(q) - 1); d_ = q[hi_i] - q[lo_i]
         if Qp[i] < 0:
@@ -275,9 +278,10 @@ def main():
         lab_xy = mids[i]
         if np.linalg.norm(d_) > 0:
             u_ = d_ / np.linalg.norm(d_)
+        if np.linalg.norm(d_) > 0 and i in arrow_set:
             i0, i1 = int(np.searchsorted(cum, 0.22 * cum[-1])), min(int(np.searchsorted(cum, 0.78 * cum[-1])), len(q) - 1)
             seg = q[i0:i1 + 1] if Qp[i] >= 0 else q[i0:i1 + 1][::-1]                    # shaft follows the vessel, head at the downstream end
-            HL_, HW_ = 11.0, 5.5                                                   # head length / half-width in mosaic pixels
+            HL_, HW_ = 8.0, 4.0                                                   # head length / half-width in mosaic pixels
             if len(seg) < 3:                                                       # short vessel: its own chord, downstream end
                 a0_, a1_ = (q[0], q[-1]) if Qp[i] >= 0 else (q[-1], q[0]); seg = np.array([a0_, a0_ + 0.85 * (a1_ - a0_)])
             # smooth the traced path (jagged pixel steps), then resample by arc length
@@ -292,16 +296,17 @@ def main():
             Ls_ = np.linspace(0, max(Lt_ - HL_, 0), 40); shaft_ = np.array([at_(L) for L in Ls_])
             if len(shaft_) and Lt_ > HL_ + 2:
                 shaft_[-1] = base_                                                 # shaft ends exactly at the head's base centre
-                axC.plot(shaft_[:, 0], shaft_[:, 1], color="black", lw=1.8, solid_capstyle="butt", zorder=6)
+                axC.plot(shaft_[:, 0], shaft_[:, 1], color="black", lw=1.2, solid_capstyle="butt", zorder=6)
             tri_ = np.array([tip_, base_ + HW_ * pv_, base_ - HW_ * pv_])
             axC.add_patch(matplotlib.patches.Polygon(tri_, closed=True, fc="black", ec="white", lw=0.6, zorder=7, joinstyle="miter"))
-            nrm = np.array([-u_[1], u_[0]]); cands = [q[a_] + 13 * nrm, q[a_] - 13 * nrm]      # number beside the vessel, not on it
+        if np.linalg.norm(d_) > 0:
+            nrm = np.array([-u_[1], u_[0]]); cands = [q[a_] + 12 * nrm, q[a_] - 12 * nrm]      # number beside the vessel, not on it
             lab_xy = max(cands, key=lambda c: min([np.linalg.norm(c - o) for o in placed] + [1e9]))
         placed.append(lab_xy)
         axC.text(*lab_xy, str(num[i]), ha="center", va="center", fontsize=9, color=INK, fontweight="bold", zorder=8,
                  bbox=dict(boxstyle="circle,pad=0.15", fc="white", ec="black", lw=0.6))
-    # imbalance of the used recordings at each junction, before reconstruction (all 0 after)
-    for n in pjun:
+    # imbalance of the used recordings at each junction, before reconstruction (all 0 after) — logged only (SI / caption)
+    for n in (pjun if SHOW_IMBALANCE else []):
         inc = [(eidx[(n, m)], 1.0) if (n, m) in eidx else (eidx[(m, n)], -1.0) for m in Hn.neighbors(n)]
         if not all(im[i_] for i_, _ in inc):
             continue
@@ -312,7 +317,7 @@ def main():
         jcol_ = TCOL.get(int(D["tile"][inc[0][0]]), PINK) if nt_ == 1 else PINK      # single-tile junction: in that tile's colour
         axC.plot([pj_[0], lp_[0]], [pj_[1], lp_[1]], color=jcol_, lw=0.9, zorder=8)
         axC.scatter(*pj_, s=70, facecolor="none", edgecolor=jcol_, linewidth=1.4, zorder=8)
-        axC.text(*lp_, f"{100 * abs(r_) / thr_:.0f}%" + (f"\none tile" if nt_ == 1 else ""), ha="center", va="center", fontsize=8, linespacing=1.0,
+        axC.text(*lp_, f"{100 * abs(r_) / thr_:.0f}%" + ("\none tile" if nt_ == 1 else ""), ha="center", va="center", fontsize=8, linespacing=1.0,
                  color=jcol_, fontweight="bold", zorder=9, bbox=dict(boxstyle="round,pad=0.12", fc="white", ec=jcol_, lw=0.6 if nt_ > 1 else 1.2))
         log(f"  junction {n}: imbalance of used recordings {100 * abs(r_) / thr_:.0f}% ({nt_} tile(s))")
     L_ = 50 / PX_UM; xb_, yb_ = c1_ - 8 - L_, r1_ - 8
@@ -346,7 +351,7 @@ def main():
         axW.plot(tt[sel], q[sel], color=TCOL[t_], lw=1.4 if used else 0.9, alpha=1.0 if used else 0.7, zorder=3 if used else 2)
         axW.axhline(q.mean(), color=TCOL[t_], lw=1.0, ls=(0, (3, 2)), zorder=2)
     axW.axhline(abs(Qp[wv]), color=INK, lw=2.0, zorder=4)
-    axW.text(1.98, abs(Qp[wv]) * 0.93, "reconstructed mean flow", fontsize=8, color=INK, va="top", ha="right", zorder=6,
+    axW.text(1.98, abs(Qp[wv]) * 0.93, "reconstructed reference", fontsize=8, color=INK, va="top", ha="right", zorder=6,
              bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.5))
     axW.set_xlim(0, 2.0); axW.set_xlabel("time since recording start (s)", fontsize=8, labelpad=1); axW.set_ylabel("flow (nL/s)", fontsize=8, labelpad=1)
     axW.tick_params(labelsize=8); axW.spines[["top", "right"]].set_visible(False)
@@ -361,7 +366,8 @@ def main():
         used = int(D["tile"][i])                                             # the winner (smallest c): the only recording the reconstruction uses
         assert used in [r[0] for r in rs] and min(rs, key=lambda r: r[2])[0] == used, (i, used, rs)
         for (t_, q_, c_, s_), dx in zip(sorted(rs), offs):
-            axS.scatter(k + 1 + dx, q_, s=48 if t_ == used else 26, facecolors=TCOL[t_] if t_ == used else "white", edgecolors=TCOL[t_], linewidths=1.3, zorder=3)
+            axS.scatter(k + 1 + dx, q_, s=52 if t_ == used else 24, facecolors=TCOL[t_] if t_ == used else "white", edgecolors=TCOL[t_], linewidths=1.3,
+                        alpha=1.0 if t_ == used else 0.6, zorder=3)
         axS.plot([k + 1 - 0.38, k + 1 + 0.38], [abs(Qp[i])] * 2, color=INK, lw=3.2, zorder=4, solid_capstyle="butt")
     axS.set_yscale("log"); axS.set_xticks(xs_); axS.set_xticklabels([str(x) for x in xs_], fontsize=8); axS.set_xlim(0.4, len(order) + 0.6)
     axS.set_xlabel("Vessel ID", fontsize=8, labelpad=1); axS.set_ylabel("mean flow (nL/s)", fontsize=8, labelpad=1); axS.tick_params(labelsize=8)
@@ -369,8 +375,8 @@ def main():
     from matplotlib.lines import Line2D
     hs = [Line2D([], [], marker="s", ls="", ms=7, color=TCOL[t_], label=f"Tile {t_}") for t_ in ptiles]
     hs += [Line2D([], [], marker="o", ls="", ms=7, color="0.35", label="Used"),
-           Line2D([], [], marker="o", ls="", ms=5, mfc="white", mec="0.35", mew=1.3, label="Independent repeat"),
-           Line2D([], [], color=INK, lw=3.2, label="Reconstructed mean")]
+           Line2D([], [], marker="o", ls="", ms=5, mfc="white", mec="0.35", mew=1.3, label="Not used"),
+           Line2D([], [], color=INK, lw=3.2, label="Reconstructed")]
     fig.legend(handles=hs, loc="upper center", bbox_to_anchor=(0.5, 0.405), ncol=6, frameon=False, fontsize=8, handletextpad=0.3, columnspacing=1.4)
 
     # d: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
@@ -379,7 +385,7 @@ def main():
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
-    axd.text(-0.38, raw["err"] - 0.015, "two recordings of the same vessel", fontsize=8, color=GREY, va="top", ha="left")
+    axd.text(-0.38, raw["err"] - 0.015, "repeat-recording disagreement", fontsize=8, color=GREY, va="top", ha="left")
     for test, dx, mk, lab in (("measured", -0.12, "o", "measured vessels"), ("imputed", 0.12, "D", "withheld vessels")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
@@ -473,7 +479,7 @@ def main():
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
-    axd.text(-0.38, raw["err"] - 0.015, "two recordings of the same vessel", fontsize=8, color=GREY, va="top", ha="left")
+    axd.text(-0.38, raw["err"] - 0.015, "repeat-recording disagreement", fontsize=8, color=GREY, va="top", ha="left")
     for test, dx, mk, lab in (("measured", -0.15, "o", "measured"), ("imputed", 0.15, "D", "withheld")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
