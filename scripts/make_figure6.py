@@ -34,6 +34,9 @@ _ap.parse_args()
 OUT = P.FIGURES / "fig6" / "fig6"
 Z_S = 5.0                                         # junction-circle area per z²
 TILE, NODE = 30, 28329
+PATCH, PATCH_HOPS = 59219, 2                      # Fig 6a: 9 vessels each recorded in ≥ 2 of tiles 22/26/27; Q′ within every vessel's recordings
+import os as _os
+PATCH = int(_os.environ.get("FIG6_PATCH", PATCH)); PATCH_HOPS = int(_os.environ.get("FIG6_PATCH_HOPS", PATCH_HOPS))
 HIGH, LOW = (28304, 28329), (35992, 36030)
 PX_UM = 1.7
 KW = dict(dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="median_band", median_lo=0.5, median_hi=1.5, R_slice_lo=0.5,
@@ -223,9 +226,83 @@ def main():
 
     q0 = float(np.percentile(np.abs(Qm[im]), 10))                    # floor for relative changes of near-zero flows
     rel = np.where(im, (np.abs(Qp) - np.abs(Qm)) / np.maximum(np.abs(Qm), q0), np.nan); rev = im & (np.sign(Qp) != np.sign(Qm))
+
+    # ---- main figure: a recordings of the same vessels from different tiles (different times) disagree; the reconstruction
+    #      is one conservative field through them;  b prediction of independent recordings
+    import networkx as nx
+    from plexusflow.io.acquisition import tile_acquisition_minutes
+    Hn = nx.Graph(); Hn.add_edges_from(E); pn_ = nx.single_source_shortest_path_length(Hn, PATCH, cutoff=PATCH_HOPS)
+    pidx = sorted({eidx[e] if e in eidx else eidx[e[::-1]] for e in Hn.subgraph(pn_).edges()})
+    pjun = [n for n in pn_ if Hn.degree(n) >= 3 and pn_[n] < PATCH_HOPS]
+    recs = {i: [] for i in pidx}
+    for (tt, e), m in M.items():
+        if e in eidx and eidx[e] in recs:
+            recs[eidx[e]].append((int(m["tile"]), abs(m["Q"]), c_of(mod, m), np.sign(m["Q"])))
+    ptiles = sorted({r[0] for i in pidx for r in recs[i]}); tmin = tile_acquisition_minutes(ST, StageConfig.load(ST), ptiles)
+    TCOL = dict(zip(ptiles, ["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#a6761d"]))
+    xy = lambda n: np.array([G.nodes[n]["x"], G.nodes[n]["y"]], float)
+    mids = {i: np.asarray(G.edges[E[i]]["path"], float)[len(G.edges[E[i]]["path"]) // 2] for i in pidx}
+    order = sorted(pidx, key=lambda i: (mids[i][0], mids[i][1])); num = {i: k + 1 for k, i in enumerate(order)}
+    log(f"patch {PATCH}: {len(pidx)} vessels, tiles {ptiles} at {[tmin[t_] for t_ in ptiles]} min; "
+        + "; ".join(f"{num[i]}: Q′ {abs(Qp[i]):.3f} vs " + "/".join(f"{r[1]:.3f}" for r in recs[i]) for i in order))
+
+    fig = plt.figure(figsize=(7.5, 6.0), facecolor="white")
+    gt = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.94, bottom=0.53, width_ratios=[0.85, 1.15], wspace=0.12)
+    axN = fig.add_subplot(gt[0]); allp = np.vstack([np.asarray(G.edges[E[i]]["path"], float) for i in pidx]); pad = 18
+    axN.set_xlim(allp[:, 0].min() - pad, allp[:, 0].max() + pad); axN.set_ylim(allp[:, 1].max() + pad, allp[:, 1].min() - pad)
+    axN.set_aspect("equal"); axN.axis("off"); qmax = np.abs(Qp[pidx]).max()
+    for i in pidx:
+        q = np.asarray(G.edges[E[i]]["path"], float)
+        axN.plot(q[:, 0], q[:, 1], color="0.6", lw=1.5 + 8 * abs(Qp[i]) / qmax, solid_capstyle="round", zorder=2)
+        axN.text(*mids[i], str(num[i]), ha="center", va="center", fontsize=8, color=INK, fontweight="bold", zorder=4,
+                 bbox=dict(boxstyle="circle,pad=0.18", fc="white", ec="0.4", lw=0.6))
+    for n in pjun:
+        axN.scatter(*xy(n), s=12, color=INK, zorder=3)
+    axN.set_title("Vessels recorded in several tiles", fontsize=9, loc="left", pad=3)
+    # strip chart: each tile's recording vs the reconstruction
+    axS = fig.add_subplot(gt[1]); xs_ = np.arange(1, len(order) + 1)
+    for k, i in enumerate(order):
+        rs = recs[i]; offs = np.linspace(-0.18, 0.18, len(rs)) if len(rs) > 1 else [0.0]
+        for (t_, q_, c_, s_), dx in zip(sorted(rs), offs):
+            axS.scatter(k + 1 + dx, q_, s=30, color=TCOL[t_], edgecolors="white", linewidths=0.5, zorder=3, alpha=1.0 if c_ < 0.6 else 0.45)
+        axS.plot([k + 1 - 0.32, k + 1 + 0.32], [abs(Qp[i])] * 2, color=INK, lw=2.2, zorder=4, solid_capstyle="butt")
+    axS.set_yscale("log"); axS.set_xticks(xs_); axS.set_xticklabels([str(x) for x in xs_], fontsize=8); axS.set_xlim(0.4, len(order) + 0.6)
+    axS.set_xlabel("vessel", fontsize=8, labelpad=1); axS.set_ylabel("|flow| (nL/s)", fontsize=8, labelpad=1); axS.tick_params(labelsize=8)
+    axS.spines[["top", "right"]].set_visible(False); axS.set_title("Recordings disagree; one conservative field", fontsize=9, loc="left", pad=3)
+    from matplotlib.lines import Line2D
+    hs = [Line2D([], [], marker="o", ls="", ms=6, color=TCOL[t_], label=f"tile {t_} (t = {tmin[t_]:.0f} min)") for t_ in ptiles]
+    hs.append(Line2D([], [], color=INK, lw=2.2, label="reconstructed"))
+    axS.legend(handles=hs, loc="lower left", ncol=1, frameon=False, fontsize=8, handletextpad=0.3, borderaxespad=0.2)
+
+    # b: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
+    V = json.loads((P.RESULTS / "dc_weighting_validation.json").read_text())
+    axd = fig.add_axes([0.16, 0.08, 0.66, 0.3])
+    kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
+    xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
+    axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
+    axd.text(-0.5, raw["err"] - 0.015, "two recordings of the same vessel", fontsize=8, color=GREY, va="top", ha="left")
+    for test, dx, mk, lab in (("measured", -0.12, "o", "measured vessels"), ("imputed", 0.12, "D", "withheld vessels")):
+        r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
+        cl = [BLUE if k == "calibrated" else GREY for k in kinds]
+        axd.vlines(xs + dx, ci_[:, 0], ci_[:, 1], color=cl, lw=1.4, zorder=2)
+        axd.scatter(xs + dx, e_, marker=mk, s=50, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.5, zorder=3)
+        axd.scatter([], [], marker=mk, s=50, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.5, label=lab)
+    axd.set_xticks(xs); axd.set_xticklabels(xl, fontsize=9); axd.get_xticklabels()[-1].set_color(BLUE); axd.get_xticklabels()[-1].set_fontweight("bold")
+    axd.set_xlim(-0.55, len(kinds) - 0.45); axd.set_ylim(0, 0.75)
+    axd.set_ylabel("error vs independent recordings\n(median |log ratio|)", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
+    axd.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False, fontsize=8, handletextpad=0.3)
+    axd.set_title("Independent validation", fontsize=10, pad=4, loc="left")
+    for s_ in ("top", "right"):
+        axd.spines[s_].set_visible(False)
+    fig.text(0.005, 0.955, "a", **LET); fig.text(0.005, 0.415, "b", **LET)
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    plos_style.save(fig, OUT)
+    log(f"wrote {OUT}.png/.pdf")
+
+    # ---- SI: the full-tile correction map with the example junction (formerly the main panels)
     sel_t = np.array([i for i in pe if im[i]])
     log(f"tile {TILE}: relative change median {np.median(np.abs(rel[sel_t])):.2f}, >50 % {np.mean(np.abs(rel[sel_t]) > 0.5):.0%}, reversed {rev[sel_t].mean():.1%}; q0 {q0:.4f}")
-    fig = plt.figure(figsize=(7.5, 5.3), facecolor="white")
+    fig = plt.figure(figsize=(7.5, 5.3), facecolor="white")  # SI
     gs = fig.add_gridspec(1, 2, left=0.015, right=0.985, top=0.93, bottom=0.17, width_ratios=[1.12, 1.0], wspace=0.08)
     # a: where the reconstruction changes the measurements
     axM = fig.add_subplot(gs[0]); cor_norm = mcolors.TwoSlopeNorm(0, -1.0, 1.0); cor_cmap = matplotlib.colormaps["RdBu_r"]
@@ -314,8 +391,8 @@ def main():
     for x_, y_, l_ in ((0.005, yT, "a"), (xr, yT, "b"), (xr, tb(axd)[1, 1], "c")):
         fig.text(x_, min(y_ + 0.004, 0.985), l_, **LET)
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    plos_style.save(fig, OUT)
-    log(f"wrote {OUT}.png/.pdf")
+    plos_style.save(fig, OUT.parent / "fig6_S_corrections")
+    log("wrote fig6_S_corrections")
 
     # SI: the reliability score c — (a) two measurements, (b) held-out junction calibration, (c) known truth
     fs2 = plt.figure(figsize=(7.5, 3.3), facecolor="white")
