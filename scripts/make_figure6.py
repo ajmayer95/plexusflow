@@ -300,6 +300,20 @@ def main():
         placed.append(lab_xy)
         axC.text(*lab_xy, str(num[i]), ha="center", va="center", fontsize=9, color=INK, fontweight="bold", zorder=8,
                  bbox=dict(boxstyle="circle,pad=0.15", fc="white", ec="black", lw=0.6))
+    # imbalance of the used recordings at each junction, before reconstruction (all 0 after)
+    for n in pjun:
+        inc = [(eidx[(n, m)], 1.0) if (n, m) in eidx else (eidx[(m, n)], -1.0) for m in Hn.neighbors(n)]
+        if not all(im[i_] for i_, _ in inc):
+            continue
+        r_ = sum(s_ * Qm[i_] for i_, s_ in inc); thr_ = sum(abs(Qm[i_]) for i_, _ in inc) / 2; nt_ = len({int(D["tile"][i_]) for i_, _ in inc})
+        pj_ = xy(n); obst_ = np.vstack([allp] + [np.array(placed)] * 3 if placed else [allp])
+        cands_ = [pj_ + 22 * np.array([np.cos(t), np.sin(t)]) for t in np.linspace(0, 2 * np.pi, 16, endpoint=False)]
+        lp_ = max(cands_, key=lambda c: np.min(np.linalg.norm(obst_ - c, axis=1))); placed.append(lp_)
+        axC.plot([pj_[0], lp_[0]], [pj_[1], lp_[1]], color=PINK, lw=0.9, zorder=8)
+        axC.scatter(*pj_, s=70, facecolor="none", edgecolor=PINK, linewidth=1.4, zorder=8)
+        axC.text(*lp_, f"{100 * abs(r_) / thr_:.0f}%", ha="center", va="center", fontsize=8, color=PINK, fontweight="bold", zorder=9,
+                 bbox=dict(boxstyle="round,pad=0.12", fc="white", ec=PINK, lw=0.6))
+        log(f"  junction {n}: imbalance of used recordings {100 * abs(r_) / thr_:.0f}% ({nt_} tile(s))")
     L_ = 50 / PX_UM; xb_, yb_ = c1_ - 8 - L_, r1_ - 8
     axC.plot([xb_, xb_ + L_], [yb_, yb_], color="white", lw=2.5, solid_capstyle="butt", zorder=8)
     axC.text(xb_ + L_ / 2, yb_ - 5, "50 µm", color="white", fontsize=8, ha="center", va="bottom", zorder=8,
