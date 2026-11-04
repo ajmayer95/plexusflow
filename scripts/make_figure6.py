@@ -178,117 +178,114 @@ def main():
         log(f"  {e}: kept {valid.sum()}/{len(valid)} (stored f {m['f']:.3f}), align {m['align']:.2f}, c {ex[e]['c']:.2f}")
 
     # ---------------------------------------------------------------- layout (7.5 in wide, PLOS max)
-    # top: what the reliability score c is (a), and that it predicts real errors — against known truth (b) and on real
-    # held-out junctions (c);  bottom: how c is used (d, the weighted conservative projection at one junction) and the
-    # independent validation (e).  Tile-30 measured / reconciled maps: SI fig6_S_maps.
-    BLUE, GREY, PINK = "#1f5fa8", "0.55", "#c51b8a"
-    fig = plt.figure(figsize=(7.5, 6.6), facecolor="white")
+    # One question per panel:  a why measurements differ in uncertainty (reliability score c) → b does the error model
+    # describe real data (held-out junction calibration) → c how uncertainty sets the corrections (the reconstruction at one
+    # junction; centrepiece) → d does it predict independent recordings better.  SI: c vs known truth (fig6_S_truth),
+    # tile-30 measured / reconciled maps (fig6_S_maps).
+    BLUE, GREY, PINK = "#1f5fa8", "0.55", "#c51b8a"            # blue = lower uncertainty, magenta = higher (panels a and c)
+    fig = plt.figure(figsize=(7.5, 6.9), facecolor="white")
     LET = dict(fontsize=12, fontweight="bold", color=INK, ha="left", va="bottom")
     TIT = dict(fontsize=9, color=INK, pad=4, loc="left")
     c0_ = mod.get("c0", np.median(list(mod["c_T"].values())))
-    top = fig.add_gridspec(1, 3, left=0.015, right=0.985, top=0.935, bottom=0.6, width_ratios=[1.75, 1.0, 1.0], wspace=0.42)
-    TOPROW = (0.935, 0.6)
+    top = fig.add_gridspec(1, 2, left=0.015, right=0.985, top=0.935, bottom=0.6, width_ratios=[1.3, 1.0], wspace=0.25)
     ga = top[0].subgridspec(1, 2, wspace=0.05); axA = []
-    for k, (e, lab, colr) in enumerate(((HIGH, "Reliable", COL[0]), (LOW, "Unreliable", LOWCOL))):
+    for k, (e, lab, colr) in enumerate(((HIGH, "Lower uncertainty", BLUE), (LOW, "Higher uncertainty", PINK))):
         ax = fig.add_subplot(ga[k]); x = ex[e]; draw_measurement(ax, img, x["ki"], colr, x["valid"]); axA.append(ax)
         ax.set_title(lab, fontsize=9, color=colr, pad=3)
-        ax.text(0.5, -0.04, f"f = {x['f']:.2f},  align = {x['align']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=8, color=INK)
-        ax.text(0.5, -0.16, f"c = {x['c']:.2f}  (≈ ±{100 * x['c']:.0f} %)", transform=ax.transAxes, ha="center", va="top", fontsize=9,
-                color=colr, fontweight="bold")
-    for ax in axA:                                                            # lift the image pair to the top of the row
-        p_ = ax.get_position(); ax.set_position([p_.x0, TOPROW[0] - 0.03 - p_.height, p_.width, p_.height])
+        ax.text(0.5, -0.04, f"c = {x['c']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=10, color=colr, fontweight="bold")
+        ax.text(0.5, -0.17, f"f = {x['f']:.2f},  align = {x['align']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=8, color=INK)
+    for ax in axA:
+        p_ = ax.get_position(); ax.set_position([p_.x0, 0.935 - 0.035 - p_.height, p_.width, p_.height])
     pa0, pa1 = axA[0].get_position(), axA[1].get_position(); xm_ = (pa0.x0 + pa1.x1) / 2
-    fig.text(xm_, pa0.y0 - 0.075, r"$c = %.2f + %.2f\,(1 - f) + %.2f\,(1 - \mathrm{align})$" % (c0_, mod["c_f"], mod["c_a"]),
-             ha="center", va="top", fontsize=9, color=INK)
-    fig.text(xm_, pa0.y0 - 0.108, "f: cross-sections with a clean profile (white; grey rejected)\nalign: flow (arrows) along the vessel axis",
+    fig.text(xm_, pa0.y0 - 0.09, r"$c = %.2f + %.2f\,(1 - f) + %.2f\,(1 - \mathrm{align})$" % (c0_, mod["c_f"], mod["c_a"]), ha="center", va="top", fontsize=9, color=INK)
+    fig.text(xm_, pa0.y0 - 0.122, "f: cross-sections with a clean profile (white; grey rejected)\nalign: mean flow (arrows) along the vessel axis",
              ha="center", va="top", fontsize=8, color=GREY, linespacing=1.1)
 
-    # b: known truth — synthetic videos of real junctions (scripts/benchmark/c_truth_calibration.py)
-    T_ = json.loads((P.RESULTS / "c_truth_calibration.json").read_text()); bns = T_["bins"]
-    axb = fig.add_subplot(top[1]); xb_ = np.array([q["c_mean"] for q in bns]); yb_ = np.array([q["rms"] for q in bns]); cib = np.array([q["rms_ci"] for q in bns])
-    axb.plot([0, 1.3], [0, 1.3], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1); axb.text(1.28, 1.02, "y = x", fontsize=8, color=GREY, ha="right", va="top")
-    axb.errorbar(xb_, yb_, yerr=[yb_ - cib[:, 0], cib[:, 1] - yb_], fmt="o", ms=5, color=BLUE, mec="white", mew=0.6, ecolor=BLUE, elinewidth=1.0, capsize=0, zorder=3)
-    axb.set_xlim(0, 1.3); axb.set_ylim(0, 1.8); axb.set_xlabel("reliability score c", fontsize=8, labelpad=1)
-    axb.set_ylabel("true fractional error, RMS", fontsize=8, labelpad=1); axb.tick_params(labelsize=8)
-    axb.set_title("Known truth", **TIT)
-    axb.text(0.03, 0.97, f"synthetic videos of\n{T_['n_junctions']} real junctions\n({T_['n_usable']:,} measurements)", transform=axb.transAxes,
-             ha="left", va="top", fontsize=8, color=GREY, linespacing=1.05)
-    for s_ in ("top", "right"):
-        axb.spines[s_].set_visible(False)
-
-    # c: real data — held-out junction calibration
-    axc = fig.add_subplot(top[2]); R_ = cal["rows"]
+    # b: real data — held-out junction calibration
+    axc = fig.add_subplot(top[1]); R_ = cal["rows"]
     lo_, hi_ = R_[:, 0].min() / 1.6, R_[:, 0].max() * 1.6
     axc.plot([lo_, hi_], [lo_, hi_], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
-    axc.errorbar(R_[:, 0], R_[:, 1], yerr=[R_[:, 1] - R_[:, 2], R_[:, 3] - R_[:, 1]], fmt="o", ms=5, color=BLUE, mec="white", mew=0.6,
+    axc.text(lo_ * 2.4, lo_ * 1.45, "y = x", fontsize=8, color=GREY, ha="left", va="top")
+    axc.errorbar(R_[:, 0], R_[:, 1], yerr=[R_[:, 1] - R_[:, 2], R_[:, 3] - R_[:, 1]], fmt="o", ms=6, color=BLUE, mec="white", mew=0.6,
                  ecolor=BLUE, elinewidth=1.0, capsize=0, zorder=3)
-    axc.set_xscale("log"); axc.set_yscale("log"); axc.set_xlim(lo_, hi_); axc.set_ylim(lo_, hi_); axc.set_aspect("equal")
-    axc.set_xlabel("predicted imbalance (nL/s)", fontsize=8, labelpad=1); axc.set_ylabel("observed imbalance, RMS (nL/s)", fontsize=8, labelpad=1)
-    axc.tick_params(labelsize=8); axc.set_title("Real junctions (held out)", **TIT)
-    axc.text(0.04, 0.96, r"$\sigma_j^2 = \sum_{k\in j} c_k^2\,y_k^2 + \sigma_0^2$", transform=axc.transAxes, ha="left", va="top", fontsize=8)
+    axc.set_xscale("log"); axc.set_yscale("log"); axc.set_xlim(lo_, hi_); axc.set_ylim(lo_, hi_)
+    axc.set_xlabel("predicted junction imbalance (nL/s)", fontsize=8, labelpad=1); axc.set_ylabel("observed junction imbalance, RMS (nL/s)", fontsize=8, labelpad=1)
+    axc.tick_params(labelsize=8); axc.set_title(f"Error model on held-out tiles ({len(z):,} junctions)", **TIT)
     for s_ in ("top", "right"):
         axc.spines[s_].set_visible(False)
 
-    # d: projection — one equation, the real junction measured → reconciled
-    bot = fig.add_gridspec(1, 2, left=0.015, right=0.985, top=0.43, bottom=0.1, width_ratios=[1.3, 1.0], wspace=0.22)
+    # c: reconstruction at one junction (centrepiece)
+    bot = fig.add_gridspec(1, 2, left=0.015, right=0.985, top=0.405, bottom=0.075, width_ratios=[1.3, 1.0], wspace=0.25)
     axD = fig.add_subplot(bot[0]); axD.axis("off"); axD.set_xlim(0, 1); axD.set_ylim(0, 1)
-    axD.set_title("Conservative projection, weighted by c", **TIT)
-    axD.text(0.5, 0.93, r"$\mathbf{Q}' = \arg\min_{\mathbf{q}}\ \sum_k\, (q_k - y_k)^2 / \sigma_k^2,\quad \sigma_k = c_k\,|q_k|$", ha="center", va="center",
-             fontsize=9.5, color=INK)
-    axD.text(0.5, 0.81, "subject to inflow = outflow at every junction", ha="center", va="center", fontsize=8, color=GREY)
+    axD.set_title("Conservation-consistent reconstruction", **TIT)
+    axD.text(0.5, 0.93, r"$\mathbf{Q}' = \arg\min_{\mathbf{q}}\ \sum_k\ \ell_k(q_k;\,y_k,\,c_k)\quad \mathrm{s.t.}\ \ B_{\mathrm{int}}\,\mathbf{q} = 0$",
+             ha="center", va="center", fontsize=9.5, color=INK)
+    axD.text(0.5, 0.82, "ℓ: misfit relative to each vessel's uncertainty;  inflow = outflow at junctions", ha="center", va="center", fontsize=8, color=GREY)
     pn = np.array([G.nodes[NODE]["x"], G.nodes[NODE]["y"]], float); ang = []
     for e_, s_ in jn:
         nb_ = e_[1] if e_[0] == NODE else e_[0]; d_ = np.array([G.nodes[nb_]["x"], G.nodes[nb_]["y"]], float) - pn; ang.append(np.arctan2(-d_[1], d_[0]))
     weak = int(np.argmax(cj))
 
     def junction(ax, vals, title, show_c):
-        ax.set_xlim(-2.4, 2.4); ax.set_ylim(-2.75, 2.45); ax.set_aspect("equal"); ax.axis("off")
+        ax.set_xlim(-2.5, 2.5); ax.set_ylim(-2.85, 2.5); ax.set_aspect("equal"); ax.axis("off")
         for k, (th, v) in enumerate(zip(ang, vals)):
             u = np.array([np.cos(th), np.sin(th)]); cl = PINK if k == weak else BLUE
-            ax.plot([0, 1.25 * u[0]], [0, 1.25 * u[1]], color="0.85", lw=7, solid_capstyle="round", zorder=1)
-            a0, a1 = (0.15 * u, 1.15 * u) if v > 0 else (1.15 * u, 0.15 * u)          # s·y > 0 = flow out of the node
-            ax.annotate("", xy=a1, xytext=a0, arrowprops=dict(arrowstyle="-|>", color=cl, lw=2.0, mutation_scale=16, shrinkA=0, shrinkB=0), zorder=3)
-            lab = f"{abs(v):.3f}" + (f"\n(c = {cj[k]:.2f})" if show_c else "")
-            ax.text(*(1.75 * u), lab, ha="center", va="center", fontsize=8, color=cl, linespacing=1.0, fontweight="bold" if k == weak else "normal")
-        ax.scatter([0], [0], s=30, color=INK, zorder=4)
+            ax.plot([0, 1.3 * u[0]], [0, 1.3 * u[1]], color="0.85", lw=9, solid_capstyle="round", zorder=1)
+            a0, a1 = (0.15 * u, 1.2 * u) if v > 0 else (1.2 * u, 0.15 * u)            # s·y > 0 = flow out of the node
+            ax.annotate("", xy=a1, xytext=a0, arrowprops=dict(arrowstyle="-|>", color=cl, lw=2.4, mutation_scale=18, shrinkA=0, shrinkB=0), zorder=3)
+            lab = f"{abs(v):.3f}" + (f"\nc = {cj[k]:.2f}" if show_c else "")
+            ax.text(*(1.85 * u), lab, ha="center", va="center", fontsize=8.5, color=cl, linespacing=1.0, fontweight="bold" if k == weak else "normal")
+        ax.scatter([0], [0], s=36, color=INK, zorder=4)
         tot = abs(np.sum(vals))
-        ax.text(0, -2.25, title, ha="center", va="bottom", fontsize=9, color=INK)
-        ax.text(0, -2.72, f"imbalance {tot:.3f} nL/s" if tot > 5e-4 else "imbalance 0", ha="center", va="bottom", fontsize=8, color=PINK if tot > 5e-4 else INK)
-    pD = axD.get_position(); w_ = 0.36 * pD.width
-    junction(fig.add_axes([pD.x0 + 0.03 * pD.width, pD.y0 - 0.03, w_, 0.78 * pD.height]), y, "Measured y", True)
-    junction(fig.add_axes([pD.x1 - 0.03 * pD.width - w_, pD.y0 - 0.03, w_, 0.78 * pD.height]), yp, "Reconciled Q′", False)
-    fig.add_artist(matplotlib.patches.FancyArrowPatch((pD.x0 + 0.43 * pD.width, pD.y0 + 0.39 * pD.height), (pD.x0 + 0.57 * pD.width, pD.y0 + 0.39 * pD.height),
+        ax.text(0, -2.3, title, ha="center", va="bottom", fontsize=9, color=INK)
+        ax.text(0, -2.8, f"imbalance {tot:.3f} nL/s" if tot > 5e-4 else "imbalance 0", ha="center", va="bottom", fontsize=8, color=PINK if tot > 5e-4 else INK)
+    pD = axD.get_position(); w_ = 0.40 * pD.width
+    junction(fig.add_axes([pD.x0 + 0.01 * pD.width, pD.y0 - 0.02, w_, 0.8 * pD.height]), y, "Measured", True)
+    junction(fig.add_axes([pD.x1 - 0.01 * pD.width - w_, pD.y0 - 0.02, w_, 0.8 * pD.height]), yp, "Reconstructed", False)
+    fig.add_artist(matplotlib.patches.FancyArrowPatch((pD.x0 + 0.44 * pD.width, pD.y0 + 0.4 * pD.height), (pD.x0 + 0.56 * pD.width, pD.y0 + 0.4 * pD.height),
                                                       transform=fig.transFigure, arrowstyle="-|>", mutation_scale=18, lw=1.6, color=GREY))
-    axD.text(0.5, 0.5, "least reliable\nbranch moves most", ha="center", va="center", fontsize=8, color=PINK, linespacing=1.0)
+    axD.text(0.5, 0.52, "higher-uncertainty\nbranch absorbs\nmost of the imbalance", ha="center", va="center", fontsize=8, color=PINK, linespacing=1.0)
 
-    # e: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
+    # d: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
     V = json.loads((P.RESULTS / "dc_weighting_validation.json").read_text())
-    axd = fig.add_subplot(bot[1]); pos = axd.get_position(); axd.set_position([pos.x0 + 0.06, pos.y0 + 0.02, pos.width - 0.06, pos.height - 0.02])
-    kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality-\nweighted", "Measured-\nrelative", "Calibrated\n(used)")
+    axd = fig.add_subplot(bot[1]); pos = axd.get_position(); axd.set_position([pos.x0 + 0.06, pos.y0 + 0.03, pos.width - 0.06, pos.height - 0.03])
+    kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality\nonly", "Measured-\nrelative", "Calibrated\n(used)")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.9, ls=(0, (3, 2)), zorder=1)
-    axd.text(-0.45, raw["err"] - 0.012, "repeat recording", fontsize=8, color=GREY, va="top", ha="left")
-    for test, dx, mk, lab in (("measured", -0.14, "o", "measured vessels"), ("imputed", 0.14, "D", "hidden vessels (imputed)")):
+    axd.text(-0.45, raw["err"] - 0.012, "two recordings of\nthe same vessel", fontsize=8, color=GREY, va="top", ha="left", linespacing=1.0)
+    for test, dx, mk, lab in (("measured", -0.15, "o", "measured vessels"), ("imputed", 0.15, "D", "withheld vessels (inferred)")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
-        axd.vlines(xs + dx, ci_[:, 0], ci_[:, 1], color=cl, lw=1.2, zorder=2)
-        axd.scatter(xs + dx, e_, marker=mk, s=34, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.3, zorder=3)
-        axd.scatter([], [], marker=mk, s=34, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.3, label=lab)
+        axd.vlines(xs + dx, ci_[:, 0], ci_[:, 1], color=cl, lw=1.3, zorder=2)
+        axd.scatter(xs + dx, e_, marker=mk, s=44, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.4, zorder=3)
+        axd.scatter([], [], marker=mk, s=44, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.4, label=lab)
     axd.set_xticks(xs); axd.set_xticklabels(xl, fontsize=8); axd.get_xticklabels()[-1].set_color(BLUE); axd.get_xticklabels()[-1].set_fontweight("bold")
     axd.set_xlim(-0.55, len(kinds) - 0.45); axd.set_ylim(0, 0.75)
-    axd.set_ylabel("error vs trusted repeat recordings\n(median |log ratio|)", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
+    axd.set_ylabel("error vs independent recordings\n(median |log ratio|)", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
     axd.legend(loc="lower left", frameon=False, fontsize=8, handletextpad=0.3, borderaxespad=0.2)
-    axd.set_title("Independent validation", **TIT)
+    axd.set_title("Prediction of independent recordings", **TIT)
     for s_ in ("top", "right"):
         axd.spines[s_].set_visible(False)
 
     fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv = fig.transFigure.inverted(); tb = lambda a_: inv.transform(a_.get_tightbbox(rr_))
-    yT = max(tb(a_)[1, 1] for a_ in axA + [axb, axc]); yB = max(tb(axD)[1, 1], tb(axd)[1, 1])
-    for x_, y_, l_ in ((0.005, yT, "a"), (tb(axb)[0, 0] - 0.012, yT, "b"), (tb(axc)[0, 0] - 0.012, yT, "c"), (0.005, yB, "d"), (tb(axd)[0, 0] - 0.012, yB, "e")):
+    yT = max(tb(a_)[1, 1] for a_ in axA + [axc]); yB = max(tb(axD)[1, 1], tb(axd)[1, 1])
+    for x_, y_, l_ in ((0.005, yT, "a"), (tb(axc)[0, 0] - 0.012, yT, "b"), (0.005, yB, "c"), (tb(axd)[0, 0] - 0.012, yB, "d")):
         fig.text(x_, min(y_ + 0.004, 0.985), l_, **LET)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     plos_style.save(fig, OUT)
-    log(f"wrote {OUT}.png/.pdf; b: " + ", ".join(f"c {q['c_mean']:.2f} → RMS {q['rms']:.2f}" for q in bns))
+    log(f"wrote {OUT}.png/.pdf")
+
+    # SI: the reliability score against known truth (synthetic videos of real junctions; scripts/benchmark/c_truth_calibration.py)
+    T_ = json.loads((P.RESULTS / "c_truth_calibration.json").read_text()); bns = T_["bins"]
+    ft, axb = plt.subplots(figsize=(3.4, 3.0)); ft.subplots_adjust(left=0.2, right=0.96, top=0.86, bottom=0.17)
+    xb_ = np.array([q["c_mean"] for q in bns]); yb_ = np.array([q["rms"] for q in bns]); cib = np.array([q["rms_ci"] for q in bns])
+    axb.plot([0, 1.3], [0, 1.3], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1); axb.text(1.28, 1.02, "y = x", fontsize=8, color=GREY, ha="right", va="top")
+    axb.errorbar(xb_, yb_, yerr=[yb_ - cib[:, 0], cib[:, 1] - yb_], fmt="o", ms=5, color=BLUE, mec="white", mew=0.6, ecolor=BLUE, elinewidth=1.0, capsize=0, zorder=3)
+    axb.set_xlim(0, 1.3); axb.set_ylim(0, 1.8); axb.set_xlabel("reliability score c", fontsize=8); axb.set_ylabel("true fractional error, RMS", fontsize=8)
+    axb.tick_params(labelsize=8); axb.spines[["top", "right"]].set_visible(False)
+    axb.set_title(f"Known truth: synthetic videos of {T_['n_junctions']} real junctions\n({T_['n_usable']:,} measurements; common ×{T_['common_mode']:.2f} removed)", fontsize=8, loc="left")
+    plos_style.save(ft, OUT.parent / "fig6_S_truth")
+    log("  SI truth: " + ", ".join(f"c {q['c_mean']:.2f} → RMS {q['rms']:.2f}" for q in bns))
 
     # SI: measured vs reconciled flux in tile 30 (formerly panels of the main figure)
     geom = load_tile_geometry(StageConfig.load(ST)); E = [tuple(e) for e in D["edges"]]
