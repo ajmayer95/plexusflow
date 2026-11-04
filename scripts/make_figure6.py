@@ -351,7 +351,7 @@ def main():
         axW.plot(tt[sel], q[sel], color=TCOL[t_], lw=1.4 if used else 0.9, alpha=1.0 if used else 0.7, zorder=3 if used else 2)
         axW.axhline(q.mean(), color=TCOL[t_], lw=1.0, ls=(0, (3, 2)), zorder=2)
     axW.axhline(abs(Qp[wv]), color=INK, lw=2.0, zorder=4)
-    axW.text(1.98, abs(Qp[wv]) * 0.93, "reconstructed reference", fontsize=8, color=INK, va="top", ha="right", zorder=6,
+    axW.text(1.98, abs(Qp[wv]) * 0.93, "reconstructed mean Q′", fontsize=8, color=INK, va="top", ha="right", zorder=6,
              bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.5))
     axW.set_xlim(0, 2.0); axW.set_xlabel("time since recording start (s)", fontsize=8, labelpad=1); axW.set_ylabel("flow (nL/s)", fontsize=8, labelpad=1)
     axW.tick_params(labelsize=8); axW.spines[["top", "right"]].set_visible(False)
@@ -385,7 +385,7 @@ def main():
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
-    axd.text(-0.38, raw["err"] - 0.015, "repeat-recording disagreement", fontsize=8, color=GREY, va="top", ha="left")
+    axd.text(-0.38, raw["err"] + 0.012, "repeat-recording disagreement", fontsize=7.5, color=GREY, va="bottom", ha="left")
     for test, dx, mk, lab in (("measured", -0.12, "o", "Reconciliation"), ("imputed", 0.12, "D", "Imputation")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
@@ -481,7 +481,7 @@ def main():
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
-    axd.text(-0.38, raw["err"] - 0.015, "repeat-recording disagreement", fontsize=8, color=GREY, va="top", ha="left")
+    axd.text(-0.38, raw["err"] + 0.012, "repeat-recording disagreement", fontsize=7.5, color=GREY, va="bottom", ha="left")
     for test, dx, mk, lab in (("measured", -0.15, "o", "measured"), ("imputed", 0.15, "D", "withheld")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
