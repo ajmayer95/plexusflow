@@ -11,7 +11,7 @@ FIG7_SIGMA_P=inf renders the unpenalised variant).
   b  Q_sim on the same vessels, arterial / venous boundary markers, the model's own divide
   c  local agreement log10(|Q_sim|/|Q′|) on resolved vessels (clipped ±1), direction mismatches marked
   d  measured vs predicted |Q| (log hexbin): r_log on all measured and on resolved vessels, direction agreement
-  e  radius controls: true vs uniform vs shuffled radii (r_log, all measured vessels)
+  e  radius controls: measured (consensus) vs uniform vs shuffled radii (r_log, all measured vessels)
 SI: fig7_S_boundary_distance, fig7_S_threshold (k = 0–3σ), fig7_S_forcing (arterial-inflow redistributions).
 Writes figures/fig7/; nothing to any graph.
 """
@@ -275,7 +275,7 @@ def main():
                          f'direction {100 * p_agree:.0f}% (> 2σ)',
              transform=axD.transAxes, va='top', ha='left', fontsize=8, linespacing=1.3, zorder=5,
              bbox=dict(fc='white', ec='none', pad=1.5))
-    axD.set_xlabel(r"measured log$_{10}$|Q′| (nL/s)", labelpad=1)
+    axD.set_xlabel(r"reconstructed log$_{10}$|Q′| (nL/s)", labelpad=1)
     axD.set_ylabel(r'predicted log$_{10}$|Q$_{\rm sim}$| (nL/s)', labelpad=1)
     letter(axD, 'd', 'Vessel-by-vessel', dx=-0.2); axD.title.set_position((0, 1.06))
     axD.legend(fontsize=8, loc='upper left', bbox_to_anchor=(-0.03, 0.745), frameon=False, borderaxespad=0, handletextpad=0.1); axD.set_aspect('equal')
@@ -290,14 +290,14 @@ def main():
     rng = np.random.default_rng(0)
     r_uni = r_of(np.mean(r) ** 4 / ln)
     r_sh = np.array([r_of(rng.permutation(r) ** 4 / ln) for _ in range(N_SHUFFLE)])
-    print(f'  r_log true {r_log:.3f}, uniform {r_uni:.3f}, shuffled {r_sh.mean():.3f} ± {r_sh.std():.3f}')
+    print(f'  r_log measured {r_log:.3f}, uniform {r_uni:.3f}, shuffled {r_sh.mean():.3f} ± {r_sh.std():.3f}')
     axE = fig.add_subplot(gBm[2])
-    for yi, lab, rv, col, err in ((2, 'true\nradii', r_log, '#2b70b4', 0), (1, 'uniform\nradii', r_uni, '#9e9e9e', 0),
+    for yi, lab, rv, col, err in ((2, 'measured\nradii', r_log, '#2b70b4', 0), (1, 'uniform\nradii', r_uni, '#9e9e9e', 0),
                                   (0, 'shuffled\nradii', r_sh.mean(), '#e08214', r_sh.std())):
         axE.hlines(yi, 0, rv, color=col, lw=2, alpha=0.8)
         axE.errorbar(rv, yi, xerr=err if err else None, fmt='o', color=col, markersize=5, capsize=2, zorder=4)
         axE.text(rv + 0.03, yi + 0.28, f'{rv:.2f}', va='bottom', ha='center', fontsize=8, color=col)
-    axE.set_yticks([2, 1, 0], ['true radii', 'uniform radii', 'shuffled radii'])
+    axE.set_yticks([2, 1, 0], ['measured radii', 'uniform radii', 'shuffled radii'])
     axE.set_xlim(0, 1.0); axE.set_ylim(-0.6, 2.9); axE.set_box_aspect(1.0)
     axE.set_xlabel(r"$r_{\log}$ (all measured)", labelpad=1)
     axE.spines['right'].set_visible(False); axE.spines['top'].set_visible(False)
