@@ -255,24 +255,19 @@ def main():
     gr = gt[1].subgridspec(2, 1, height_ratios=[0.85, 1.15], hspace=0.5)
     # a: the vessels in the tissue (max − median mosaic), numbered, with flow direction and the three tile footprints
     allp = toimg(np.vstack([np.asarray(G.edges[E[i]]["path"], float) for i in pidx]))
-    axC = fig.add_subplot(gt[0]); cpad = 150
-    c0_, c1_ = int(allp[:, 0].min() - cpad), int(allp[:, 0].max() + cpad); r0_, r1_ = int(allp[:, 1].min() - cpad), int(allp[:, 1].max() + cpad)
+    axC = fig.add_subplot(gt[0]); ctr_ = (allp.min(0) + allp.max(0)) / 2; half_ = 0.5 * (allp.max(0) - allp.min(0)).max() + 28
+    c0_, c1_, r0_, r1_ = int(ctr_[0] - half_), int(ctr_[0] + half_), int(ctr_[1] - half_), int(ctr_[1] + half_)
     crop_ = mos[max(r0_, 0):r1_, max(c0_, 0):c1_]; lo_, hi_ = np.percentile(crop_[crop_ > 0], (1, 99.5))
     axC.imshow(mos, cmap="gray", vmin=lo_, vmax=hi_ * 1.3, interpolation="antialiased"); axC.set_xlim(c0_, c1_); axC.set_ylim(r1_, r0_)
     axC.set_aspect("equal"); axC.set_xticks([]); axC.set_yticks([])
     for s_ in axC.spines.values():
         s_.set_color("0.7"); s_.set_linewidth(0.5)
-    for t_ in ptiles:
-        tg = geom.tiles[int(t_)]; Hv, Wv = tg.video_shape if tg.video_shape else tifffile.imread(str(ST / "tiles" / "maxmed" / f"vid{t_}_maxmed.tif")).shape[:2]
-        fp = np.array([[0, 0, 1], [0, Wv, 1], [Hv, Wv, 1], [Hv, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
-        fp = fp[:, :2] / geom.downsample - [geom.y0, geom.x0]                  # (row, column) in the mosaic
-        axC.plot(fp[:, 1], fp[:, 0], color=TCOL[t_], lw=1.4, alpha=0.75, zorder=3)
     placed = []
     for i in pidx:
         q = toimg(np.asarray(G.edges[E[i]]["path"], float))
         if np.linalg.norm(q[0] - xy(E[i][0])) > np.linalg.norm(q[-1] - xy(E[i][0])):
             q = q[::-1]
-        axC.plot(q[:, 0], q[:, 1], color="black", lw=3.4, zorder=4, solid_capstyle="round"); axC.plot(q[:, 0], q[:, 1], color="#ffd400", lw=2.0, zorder=5, solid_capstyle="round")
+        axC.plot(q[:, 0], q[:, 1], color="black", lw=7.0, zorder=4, solid_capstyle="round"); axC.plot(q[:, 0], q[:, 1], color="#ffd400", lw=5.0, zorder=5, solid_capstyle="round")
         cum = np.r_[0, np.cumsum(np.linalg.norm(np.diff(q, axis=0), axis=1))]; a_ = int(np.searchsorted(cum, 0.5 * cum[-1]))
         lo_i, hi_i = max(a_ - 2, 0), min(a_ + 2, len(q) - 1); d_ = q[hi_i] - q[lo_i]
         if Qp[i] < 0:
@@ -282,21 +277,38 @@ def main():
             u_ = d_ / np.linalg.norm(d_)
             i0, i1 = int(np.searchsorted(cum, 0.22 * cum[-1])), min(int(np.searchsorted(cum, 0.78 * cum[-1])), len(q) - 1)
             seg = q[i0:i1 + 1] if Qp[i] >= 0 else q[i0:i1 + 1][::-1]                    # shaft follows the vessel, head at the downstream end
-            for col_, lw_ in (("white", 3.0), ("black", 1.4)):
+            for col_, lw_ in (("black", 1.8),):
                 axC.plot(seg[:-1, 0], seg[:-1, 1], color=col_, lw=lw_, solid_capstyle="round", zorder=6)
-            axC.annotate("", xy=seg[-1], xytext=seg[-3] if len(seg) > 2 else seg[0], zorder=7,
-                         arrowprops=dict(arrowstyle="-|>,head_length=0.8,head_width=0.5", fc="black", ec="white", lw=0.6, mutation_scale=7,
-                                         shrinkA=0, shrinkB=0))
-            nrm = np.array([-u_[1], u_[0]]); cands = [q[a_] + 17 * nrm, q[a_] - 17 * nrm]      # number beside the vessel, not on it
+            if len(seg) >= 3:
+                tip_, back_ = seg[-1], seg[-3]
+            else:                                                                  # short vessel: its own chord, downstream end
+                a0_, a1_ = (q[0], q[-1]) if Qp[i] >= 0 else (q[-1], q[0]); tip_, back_ = a0_ + 0.85 * (a1_ - a0_), a0_
+            dv_ = tip_ - back_; dv_ = dv_ / max(np.linalg.norm(dv_), 1e-9); pv_ = np.array([-dv_[1], dv_[0]])
+            HL_, HW_ = 11.0, 5.5                                                   # head length / half-width in mosaic pixels
+            tri_ = np.array([tip_, tip_ - HL_ * dv_ + HW_ * pv_, tip_ - HL_ * dv_ - HW_ * pv_])
+            axC.add_patch(matplotlib.patches.Polygon(tri_, closed=True, fc="black", ec="white", lw=0.6, zorder=7))
+            nrm = np.array([-u_[1], u_[0]]); cands = [q[a_] + 13 * nrm, q[a_] - 13 * nrm]      # number beside the vessel, not on it
             lab_xy = max(cands, key=lambda c: min([np.linalg.norm(c - o) for o in placed] + [1e9]))
         placed.append(lab_xy)
-        axC.text(*lab_xy, str(num[i]), ha="center", va="center", fontsize=8, color=INK, fontweight="bold", zorder=8,
+        axC.text(*lab_xy, str(num[i]), ha="center", va="center", fontsize=9, color=INK, fontweight="bold", zorder=8,
                  bbox=dict(boxstyle="circle,pad=0.15", fc="white", ec="black", lw=0.6))
-    L_ = 100 / PX_UM; xb_, yb_ = c1_ - 20 - L_, r1_ - 20
+    L_ = 50 / PX_UM; xb_, yb_ = c1_ - 8 - L_, r1_ - 8
     axC.plot([xb_, xb_ + L_], [yb_, yb_], color="white", lw=2.5, solid_capstyle="butt", zorder=8)
-    axC.text(xb_ + L_ / 2, yb_ - 8, "100 µm", color="white", fontsize=8, ha="center", va="bottom", zorder=8,
+    axC.text(xb_ + L_ / 2, yb_ - 5, "50 µm", color="white", fontsize=8, ha="center", va="bottom", zorder=8,
              path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="black")])
     axC.set_title("Vessels in the overlap of three tiles", fontsize=9, loc="left", pad=3)
+    axI = axC.inset_axes([0.0, 0.0, 0.36, 0.36]); ipad = 230
+    ic0, ic1, ir0, ir1 = int(ctr_[0] - ipad), int(ctr_[0] + ipad), int(ctr_[1] - ipad), int(ctr_[1] + ipad)
+    axI.imshow(mos, cmap="gray", vmin=lo_, vmax=hi_ * 1.3, interpolation="antialiased"); axI.set_xlim(ic0, ic1); axI.set_ylim(ir1, ir0)
+    axI.set_xticks([]); axI.set_yticks([])
+    for s_ in axI.spines.values():
+        s_.set_color("white"); s_.set_linewidth(1.2)
+    for t_ in ptiles:
+        tg = geom.tiles[int(t_)]; Hv, Wv = tg.video_shape if tg.video_shape else tifffile.imread(str(ST / "tiles" / "maxmed" / f"vid{t_}_maxmed.tif")).shape[:2]
+        fp = np.array([[0, 0, 1], [0, Wv, 1], [Hv, Wv, 1], [Hv, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
+        fp = fp[:, :2] / geom.downsample - [geom.y0, geom.x0]                  # (row, column) in the mosaic
+        axI.plot(fp[:, 1], fp[:, 0], color=TCOL[t_], lw=1.6, zorder=3)
+    axI.add_patch(matplotlib.patches.Rectangle((c0_, r0_), c1_ - c0_, r1_ - r0_, fill=False, ec="#ffd400", lw=1.4, zorder=4))
 
     # b: one vessel, three recordings
     from plexusflow.reconcile.harmonics import FS as _FS
