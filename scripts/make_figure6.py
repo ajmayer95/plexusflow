@@ -386,10 +386,11 @@ def main():
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
     axd.text(-0.38, raw["err"] - 0.015, "repeat-recording disagreement", fontsize=8, color=GREY, va="top", ha="left")
-    for test, dx, mk, lab in (("measured", -0.12, "o", "measured vessels"), ("imputed", 0.12, "D", "withheld vessels")):
+    for test, dx, mk, lab in (("measured", -0.12, "o", "Reconciliation"), ("imputed", 0.12, "D", "Imputation")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
-        axd.vlines(xs + dx, ci_[:, 0], ci_[:, 1], color=cl, lw=1.4, zorder=2)
+        for x_, e1, lo1, hi1, ecol_ in zip(xs + dx, e_, ci_[:, 0], ci_[:, 1], cl):
+            axd.errorbar([x_], [e1], yerr=[[e1 - lo1], [hi1 - e1]], fmt="none", ecolor=ecol_, elinewidth=1.2, capsize=3, capthick=1.2, zorder=4)
         axd.scatter(xs + dx, e_, marker=mk, s=64, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.5, zorder=3)
         axd.scatter([], [], marker=mk, s=50, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.5, label=lab)
     axd.set_xticks(xs); axd.set_xticklabels(xl, fontsize=9); axd.get_xticklabels()[-1].set_color(BLUE); axd.get_xticklabels()[-1].set_fontweight("bold")
