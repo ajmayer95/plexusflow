@@ -389,10 +389,8 @@ def main():
     for test, dx, mk, lab in (("measured", -0.12, "o", "Reconciliation"), ("imputed", 0.12, "D", "Imputation")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
-        for x_, e1, lo1, hi1, ecol_ in zip(xs + dx, e_, ci_[:, 0], ci_[:, 1], cl):
-            axd.errorbar([x_], [e1], yerr=[[e1 - lo1], [hi1 - e1]], fmt="none", ecolor=ecol_, elinewidth=1.0,
-                         capsize=3.5, capthick=1.0, zorder=2)
-        axd.scatter(xs + dx, e_, marker=mk, s=40, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.5, zorder=3)
+        # no error bars in the main figure: paired vessel- and tile-bootstrap intervals are in the SI (dc_weighting_validation.json)
+        axd.scatter(xs + dx, e_, marker=mk, s=56, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.5, zorder=3)
         axd.scatter([], [], marker=mk, s=50, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.5, label=lab)
     axd.set_xticks(xs); axd.set_xticklabels(xl, fontsize=9); axd.get_xticklabels()[-1].set_color(BLUE); axd.get_xticklabels()[-1].set_fontweight("bold")
     axd.set_xlim(-0.45, len(kinds) - 0.55); axd.set_ylim(0, 0.75)

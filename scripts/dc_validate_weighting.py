@@ -34,6 +34,32 @@ def fields(D, dom):
             "measured_scale": project(y, norm(1 / (C ** 2 * y ** 2 + s0 ** 2)), dom), "calibrated": D["Qp"]}
 
 
+def paired(rows, rng, ref="calibrated", n_boot=1000):
+    """Paired differences (alternative − reference method) on identical references: median error and direction rate, with
+    95 % intervals from a bootstrap over vessels and over reference tiles (recordings in a tile share errors / physiology)."""
+    out = {}
+    A = {k: np.array(v, float) for k, v in rows.items()}
+    base = A[ref]
+    for k, a in A.items():
+        if k == ref:
+            continue
+        assert np.array_equal(a[:, 0], base[:, 0]) and np.array_equal(a[:, 4], base[:, 4])
+        res = {}
+        for lab, sel in (("trusted", base[:, 3] < TRUST), ("all", np.ones(len(base), bool))):
+            b0, b1 = base[sel], a[sel]
+            d_err = float(np.median(b1[:, 1]) - np.median(b0[:, 1])); d_dir = float(b1[:, 2].mean() - b0[:, 2].mean())
+            ci = {}
+            for unit, col in (("vessel", 0), ("tile", 4)):
+                ids = np.unique(b0[:, col]); grp = [np.nonzero(b0[:, col] == v)[0] for v in ids]; de, dd = [], []
+                for _ in range(n_boot):
+                    ix = np.concatenate([grp[j] for j in rng.integers(0, len(grp), len(grp))])
+                    de.append(np.median(b1[ix, 1]) - np.median(b0[ix, 1])); dd.append(b1[ix, 2].mean() - b0[ix, 2].mean())
+                ci[unit] = dict(d_err=np.percentile(de, [2.5, 97.5]).tolist(), d_dir=np.percentile(dd, [2.5, 97.5]).tolist(), n_units=int(len(ids)))
+            res[lab] = dict(d_err=d_err, d_dir=d_dir, ci=ci, n=int(sel.sum()))
+        out[k] = res
+    return out
+
+
 def summarise(rows, rng, n_boot=500):
     """rows: (vessel, err, direction_ok, c_ref) → {all, trusted}: median err [CI], direction agreement [CI], n"""
     a = np.array(rows, float); out = {}
@@ -62,8 +88,8 @@ def main(n_fold=5, frac=0.10, seed=0):
         for m in ms:
             if m["tile"] != D["tile"][i] and abs(m["Q"]) > 0:
                 for k, Q in F.items():
-                    rows[k].append((i, abs(np.log(max(abs(Q[i]), 1e-12) / abs(m["Q"]))), float(np.sign(Q[i]) == np.sign(m["Q"])), c_of(model, m)))
-    measured = {k: summarise(v, rng) for k, v in rows.items()}
+                    rows[k].append((i, abs(np.log(max(abs(Q[i]), 1e-12) / abs(m["Q"]))), float(np.sign(Q[i]) == np.sign(m["Q"])), c_of(model, m), int(m["tile"])))
+    measured = {k: summarise(v, rng) for k, v in rows.items()}; measured_paired = paired(rows, np.random.default_rng(seed + 101))
     log(f"measured: {measured['calibrated']['all']['n_vessels']} vessels with repeats; trusted err raw {measured['raw']['trusted']['err']:.3f}, "
         f"calibrated {measured['calibrated']['trusted']['err']:.3f}")
     # 2. imputation: hide every measurement of 10 % of the repeat-measured vessels per fold
@@ -77,13 +103,19 @@ def main(n_fold=5, frac=0.10, seed=0):
             for m in by_e[e]:
                 if abs(m["Q"]) > 0:
                     for k, Q in Ff.items():
-                        rows[k].append((i, abs(np.log(max(abs(Q[i]), 1e-12) / abs(m["Q"]))), float(np.sign(Q[i]) == np.sign(m["Q"])), c_of(model, m)))
+                        rows[k].append((i, abs(np.log(max(abs(Q[i]), 1e-12) / abs(m["Q"]))), float(np.sign(Q[i]) == np.sign(m["Q"])), c_of(model, m), int(m["tile"])))
         log(f"imputation fold {fi + 1}/{n_fold}: {len(hide)} vessels hidden")
-    imputed = {k: summarise(v, rng) for k, v in rows.items()}
+    imputed = {k: summarise(v, rng) for k, v in rows.items()}; imputed_paired = paired(rows, np.random.default_rng(seed + 102))
+    for lab, PP in (("reconciliation", measured_paired), ("imputation", imputed_paired)):
+        for k, r in PP.items():
+            t = r["trusted"]
+            log(f"  paired {lab:14s} {k:15s} − calibrated (trusted): Δerr {t['d_err']:+.3f} vessel CI [{t['ci']['vessel']['d_err'][0]:+.3f}, "
+                f"{t['ci']['vessel']['d_err'][1]:+.3f}] tile CI [{t['ci']['tile']['d_err'][0]:+.3f}, {t['ci']['tile']['d_err'][1]:+.3f}] "
+                f"({t['ci']['tile']['n_units']} tiles); Δdir {100 * t['d_dir']:+.1f} pts tile CI [{100 * t['ci']['tile']['d_dir'][0]:+.1f}, {100 * t['ci']['tile']['d_dir'][1]:+.1f}]")
     for k in KINDS:
         log(f"  {k:15s} measured trusted {measured[k]['trusted']['err']:.3f} / {measured[k]['trusted']['dir']:.3f}   "
             f"imputed trusted {imputed[k]['trusted']['err']:.3f} / {imputed[k]['trusted']['dir']:.3f}")
-    out = dict(measured=measured, imputed=imputed, trust_c=TRUST, n_fold=n_fold, frac=frac, seed=seed)
+    out = dict(measured=measured, imputed=imputed, measured_paired=measured_paired, imputed_paired=imputed_paired, trust_c=TRUST, n_fold=n_fold, frac=frac, seed=seed)
     P.RESULTS.mkdir(parents=True, exist_ok=True); (P.RESULTS / "dc_weighting_validation.json").write_text(json.dumps(out, indent=1))
     log(f"wrote {P.RESULTS / 'dc_weighting_validation.json'}")
 
