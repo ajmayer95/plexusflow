@@ -175,7 +175,7 @@ def main():
 
     fig = plt.figure(figsize=(7.5, 6.6), facecolor='white')
     gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.8], hspace=0.16, left=0.06, right=0.9, top=0.935, bottom=0.08)
-    gT = gs[0].subgridspec(1, 3, width_ratios=[1.0, 0.34, 1.0], wspace=0.04); gBm = gs[1].subgridspec(1, 3, width_ratios=[1.15, 1.0, 0.8], wspace=0.45)
+    gT = gs[0].subgridspec(1, 3, width_ratios=[1.0, 0.34, 1.0], wspace=0.04); gBm = gs[1].subgridspec(1, 3, width_ratios=[1.1, 0.95, 0.85], wspace=0.5)
     LETTERS = {}
     def letter(ax, l, title, dx=-0.02):                                      # letter + title placed on a shared row line after layout (below)
         LETTERS[l] = (ax, title)
@@ -347,10 +347,17 @@ def main():
     axE.text(r_sh.mean(), 0.36, f'{r_sh.mean():.2f}', va='bottom', ha='center', fontsize=8, color='#e08214')
     axE.text(r_sh.max() + 0.03, 0, f'{len(r_sh)} shuffles\n(max {r_sh.max():.2f})', va='center', ha='left', fontsize=8, color='#a85a00', linespacing=1.0)
     axE.set_yticks([2, 1, 0], ['measured radii', 'uniform radii', 'shuffled radii'])
-    axE.set_xlim(0, 1.0); axE.set_ylim(-0.6, 2.9); axE.set_box_aspect(1.0)
+    axE.set_xlim(0, 1.0); axE.set_ylim(-0.6, 2.9); axE.set_box_aspect(1.0); axE.set_xticks([0, 0.5, 1.0])
     axE.set_xlabel(r"$r_{\log}$ (all measured)", labelpad=1)
     axE.spines['right'].set_visible(False); axE.spines['top'].set_visible(False)
     letter(axE, 'e', 'Radius controls', dx=-0.3)
+    # inset: the flow field with uniform radii (same boundary fluxes), on the colour scale of a
+    Qu = passive(np.mean(r) ** 4 / ln, fb, dom)
+    axU = axE.inset_axes([0.86, 0.55, 0.46, 0.46]); bg(axU); axU.set_ylim(Hm, 0)
+    axU.add_collection(LineCollection(segs, colors=[cAB(nAB(min(max(abs(Qu[c]), vmin), vmax))) for c in range(len(segs))], linewidths=0.3, zorder=3))
+    axU.set_title('uniform radii', fontsize=8, pad=1, color='#7a7a7a')
+    for s_ in axU.spines.values():
+        s_.set_visible(True); s_.set_color('#9e9e9e'); s_.set_linewidth(0.8)
 
     # F  distance from the driven carve boundary
     B = dom['B']; Bc = B.tocoo()
