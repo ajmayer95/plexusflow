@@ -183,12 +183,12 @@ def main():
     # a
     axA = fig.add_subplot(gT[0]); bg(axA); field(axA, Qp, True); markers(axA)
     letter(axA, 'a', "Reference field Q′")
-    totals(axA); div_a = mark_divide(axA, Qp, "Q′", resolved, min_gap=400)
+    div_a = mark_divide(axA, Qp, "Q′", resolved, min_gap=400)
     axA.plot([], [], color=GREY_U[:3], lw=1.2, label='measured, |Q′| < 2σ')
     axA.plot([], [], color=GREY_N[:3], lw=1.2, label='unmeasured')
     axA.plot([], [], 'D', ms=5, mfc='white', mec=INKC, mew=1.0, label='stagnation point')
     # middle column: the arterial cuts zoomed, each cut coloured by its inflow in Q′ (red log scale; white = net withdrawal)
-    cxy_ = np.array([nxy[nodes[i_]] for i_ in dom['inj']]); pad_ = 120
+    cxy_ = np.array([nxy[nodes[i_]] for i_ in np.r_[dom['inj'], dom['out']]]); pad_ = 110          # arterial cuts and venous outlets
     x0i, x1i = cxy_[:, 0].min() - pad_, cxy_[:, 0].max() + pad_; y0i, y1i = cxy_[:, 1].min() - pad_, cxy_[:, 1].max() + pad_
     axIn = fig.add_subplot(gT[1]); bg(axIn); field(axIn, Qp, True)
     axIn.set_xlim(x0i, x1i); axIn.set_ylim(y1i, y0i); axIn.set_aspect('equal')
@@ -206,11 +206,22 @@ def main():
     from matplotlib.patches import ConnectionPatch
     for ya_ in (y0i, y1i):                                                   # box in a → zoomed panel
         fig.add_artist(ConnectionPatch(xyA=(x1i, ya_), coordsA=axA.transData, xyB=(x0i, ya_), coordsB=axIn.transData, color='0.5', lw=0.6, ls=(0, (2, 2))))
-    axIn.set_title('Arterial cuts', fontsize=8, pad=2)
+    fV_ = -D['fb'][dom['out']]; nV = mcolors.Normalize(0, fV_.max())
+    cV = mcolors.LinearSegmentedColormap.from_list('bt', plt.get_cmap('Blues')(np.linspace(0.35, 1.0, 256)))
+    for i_, f_ in zip(dom['out'], fV_):
+        axIn.scatter(*nxy[nodes[i_]], s=60, marker='s', color=cV(nV(f_)), edgecolor='black', linewidths=0.6, zorder=7)
+        axIn.text(nxy[nodes[i_]][0], nxy[nodes[i_]][1] + 45, f"{f_:.1f}", ha='center', va='top', fontsize=8, color='#2b35a8',
+                  path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground='white')], zorder=8)
+    axIn.set_title('Boundary flux (nL/s)', fontsize=8, pad=30); axIn.set_zorder(5)
     cbCut = axIn.inset_axes([0.05, -0.1, 0.9, 0.035])
     cb_ = plt.colorbar(plt.cm.ScalarMappable(norm=nCut, cmap=cCut), cax=cbCut, orientation='horizontal', ticks=[0.01, 0.1, 1.0])
     cb_.ax.set_xticklabels(['0.01', '0.1', '1']); cb_.ax.minorticks_off(); cb_.ax.tick_params(labelsize=8, length=2, pad=1); cb_.outline.set_linewidth(0.4)
-    cb_.set_label('inflow (nL/s)\n○ withdrawal', fontsize=8, labelpad=2, linespacing=1.1)
+    cb_.set_label('arterial inflow (nL/s)\n○ withdrawal', fontsize=8, labelpad=2, linespacing=1.1)
+    f0_ = D['fb']; inj_, sd_ = f0_[dom['inj']], np.asarray(dom['side'])
+    axIn.text(0.5, 1.085, f"arterial L {inj_[sd_ == 'L'].sum():.1f} · R {inj_[sd_ == 'R'].sum():.1f}", transform=axIn.transAxes, ha='center', va='bottom',
+              fontsize=8, color='#a00000')
+    axIn.text(0.5, 1.01, f"venous V$_1$ {-f0_[dom['out'][0]]:.1f} · V$_2$ {-f0_[dom['out'][1]]:.1f}", transform=axIn.transAxes, ha='center', va='bottom',
+              fontsize=8, color='#2b35a8')
     _hs = []
     axA.legend(handles=[h_ for h_ in axA.get_legend_handles_labels()[0] if h_ not in _hs], loc='upper center', bbox_to_anchor=(0.5, 0.0), ncol=3,
                fontsize=8, frameon=False, borderaxespad=0.2, scatterpoints=1,
