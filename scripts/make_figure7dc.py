@@ -85,7 +85,7 @@ def main():
     MIS = '#c51b8a'; INKC = '#1a1a1a'
 
     def bg(ax):
-        ax.imshow(mos, cmap='gray', vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), aspect='equal', zorder=0, alpha=0.55)
+        ax.imshow(mos, cmap='gray', vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), aspect='equal', zorder=0, alpha=0.42)
         ax.set_xticks([]); ax.set_yticks([]); [s.set_visible(False) for s in ax.spines.values()]
         ax.set_xlim(0, Wm); ax.set_ylim(Hm, -0.06 * Hm)          # headroom above the organ for the boundary-flux key
 
@@ -140,7 +140,7 @@ def main():
         sg = segs[c]; u_ = np.array(nxy[edges[c][0]]); sg = sg if np.linalg.norm(sg[0] - u_) < np.linalg.norm(sg[-1] - u_) else sg[::-1]
         sg = sg if Q[c] > 0 else sg[::-1]
         k0 = len(sg) // 2; d_ = sg[min(k0 + 4, len(sg) - 1)] - sg[max(k0 - 4, 0)]; d_ = d_ / np.linalg.norm(d_)
-        ax.add_patch(FancyArrowPatch(sg[k0] - 75 * d_, sg[k0] + 75 * d_, arrowstyle='-|>', mutation_scale=7, color=INKC, lw=1.0, zorder=7,
+        ax.add_patch(FancyArrowPatch(sg[k0] - 62 * d_, sg[k0] + 62 * d_, arrowstyle='-|>', mutation_scale=6, color=INKC, lw=0.85, zorder=7,
                                      shrinkA=0, shrinkB=0, path_effects=[pe.withStroke(linewidth=1.6, foreground='white')]))
     def mark_divide(ax, Q, name, ok, min_gap=0):
         c, xy_, dth = rim_divide(Q)
@@ -174,15 +174,16 @@ def main():
                 transform=ax.transAxes, ha='left', va='top', fontsize=8, color='#2b35a8')
 
     fig = plt.figure(figsize=(7.5, 6.6), facecolor='white')
-    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.8], hspace=0.16, left=0.06, right=0.9, top=0.935, bottom=0.08)
-    gT = gs[0].subgridspec(1, 3, width_ratios=[1.0, 0.34, 1.0], wspace=0.04); gBm = gs[1].subgridspec(1, 3, width_ratios=[1.1, 0.95, 0.85], wspace=0.5)
+    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.8], hspace=0.2, left=0.06, right=0.9, top=0.935, bottom=0.07)
+    gT = gs[0].subgridspec(1, 3, width_ratios=[1.0, 0.34, 1.0], wspace=0.04); gBm = gs[1].subgridspec(1, 3, width_ratios=[0.31, 0.32, 0.37], wspace=0.3)
     LETTERS = {}
     def letter(ax, l, title, dx=-0.02):                                      # letter + title placed on a shared row line after layout (below)
         LETTERS[l] = (ax, title)
 
     # a
     axA = fig.add_subplot(gT[0]); bg(axA); field(axA, Qp, True); markers(axA)
-    letter(axA, 'a', "Reference field Q′")
+    letter(axA, 'a', "Reference and passive flow fields")
+    axA.text(0.5, 0.995, "reference Q′", transform=axA.transAxes, ha='center', va='top', fontsize=9)
     div_a = mark_divide(axA, Qp, "Q′", resolved, min_gap=400)
     axA.plot([], [], color=GREY_U[:3], lw=1.2, label='measured, |Q′| < 2σ')
     axA.plot([], [], color=GREY_N[:3], lw=1.2, label='unmeasured')
@@ -210,9 +211,9 @@ def main():
     cV = mcolors.LinearSegmentedColormap.from_list('bt', plt.get_cmap('Blues')(np.linspace(0.35, 1.0, 256)))
     for i_, f_ in zip(dom['out'], fV_):
         axIn.scatter(*nxy[nodes[i_]], s=60, marker='s', color=cV(nV(f_)), edgecolor='black', linewidths=0.6, zorder=7)
-        axIn.text(nxy[nodes[i_]][0], nxy[nodes[i_]][1] + 45, f"{f_:.1f}", ha='center', va='top', fontsize=8, color='#2b35a8',
+        if False: axIn.text(nxy[nodes[i_]][0], nxy[nodes[i_]][1] + 45, f"{f_:.1f}", ha='center', va='top', fontsize=8, color='#2b35a8',
                   path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground='white')], zorder=8)
-    axIn.set_title('Boundary flux (nL/s)', fontsize=8, pad=30); axIn.set_zorder(5)
+    axIn.set_title('Boundary fluxes', fontsize=8, pad=30); axIn.set_zorder(5)
     cbCut = axIn.inset_axes([0.05, -0.1, 0.9, 0.035])
     cb_ = plt.colorbar(plt.cm.ScalarMappable(norm=nCut, cmap=cCut), cax=cbCut, orientation='horizontal', ticks=[0.01, 0.1, 1.0])
     cb_.ax.set_xticklabels(['0.01', '0.1', '1']); cb_.ax.minorticks_off(); cb_.ax.tick_params(labelsize=8, length=2, pad=1); cb_.outline.set_linewidth(0.4)
@@ -273,7 +274,8 @@ def main():
     axB.plot([], [], 'D', ms=5, mfc='white', mec=INKC, mew=1.0, label='_nolegend_')
     axB.legend(loc='upper center', bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=8, frameon=False, borderaxespad=0.2,
                handletextpad=0.2, columnspacing=1.0)
-    letter(axB, 'b', r'Passive prediction Q$_{\rm sim}$')
+    letter(axB, 'b', '')
+    axB.text(0.5, 0.995, r'passive Q$_{\rm sim}$', transform=axB.transAxes, ha='center', va='top', fontsize=9)
     pB = axB.get_position(); cax = fig.add_axes([pB.x1 + 0.012, pB.y0 + 0.1 * pB.height, 0.013, 0.8 * pB.height])
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=nAB, cmap=cAB), cax=cax)
     cb.set_label(r'$|\bar Q|$ (nL/s)', fontsize=9, labelpad=2); cb.outline.set_linewidth(0.5)
@@ -317,12 +319,12 @@ def main():
     consider = m & sig_ok
     r_log_res = float(np.corrcoef(np.log10(np.abs(Qp[consider])), np.log10(np.abs(Qs[consider])))[0, 1])
     p_agree = float(np.mean(np.sign(Qp[consider]) == np.sign(Qs[consider])))
-    axD.text(0.03, 0.97, f'$r_{{\\log}}$ = {r_log_res:.2f}\ndirection {100 * p_agree:.0f}%',
+    axD.text(0.03, 0.97, f'|Q′| > 2σ\n$r_{{\\log}}$ = {r_log_res:.2f}\ndirection {100 * p_agree:.0f}%',
              transform=axD.transAxes, va='top', ha='left', fontsize=8, linespacing=1.3, zorder=5,
              bbox=dict(fc='white', ec='none', pad=1.5))
     axD.set_xlabel(r"reconstructed log$_{10}$|Q′| (nL/s)", labelpad=1)
     axD.set_ylabel(r'predicted log$_{10}$|Q$_{\rm sim}$| (nL/s)', labelpad=1)
-    letter(axD, 'd', 'Vessel-by-vessel (|Q′| > 2σ)', dx=-0.2)
+    letter(axD, 'd', 'Vessel-level agreement', dx=-0.2)
     axD.set_aspect('equal')
     axD.spines[['top', 'right']].set_visible(False)
     axD.set_xlim(lo - 0.1, hi + 2.1); axD.set_ylim(lo - 0.1, hi + 2.1)       # headroom: statistics above the data
@@ -336,7 +338,7 @@ def main():
     r_uni = r_of(np.mean(r) ** 4 / ln)
     r_sh = np.array([r_of(rng.permutation(r) ** 4 / ln) for _ in range(N_SHUFFLE)])
     print(f'  r_log measured {r_log:.3f}, uniform {r_uni:.3f}, shuffled {r_sh.mean():.3f} ± {r_sh.std():.3f}')
-    axE = fig.add_subplot(gBm[2])
+    gE = gBm[2].subgridspec(1, 2, width_ratios=[1.0, 0.8], wspace=0.06); axE = fig.add_subplot(gE[0])
     for yi, lab, rv, col in ((2, 'measured radii', r_log, '#2b70b4'), (1, 'uniform radii', r_uni, '#9e9e9e')):
         axE.hlines(yi, 0, rv, color=col, lw=2, alpha=0.8)
         axE.plot(rv, yi, 'o', color=col, markersize=6, zorder=4)
@@ -347,13 +349,13 @@ def main():
     axE.text(r_sh.mean(), 0.36, f'{r_sh.mean():.2f}', va='bottom', ha='center', fontsize=8, color='#e08214')
     axE.text(r_sh.max() + 0.03, 0, f'{len(r_sh)} shuffles\n(max {r_sh.max():.2f})', va='center', ha='left', fontsize=8, color='#a85a00', linespacing=1.0)
     axE.set_yticks([2, 1, 0], ['measured radii', 'uniform radii', 'shuffled radii'])
-    axE.set_xlim(0, 1.0); axE.set_ylim(-0.6, 2.9); axE.set_box_aspect(1.0); axE.set_xticks([0, 0.5, 1.0])
+    axE.set_xlim(0, 1.0); axE.set_ylim(-0.6, 2.9); axE.set_xticks([0, 0.5, 1.0]); axE.set_box_aspect(1.55); axE.set_anchor('N')
     axE.set_xlabel(r"$r_{\log}$ (all measured)", labelpad=1)
     axE.spines['right'].set_visible(False); axE.spines['top'].set_visible(False)
     letter(axE, 'e', 'Radius controls', dx=-0.3)
     # inset: the flow field with uniform radii (same boundary fluxes), on the colour scale of a
     Qu = passive(np.mean(r) ** 4 / ln, fb, dom)
-    axU = axE.inset_axes([0.86, 0.55, 0.46, 0.46]); bg(axU); axU.set_ylim(Hm, 0)
+    axU = fig.add_subplot(gE[1]); bg(axU); axU.set_ylim(Hm, 0); axU.set_aspect('equal'); axU.set_anchor('N')
     axU.add_collection(LineCollection(segs, colors=[cAB(nAB(min(max(abs(Qu[c]), vmin), vmax))) for c in range(len(segs))], linewidths=0.3, zorder=3))
     axU.set_title('uniform radii', fontsize=8, pad=1, color='#7a7a7a')
     for s_ in axU.spines.values():
