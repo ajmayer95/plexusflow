@@ -267,18 +267,25 @@ def main():
         fp = np.array([[0, 0, 1], [0, Wv, 1], [Hv, Wv, 1], [Hv, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
         fp = fp[:, :2] / geom.downsample - [geom.y0, geom.x0]                  # (row, column) in the mosaic
         axC.plot(fp[:, 1], fp[:, 0], color=TCOL[t_], lw=1.4, alpha=0.75, zorder=3)
+    placed = []
     for i in pidx:
         q = toimg(np.asarray(G.edges[E[i]]["path"], float))
         if np.linalg.norm(q[0] - xy(E[i][0])) > np.linalg.norm(q[-1] - xy(E[i][0])):
             q = q[::-1]
         axC.plot(q[:, 0], q[:, 1], color="black", lw=3.4, zorder=4, solid_capstyle="round"); axC.plot(q[:, 0], q[:, 1], color="#ffd400", lw=2.0, zorder=5, solid_capstyle="round")
-        a_ = int(0.75 * (len(q) - 1)); b_ = min(a_ + 3, len(q) - 1); d_ = q[b_] - q[a_]
+        cum = np.r_[0, np.cumsum(np.linalg.norm(np.diff(q, axis=0), axis=1))]; a_ = int(np.searchsorted(cum, 0.5 * cum[-1]))
+        lo_i, hi_i = max(a_ - 2, 0), min(a_ + 2, len(q) - 1); d_ = q[hi_i] - q[lo_i]
         if Qp[i] < 0:
             d_ = -d_
+        lab_xy = mids[i]
         if np.linalg.norm(d_) > 0:
-            d_ = d_ / np.linalg.norm(d_) * 8
-            axC.annotate("", xy=q[a_] + d_, xytext=q[a_] - d_, arrowprops=dict(arrowstyle="-|>", color="#ffd400", lw=1.0, mutation_scale=10), zorder=6)
-        axC.text(*mids[i], str(num[i]), ha="center", va="center", fontsize=8, color=INK, fontweight="bold", zorder=7,
+            u_ = d_ / np.linalg.norm(d_)
+            axC.annotate("", xy=q[a_] + 6 * u_, xytext=q[a_] - 6 * u_, zorder=6,
+                         arrowprops=dict(arrowstyle="-|>,head_length=0.55,head_width=0.35", fc="black", ec="white", lw=0.7, mutation_scale=12))
+            nrm = np.array([-u_[1], u_[0]]); cands = [q[a_] + 17 * nrm, q[a_] - 17 * nrm]      # number beside the vessel, not on it
+            lab_xy = max(cands, key=lambda c: min([np.linalg.norm(c - o) for o in placed] + [1e9]))
+        placed.append(lab_xy)
+        axC.text(*lab_xy, str(num[i]), ha="center", va="center", fontsize=8, color=INK, fontweight="bold", zorder=7,
                  bbox=dict(boxstyle="circle,pad=0.15", fc="white", ec="black", lw=0.6))
     L_ = 100 / PX_UM; xb_, yb_ = c1_ - 20 - L_, r1_ - 20
     axC.plot([xb_, xb_ + L_], [yb_, yb_], color="white", lw=2.5, solid_capstyle="butt", zorder=8)
