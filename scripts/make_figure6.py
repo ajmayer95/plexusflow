@@ -251,8 +251,8 @@ def main():
     mos = tifffile.imread(str(ST / "fuse" / "maxmed.tif")).astype(float); mos = mos.mean(-1) if mos.ndim == 3 else mos; Hm = mos.shape[0]
     toimg = lambda q: np.column_stack([q[:, 0], Hm - q[:, 1]]); xy0 = xy; xy = lambda n: toimg(xy0(n)[None])[0]
     mids = {i: toimg(np.asarray(G.edges[E[i]]["path"], float))[len(G.edges[E[i]]["path"]) // 2] for i in pidx}
-    fig = plt.figure(figsize=(7.5, 6.6), facecolor="white")
-    gt = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.95, bottom=0.44, width_ratios=[0.9, 1.1], wspace=0.14)
+    fig = plt.figure(figsize=(7.5, 7.0), facecolor="white")
+    gt = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.95, bottom=0.465, width_ratios=[0.9, 1.1], wspace=0.14)
     gr = gt[1].subgridspec(2, 1, height_ratios=[0.85, 1.15], hspace=0.5)
     # a: the vessels in the tissue (max − median mosaic), numbered, with flow direction and the three tile footprints
     allp = toimg(np.vstack([np.asarray(G.edges[E[i]]["path"], float) for i in pidx]))
@@ -377,11 +377,11 @@ def main():
     hs += [Line2D([], [], marker="o", ls="", ms=7, color="0.35", label="Used"),
            Line2D([], [], marker="o", ls="", ms=5, mfc="white", mec="0.35", mew=1.3, label="Not used"),
            Line2D([], [], color=INK, lw=3.2, label="Reconstructed")]
-    fig.legend(handles=hs, loc="upper center", bbox_to_anchor=(0.5, 0.405), ncol=6, frameon=False, fontsize=8, handletextpad=0.3, columnspacing=1.4)
+    fig.legend(handles=hs, loc="upper center", bbox_to_anchor=(0.5, 0.425), ncol=6, frameon=False, fontsize=8, handletextpad=0.3, columnspacing=1.4)
 
     # d: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
     V = json.loads((P.RESULTS / "dc_weighting_validation.json").read_text())
-    axd = fig.add_axes([0.09, 0.07, 0.88, 0.25])
+    axd = fig.add_axes([0.09, 0.065, 0.88, 0.24])
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
@@ -401,7 +401,8 @@ def main():
         axd.spines[s_].set_visible(False)
     fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv = fig.transFigure.inverted(); tb = lambda a_: inv.transform(a_.get_tightbbox(rr_))
     xr = min(tb(axW)[0, 0], tb(axS)[0, 0]) - 0.012
-    for x_, y_, l_ in ((0.005, tb(axC)[1, 1], "a"), (xr, tb(axW)[1, 1], "b"), (xr, tb(axS)[1, 1], "c"), (0.005, tb(axd)[1, 1], "d")):
+    yT = max(tb(axC)[1, 1], tb(axW)[1, 1])                                 # a and b on one line; a and d in one column
+    for x_, y_, l_ in ((0.005, yT, "a"), (xr, yT, "b"), (xr, tb(axS)[1, 1], "c"), (0.005, tb(axd)[1, 1], "d")):
         fig.text(x_, min(y_ + 0.004, 0.985), l_, **LET)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     plos_style.save(fig, OUT)
