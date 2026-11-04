@@ -246,37 +246,52 @@ def main():
     log(f"patch {PATCH}: {len(pidx)} vessels, tiles {ptiles} at {[tmin[t_] for t_ in ptiles]} min; "
         + "; ".join(f"{num[i]}: Q′ {abs(Qp[i]):.3f} vs " + "/".join(f"{r[1]:.3f}" for r in recs[i]) for i in order))
 
-    fig = plt.figure(figsize=(7.5, 6.0), facecolor="white")
-    gt = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.94, bottom=0.53, width_ratios=[0.85, 1.15], wspace=0.12)
+    fig = plt.figure(figsize=(7.5, 6.4), facecolor="white")
+    gt = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.945, bottom=0.6, width_ratios=[0.85, 1.15], wspace=0.12)
     axN = fig.add_subplot(gt[0]); allp = np.vstack([np.asarray(G.edges[E[i]]["path"], float) for i in pidx]); pad = 18
     axN.set_xlim(allp[:, 0].min() - pad, allp[:, 0].max() + pad); axN.set_ylim(allp[:, 1].max() + pad, allp[:, 1].min() - pad)
     axN.set_aspect("equal"); axN.axis("off"); qmax = np.abs(Qp[pidx]).max()
     for i in pidx:
         q = np.asarray(G.edges[E[i]]["path"], float)
+        if np.linalg.norm(q[0] - xy(E[i][0])) > np.linalg.norm(q[-1] - xy(E[i][0])):
+            q = q[::-1]                                                       # path from u to v; Q′ > 0 is flow u → v
         axN.plot(q[:, 0], q[:, 1], color="0.6", lw=1.5 + 8 * abs(Qp[i]) / qmax, solid_capstyle="round", zorder=2)
-        axN.text(*mids[i], str(num[i]), ha="center", va="center", fontsize=8, color=INK, fontweight="bold", zorder=4,
+        a_ = int(0.72 * (len(q) - 1)); b_ = min(a_ + 3, len(q) - 1); d_ = q[b_] - q[a_]
+        if Qp[i] < 0:
+            d_ = -d_
+        if np.linalg.norm(d_) > 0:
+            d_ = d_ / np.linalg.norm(d_) * 9
+            axN.annotate("", xy=q[a_] + d_, xytext=q[a_] - d_, arrowprops=dict(arrowstyle="-|>", color=INK, lw=0.9, mutation_scale=10), zorder=5)
+        axN.text(*mids[i], str(num[i]), ha="center", va="center", fontsize=8, color=INK, fontweight="bold", zorder=6,
                  bbox=dict(boxstyle="circle,pad=0.18", fc="white", ec="0.4", lw=0.6))
     for n in pjun:
         axN.scatter(*xy(n), s=12, color=INK, zorder=3)
-    axN.set_title("Vessels recorded in several tiles", fontsize=9, loc="left", pad=3)
+    jc = max(pjun, key=lambda n: xy(n)[0])                                 # right-most junction: label in the empty lower right
+    axN.annotate("Σ in = Σ out\nat every junction", xy(jc), xytext=(0.72, 0.06), textcoords="axes fraction", fontsize=8, color=INK, ha="center",
+                 arrowprops=dict(arrowstyle="-", color="0.4", lw=0.6), linespacing=1.0)
+    axN.set_title("Repeated vessel measurements", fontsize=9, loc="left", pad=3)
     # strip chart: each tile's recording vs the reconstruction
     axS = fig.add_subplot(gt[1]); xs_ = np.arange(1, len(order) + 1)
     for k, i in enumerate(order):
         rs = recs[i]; offs = np.linspace(-0.18, 0.18, len(rs)) if len(rs) > 1 else [0.0]
+        used = int(D["tile"][i])                                             # the winner (smallest c): the only recording the reconstruction uses
+        assert used in [r[0] for r in rs] and min(rs, key=lambda r: r[2])[0] == used, (i, used, rs)
         for (t_, q_, c_, s_), dx in zip(sorted(rs), offs):
-            axS.scatter(k + 1 + dx, q_, s=30, color=TCOL[t_], edgecolors="white", linewidths=0.5, zorder=3, alpha=1.0 if c_ < 0.6 else 0.45)
+            axS.scatter(k + 1 + dx, q_, s=34, facecolors=TCOL[t_] if t_ == used else "white", edgecolors=TCOL[t_], linewidths=1.3, zorder=3)
         axS.plot([k + 1 - 0.32, k + 1 + 0.32], [abs(Qp[i])] * 2, color=INK, lw=2.2, zorder=4, solid_capstyle="butt")
     axS.set_yscale("log"); axS.set_xticks(xs_); axS.set_xticklabels([str(x) for x in xs_], fontsize=8); axS.set_xlim(0.4, len(order) + 0.6)
-    axS.set_xlabel("vessel", fontsize=8, labelpad=1); axS.set_ylabel("|flow| (nL/s)", fontsize=8, labelpad=1); axS.tick_params(labelsize=8)
-    axS.spines[["top", "right"]].set_visible(False); axS.set_title("Recordings disagree; one conservative field", fontsize=9, loc="left", pad=3)
+    axS.set_xlabel("Vessel ID", fontsize=8, labelpad=1); axS.set_ylabel("flow magnitude (nL/s)", fontsize=8, labelpad=1); axS.tick_params(labelsize=8)
+    axS.spines[["top", "right"]].set_visible(False); axS.set_title("Conservative reference reconstruction", fontsize=9, loc="left", pad=3)
     from matplotlib.lines import Line2D
     hs = [Line2D([], [], marker="o", ls="", ms=6, color=TCOL[t_], label=f"tile {t_} (t = {tmin[t_]:.0f} min)") for t_ in ptiles]
-    hs.append(Line2D([], [], color=INK, lw=2.2, label="reconstructed"))
-    axS.legend(handles=hs, loc="lower left", ncol=1, frameon=False, fontsize=8, handletextpad=0.3, borderaxespad=0.2)
+    hs += [Line2D([], [], marker="o", ls="", ms=6, color="0.35", label="used in reconstruction"),
+           Line2D([], [], marker="o", ls="", ms=6, mfc="white", mec="0.35", mew=1.3, label="not used (held out)"),
+           Line2D([], [], color=INK, lw=2.2, label="reconstructed")]
+    fig.legend(handles=hs, loc="upper center", bbox_to_anchor=(0.55, 0.535), ncol=3, frameon=False, fontsize=8, handletextpad=0.3, columnspacing=1.6)
 
     # b: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
     V = json.loads((P.RESULTS / "dc_weighting_validation.json").read_text())
-    axd = fig.add_axes([0.16, 0.08, 0.66, 0.3])
+    axd = fig.add_axes([0.12, 0.07, 0.68, 0.32])
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
@@ -291,10 +306,10 @@ def main():
     axd.set_xlim(-0.55, len(kinds) - 0.45); axd.set_ylim(0, 0.75)
     axd.set_ylabel("error vs independent recordings\n(median |log ratio|)", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
     axd.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False, fontsize=8, handletextpad=0.3)
-    axd.set_title("Independent validation", fontsize=10, pad=4, loc="left")
+    axd.set_title("Held-out prediction error", fontsize=10, pad=4, loc="left")
     for s_ in ("top", "right"):
         axd.spines[s_].set_visible(False)
-    fig.text(0.005, 0.955, "a", **LET); fig.text(0.005, 0.415, "b", **LET)
+    fig.text(0.005, 0.96, "a", **LET); fig.text(0.005, 0.42, "b", **LET)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     plos_style.save(fig, OUT)
     log(f"wrote {OUT}.png/.pdf")
