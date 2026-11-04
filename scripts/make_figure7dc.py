@@ -41,7 +41,7 @@ MOSAIC_P = _paths.MOSAIC
 OUT_DIR = _paths.FIGURES / 'fig7'
 import os
 SIGMA_P = float(os.environ.get('FIG7_SIGMA_P', '2.0'))   # Pa; 'inf' = no pressure penalty (measured venous split)  #: soft equal-venous-pressure penalty (any σ_P ≲ 5 Pa gives the same split)
-SCHEME, RADIUS, N_SHUFFLE = 'irls', 'consensus', 10
+SCHEME, RADIUS, N_SHUFFLE = 'irls', 'consensus', 200
 
 
 def main():
@@ -326,11 +326,15 @@ def main():
     r_sh = np.array([r_of(rng.permutation(r) ** 4 / ln) for _ in range(N_SHUFFLE)])
     print(f'  r_log measured {r_log:.3f}, uniform {r_uni:.3f}, shuffled {r_sh.mean():.3f} ± {r_sh.std():.3f}')
     axE = fig.add_subplot(gBm[2])
-    for yi, lab, rv, col, err in ((2, 'measured\nradii', r_log, '#2b70b4', 0), (1, 'uniform\nradii', r_uni, '#9e9e9e', 0),
-                                  (0, 'shuffled\nradii', r_sh.mean(), '#e08214', r_sh.std())):
+    for yi, lab, rv, col in ((2, 'measured radii', r_log, '#2b70b4'), (1, 'uniform radii', r_uni, '#9e9e9e')):
         axE.hlines(yi, 0, rv, color=col, lw=2, alpha=0.8)
-        axE.errorbar(rv, yi, xerr=err if err else None, fmt='o', color=col, markersize=5, capsize=2, zorder=4)
-        axE.text(rv + 0.03, yi + 0.28, f'{rv:.2f}', va='bottom', ha='center', fontsize=8, color=col)
+        axE.plot(rv, yi, 'o', color=col, markersize=6, zorder=4)
+        axE.text(rv, yi + 0.28, f'{rv:.2f}', va='bottom', ha='center', fontsize=8, color=col)
+    jit_ = np.random.default_rng(1).uniform(-0.18, 0.18, len(r_sh))          # every shuffle realisation
+    axE.scatter(r_sh, jit_, s=6, color='#e08214', alpha=0.45, linewidths=0, zorder=3)
+    axE.plot([r_sh.mean()] * 2, [-0.3, 0.3], color='#a85a00', lw=1.6, zorder=4)
+    axE.text(r_sh.mean(), 0.36, f'{r_sh.mean():.2f}', va='bottom', ha='center', fontsize=8, color='#e08214')
+    axE.text(r_sh.max() + 0.03, 0, f'{len(r_sh)} shuffles\n(max {r_sh.max():.2f})', va='center', ha='left', fontsize=8, color='#a85a00', linespacing=1.0)
     axE.set_yticks([2, 1, 0], ['measured radii', 'uniform radii', 'shuffled radii'])
     axE.set_xlim(0, 1.0); axE.set_ylim(-0.6, 2.9); axE.set_box_aspect(1.0)
     axE.set_xlabel(r"$r_{\log}$ (all measured)", labelpad=1)
