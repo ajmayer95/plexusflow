@@ -168,11 +168,11 @@ def main():
                 transform=ax.transAxes, ha='left', va='top', fontsize=8, color='#2b35a8')
 
     fig = plt.figure(figsize=(7.5, 6.6), facecolor='white')
-    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.8], hspace=0.13, left=0.06, right=0.9, top=0.97, bottom=0.08)
+    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.8], hspace=0.16, left=0.06, right=0.9, top=0.935, bottom=0.08)
     gT = gs[0].subgridspec(1, 2, wspace=0.08); gBm = gs[1].subgridspec(1, 3, width_ratios=[1.15, 1.0, 0.8], wspace=0.45)
-    def letter(ax, l, title, dx=-0.02):
-        ax.text(dx, 1.01, l, transform=ax.transAxes, fontsize=12, fontweight='bold', va='bottom', ha='right')
-        ax.set_title(title, fontsize=9, loc='left', pad=3)
+    LETTERS = {}
+    def letter(ax, l, title, dx=-0.02):                                      # letter + title placed on a shared row line after layout (below)
+        LETTERS[l] = (ax, title)
 
     # a
     axA = fig.add_subplot(gT[0]); bg(axA); field(axA, Qp, True); markers(axA)
@@ -213,7 +213,7 @@ def main():
     axA.text(x0_ + L_ / 2, y0_ - 0.012 * Hm, '1 mm', ha='center', va='bottom', fontsize=8, zorder=8)
 
     # b
-    axB = fig.add_subplot(gT[1]); bg(axB); field(axB, Qs, True); markers(axB); mark_divide(axB, Qs, 'Q_sim', np.ones(len(Qs), bool))
+    axB = fig.add_subplot(gT[1]); bg(axB); field(axB, Qs, False); markers(axB); mark_divide(axB, Qs, 'Q_sim', np.ones(len(Qs), bool))
     for c in picked:                                         # same vessels as a, in the passive model's own direction
         if abs(Qs[c]) >= 0.01:                               # no arrow where the model's flow is negligible (direction meaningless)
             arrow(axB, c, Qs)
@@ -258,27 +258,26 @@ def main():
 
     # D
     axD = fig.add_subplot(gBm[1])
-    lm, ls_ = np.log10(np.maximum(np.abs(Qp[m]), 1e-5)), np.log10(np.maximum(np.abs(Qs[m]), 1e-5))
+    md = m & sig_ok                                                          # direction-resolved vessels (|Q′| > 2σ), as in a
+    lm, ls_ = np.log10(np.maximum(np.abs(Qp[md]), 1e-5)), np.log10(np.maximum(np.abs(Qs[md]), 1e-5))
     gcm = mcolors.LinearSegmentedColormap.from_list('g', [plt.cm.Greys(0.3), plt.cm.Greys(0.95)])   # lightest bin still visible
     axD.hexbin(lm, ls_, gridsize=45, cmap=gcm, mincnt=1, bins='log', linewidths=0, zorder=2)
     lo, hi = min(lm.min(), ls_.min()), max(lm.max(), ls_.max())
     axD.plot([lo, min(hi, 0.0)], [lo, min(hi, 0.0)], color=INKC, ls='--', lw=0.9, zorder=3)
-    mm = mism[m]
+    mm = mism[md]
     axD.scatter(lm[mm], ls_[mm], s=5, facecolors='none', edgecolors=MIS, linewidths=0.5, alpha=0.8,
                 zorder=4, label='direction mismatch')
-    r_log = float(np.corrcoef(lm, ls_)[0, 1])
+    r_log = float(np.corrcoef(np.log10(np.maximum(np.abs(Qp[m]), 1e-5)), np.log10(np.maximum(np.abs(Qs[m]), 1e-5)))[0, 1])
     consider = m & sig_ok
     r_log_res = float(np.corrcoef(np.log10(np.abs(Qp[consider])), np.log10(np.abs(Qs[consider])))[0, 1])
     p_agree = float(np.mean(np.sign(Qp[consider]) == np.sign(Qs[consider])))
-    axD.text(0.03, 0.97, f'$r_{{\\log}}$ {r_log:.2f}  all (n = {int(m.sum())})\n'
-                         f'$r_{{\\log}}$ {r_log_res:.2f}  > 2σ (n = {int(consider.sum())})\n'
-                         f'direction {100 * p_agree:.0f}% (> 2σ)',
+    axD.text(0.03, 0.97, f'$r_{{\\log}}$ = {r_log_res:.2f}\ndirection {100 * p_agree:.0f}%',
              transform=axD.transAxes, va='top', ha='left', fontsize=8, linespacing=1.3, zorder=5,
              bbox=dict(fc='white', ec='none', pad=1.5))
     axD.set_xlabel(r"reconstructed log$_{10}$|Q′| (nL/s)", labelpad=1)
     axD.set_ylabel(r'predicted log$_{10}$|Q$_{\rm sim}$| (nL/s)', labelpad=1)
-    letter(axD, 'd', 'Vessel-by-vessel', dx=-0.2); axD.title.set_position((0, 1.06))
-    axD.legend(fontsize=8, loc='upper left', bbox_to_anchor=(-0.03, 0.745), frameon=False, borderaxespad=0, handletextpad=0.1); axD.set_aspect('equal')
+    letter(axD, 'd', 'Vessel-by-vessel (|Q′| > 2σ)', dx=-0.2)
+    axD.set_aspect('equal')
     axD.spines[['top', 'right']].set_visible(False)
     axD.set_xlim(lo - 0.1, hi + 2.1); axD.set_ylim(lo - 0.1, hi + 2.1)       # headroom: statistics above the data
 
@@ -384,6 +383,15 @@ def main():
     axs_[1].text(-0.1, 1.03, 'b', transform=axs_[1].transAxes, fontsize=12, fontweight='bold', va='bottom')
     print('[fig7 SI forcing] ' + '; '.join(f'{l_}: r {v[1]:.3f}, dir {v[2]:.1f}%' for l_, v in zip(labs, list(sc) + [rnd.mean(0), ext])))
     plos_style.save(figF2, OUT_DIR / 'fig7_S_forcing')
+    fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv_ = fig.transFigure.inverted(); tb_ = lambda a_: inv_.transform(a_.get_tightbbox(rr_))
+    # one baseline per row, just above the highest artist of that row (excluding text placed above the maps in a)
+    yT_ = min(max(LETTERS[k][0].get_position().y1 for k in 'ab') + 0.012, 0.955)
+    yB_ = max(tb_(LETTERS[k][0])[1, 1] for k in 'cde') + 0.01
+    for k in 'abcde':
+        ax_, title_ = LETTERS[k]; y_ = yT_ if k in 'ab' else yB_
+        xl_ = 0.005 if k in 'ac' else tb_(ax_)[0, 0] - 0.005
+        fig.text(xl_, y_, k, fontsize=12, fontweight='bold', va='baseline', ha='left')
+        fig.text(xl_ + 0.028, y_, title_, fontsize=9, va='baseline', ha='left')
     plos_style.save(fig, OUT_DIR / ('fig7' if np.isfinite(SIGMA_P) else 'fig7_no_vein_penalty')); plos_style.save(figF, OUT_DIR / 'fig7_S_boundary_distance')
     print(f"[fig7] r_log {r_log:.3f}, P(dir agree|filtered) {p_agree:.2f}, mismatches {int(mism.sum())}, "
           f"n {int(m.sum())}; wrote {OUT_DIR / 'fig7.png'}")
