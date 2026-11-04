@@ -277,16 +277,24 @@ def main():
             u_ = d_ / np.linalg.norm(d_)
             i0, i1 = int(np.searchsorted(cum, 0.22 * cum[-1])), min(int(np.searchsorted(cum, 0.78 * cum[-1])), len(q) - 1)
             seg = q[i0:i1 + 1] if Qp[i] >= 0 else q[i0:i1 + 1][::-1]                    # shaft follows the vessel, head at the downstream end
-            for col_, lw_ in (("black", 1.8),):
-                axC.plot(seg[:-1, 0], seg[:-1, 1], color=col_, lw=lw_, solid_capstyle="round", zorder=6)
-            if len(seg) >= 3:
-                tip_, back_ = seg[-1], seg[-3]
-            else:                                                                  # short vessel: its own chord, downstream end
-                a0_, a1_ = (q[0], q[-1]) if Qp[i] >= 0 else (q[-1], q[0]); tip_, back_ = a0_ + 0.85 * (a1_ - a0_), a0_
-            dv_ = tip_ - back_; dv_ = dv_ / max(np.linalg.norm(dv_), 1e-9); pv_ = np.array([-dv_[1], dv_[0]])
             HL_, HW_ = 11.0, 5.5                                                   # head length / half-width in mosaic pixels
-            tri_ = np.array([tip_, tip_ - HL_ * dv_ + HW_ * pv_, tip_ - HL_ * dv_ - HW_ * pv_])
-            axC.add_patch(matplotlib.patches.Polygon(tri_, closed=True, fc="black", ec="white", lw=0.6, zorder=7))
+            if len(seg) < 3:                                                       # short vessel: its own chord, downstream end
+                a0_, a1_ = (q[0], q[-1]) if Qp[i] >= 0 else (q[-1], q[0]); seg = np.array([a0_, a0_ + 0.85 * (a1_ - a0_)])
+            # smooth the traced path (jagged pixel steps), then resample by arc length
+            sm_ = seg.copy()
+            if len(seg) >= 5:
+                k_ = np.ones(3) / 3; sm_ = np.column_stack([np.convolve(np.pad(seg[:, d], 1, mode="edge"), k_, "valid") for d in (0, 1)])
+            cl_ = np.r_[0, np.cumsum(np.linalg.norm(np.diff(sm_, axis=0), axis=1))]; Lt_ = cl_[-1]
+            at_ = lambda L: np.array([np.interp(L, cl_, sm_[:, 0]), np.interp(L, cl_, sm_[:, 1])])
+            tip_ = at_(Lt_); back_ = at_(max(Lt_ - 16, 0))                          # head direction from the last ~16 px of the shaft
+            dv_ = tip_ - back_; dv_ = dv_ / max(np.linalg.norm(dv_), 1e-9); pv_ = np.array([-dv_[1], dv_[0]])
+            base_ = tip_ - HL_ * dv_
+            Ls_ = np.linspace(0, max(Lt_ - HL_, 0), 40); shaft_ = np.array([at_(L) for L in Ls_])
+            if len(shaft_) and Lt_ > HL_ + 2:
+                shaft_[-1] = base_                                                 # shaft ends exactly at the head's base centre
+                axC.plot(shaft_[:, 0], shaft_[:, 1], color="black", lw=1.8, solid_capstyle="butt", zorder=6)
+            tri_ = np.array([tip_, base_ + HW_ * pv_, base_ - HW_ * pv_])
+            axC.add_patch(matplotlib.patches.Polygon(tri_, closed=True, fc="black", ec="white", lw=0.6, zorder=7, joinstyle="miter"))
             nrm = np.array([-u_[1], u_[0]]); cands = [q[a_] + 13 * nrm, q[a_] - 13 * nrm]      # number beside the vessel, not on it
             lab_xy = max(cands, key=lambda c: min([np.linalg.norm(c - o) for o in placed] + [1e9]))
         placed.append(lab_xy)
