@@ -89,9 +89,15 @@ def main():
         ax.set_xticks([]); ax.set_yticks([]); [s.set_visible(False) for s in ax.spines.values()]
         ax.set_xlim(0, Wm); ax.set_ylim(Hm, -0.06 * Hm)          # headroom above the organ for the boundary-flux key
 
-    def markers(ax):
+    ART_S = lambda f: 4 + 60 * abs(f)                                       # marker area per nL/s of boundary inflow
+    def markers(ax, sized=False):
         for i_ in dom['inj']:                               # Fig 5 convention: arterial cuts red, venous outlets blue
-            ax.plot(*nxy[nodes[i_]], 'o', color='#d40000', ms=2.2, mec='white', mew=0.3, zorder=6)
+            if sized:                                       # area ∝ inflow of the reference field; hollow = net withdrawal
+                f_ = D['fb'][i_]
+                ax.scatter(*nxy[nodes[i_]], s=ART_S(f_), facecolor='#d40000' if f_ > 0 else 'white', edgecolor='#d40000' if f_ <= 0 else 'white',
+                           linewidths=0.4 if f_ > 0 else 0.8, zorder=6, alpha=0.9)
+            else:
+                ax.plot(*nxy[nodes[i_]], 'o', color='#d40000', ms=2.2, mec='white', mew=0.3, zorder=6)
         for n in G.graph['boundary']['V']:
             ax.plot(*nxy[n], 's', color='#2b35a8', ms=4, mec='white', mew=0.5, zorder=6)
 
@@ -181,7 +187,23 @@ def main():
     axA.plot([], [], color=GREY_U[:3], lw=1.2, label='measured, |Q′| < 2σ')
     axA.plot([], [], color=GREY_N[:3], lw=1.2, label='unmeasured')
     axA.plot([], [], 'D', ms=5, mfc='white', mec=INKC, mew=1.0, label='stagnation point')
-    axA.legend(loc='upper center', bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=8, frameon=False, borderaxespad=0.2,
+    # arterial cuts coloured by their inflow in Q′ (red scale, log); hollow = net withdrawal
+    fcut_ = D['fb'][dom['inj']]; pos_ = fcut_ > 0
+    nCut = mcolors.LogNorm(vmin=max(fcut_[pos_].min(), 1e-3), vmax=fcut_.max()); cCut = plt.get_cmap('Reds')
+    for i_, f_ in zip(dom['inj'], fcut_):
+        if f_ > 0:
+            axA.scatter(*nxy[nodes[i_]], s=16, color=cCut(0.25 + 0.75 * nCut(f_)), edgecolor='black', linewidths=0.4, zorder=7)
+        else:
+            axA.scatter(*nxy[nodes[i_]], s=12, facecolor='white', edgecolor='black', linewidths=0.6, zorder=7)
+    cbCut = axA.inset_axes([0.73, 0.94, 0.24, 0.025])
+    _cmap_trunc = mcolors.LinearSegmentedColormap.from_list('rt', cCut(np.linspace(0.25, 1.0, 256)))
+    cb_ = plt.colorbar(plt.cm.ScalarMappable(norm=nCut, cmap=_cmap_trunc), cax=cbCut, orientation='horizontal', ticks=[0.01, 0.1, 1.0])
+    cb_.ax.set_xticklabels(['0.01', '0.1', '1']); cb_.ax.minorticks_off()
+    cb_.set_label('cut inflow (nL/s)', fontsize=8, labelpad=1); cb_.ax.tick_params(labelsize=8, length=2, pad=1); cb_.outline.set_linewidth(0.4)
+    cb_.ax.xaxis.set_label_position('top')
+    _hs = []
+    axA.legend(handles=[h_ for h_ in axA.get_legend_handles_labels()[0] if h_ not in _hs], loc='upper center', bbox_to_anchor=(0.5, 0.0), ncol=3,
+               fontsize=8, frameon=False, borderaxespad=0.2, scatterpoints=1,
                handlelength=1.4, columnspacing=1.2)
     # a handful of direction arrows on the strongest direction-resolved vessels, spread over the organ
     picked = []; bxy = np.array([nxy[nodes[i_]] for i_ in np.r_[dom['inj'], dom['out']]])
@@ -223,6 +245,7 @@ def main():
     inj = fb[dom['inj']]                                     # arterial cuts drawn red by markers(); net withdrawals not marked (caption)
     print(f"[fig7] arterial cuts: {int((inj < 0).sum())} net withdrawals, Σ {inj[inj < 0].sum():.2f} nL/s ({100 * -inj[inj < 0].sum() / inj[inj > 0].sum():.0f}% of inflow)")
     axB.plot([], [], 'o', ms=3.2, color='#d40000', mec='white', mew=0.3, label='arterial boundary')
+    axB.plot([], [], 'o', ms=4, mfc='white', mec='black', mew=0.6, label='withdrawing cut')
     axB.plot([], [], 's', ms=4, color='#2b35a8', mec='white', mew=0.5, label='venous outlet')
     axB.plot([], [], 'D', ms=5, mfc='white', mec=INKC, mew=1.0, label='_nolegend_')
     axB.legend(loc='upper center', bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=8, frameon=False, borderaxespad=0.2,
@@ -387,11 +410,13 @@ def main():
     # one baseline per row, just above the highest artist of that row (excluding text placed above the maps in a)
     yT_ = min(max(LETTERS[k][0].get_position().y1 for k in 'ab') + 0.012, 0.955)
     yB_ = max(tb_(LETTERS[k][0])[1, 1] for k in 'cde') + 0.01
-    for k in 'abcde':
+    # Q′ and Q_sim are one comparison → one panel (a); bottom row b–d
+    for k, shown in (('a', 'a'), ('b', None), ('c', 'b'), ('d', 'c'), ('e', 'd')):
         ax_, title_ = LETTERS[k]; y_ = yT_ if k in 'ab' else yB_
         xl_ = 0.005 if k in 'ac' else tb_(ax_)[0, 0] - 0.005
-        fig.text(xl_, y_, k, fontsize=12, fontweight='bold', va='baseline', ha='left')
-        fig.text(xl_ + 0.028, y_, title_, fontsize=9, va='baseline', ha='left')
+        if shown:
+            fig.text(xl_, y_, shown, fontsize=12, fontweight='bold', va='baseline', ha='left')
+        fig.text(xl_ + (0.028 if shown else 0.0), y_, title_, fontsize=9, va='baseline', ha='left')
     plos_style.save(fig, OUT_DIR / ('fig7' if np.isfinite(SIGMA_P) else 'fig7_no_vein_penalty')); plos_style.save(figF, OUT_DIR / 'fig7_S_boundary_distance')
     print(f"[fig7] r_log {r_log:.3f}, P(dir agree|filtered) {p_agree:.2f}, mismatches {int(mism.sum())}, "
           f"n {int(m.sum())}; wrote {OUT_DIR / 'fig7.png'}")
