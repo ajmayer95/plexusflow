@@ -266,7 +266,7 @@ def main():
         tg = geom.tiles[int(t_)]; Hv, Wv = tg.video_shape if tg.video_shape else tifffile.imread(str(ST / "tiles" / "maxmed" / f"vid{t_}_maxmed.tif")).shape[:2]
         fp = np.array([[0, 0, 1], [0, Wv, 1], [Hv, Wv, 1], [Hv, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
         fp = fp[:, :2] / geom.downsample - [geom.y0, geom.x0]                  # (row, column) in the mosaic
-        axC.plot(fp[:, 1], fp[:, 0], color=TCOL[t_], lw=2.2, zorder=3)
+        axC.plot(fp[:, 1], fp[:, 0], color=TCOL[t_], lw=1.4, alpha=0.75, zorder=3)
     for i in pidx:
         q = toimg(np.asarray(G.edges[E[i]]["path"], float))
         if np.linalg.norm(q[0] - xy(E[i][0])) > np.linalg.norm(q[-1] - xy(E[i][0])):
@@ -303,7 +303,7 @@ def main():
              bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.5))
     axW.set_xlim(0, 2.0); axW.set_xlabel("time since recording start (s)", fontsize=8, labelpad=1); axW.set_ylabel("flow (nL/s)", fontsize=8, labelpad=1)
     axW.tick_params(labelsize=8); axW.spines[["top", "right"]].set_visible(False)
-    axW.set_title(f"Repeated recordings of vessel {num[wv]}", fontsize=9, loc="left", pad=3)
+    axW.set_title(f"Repeated recordings of vessel {num[wv]} (dashed: means)", fontsize=9, loc="left", pad=3)
     log(f"  waveform panel: vessel {num[wv]} {E[wv]}, means " + ", ".join(f"{r[0]}: {r[1]:.3f}" for r in sorted(recs[wv])) + f"; Q′ {abs(Qp[wv]):.3f}")
 
     # c: all nine vessels — selected recording, held-out recordings, reconstruction
@@ -314,16 +314,16 @@ def main():
         used = int(D["tile"][i])                                             # the winner (smallest c): the only recording the reconstruction uses
         assert used in [r[0] for r in rs] and min(rs, key=lambda r: r[2])[0] == used, (i, used, rs)
         for (t_, q_, c_, s_), dx in zip(sorted(rs), offs):
-            axS.scatter(k + 1 + dx, q_, s=30, facecolors=TCOL[t_] if t_ == used else "white", edgecolors=TCOL[t_], linewidths=1.3, zorder=3)
-        axS.plot([k + 1 - 0.32, k + 1 + 0.32], [abs(Qp[i])] * 2, color=INK, lw=2.2, zorder=4, solid_capstyle="butt")
+            axS.scatter(k + 1 + dx, q_, s=48 if t_ == used else 26, facecolors=TCOL[t_] if t_ == used else "white", edgecolors=TCOL[t_], linewidths=1.3, zorder=3)
+        axS.plot([k + 1 - 0.38, k + 1 + 0.38], [abs(Qp[i])] * 2, color=INK, lw=3.2, zorder=4, solid_capstyle="butt")
     axS.set_yscale("log"); axS.set_xticks(xs_); axS.set_xticklabels([str(x) for x in xs_], fontsize=8); axS.set_xlim(0.4, len(order) + 0.6)
     axS.set_xlabel("Vessel ID", fontsize=8, labelpad=1); axS.set_ylabel("mean flow (nL/s)", fontsize=8, labelpad=1); axS.tick_params(labelsize=8)
     axS.spines[["top", "right"]].set_visible(False); axS.set_title("Conservation-consistent reference flows", fontsize=9, loc="left", pad=3)
     from matplotlib.lines import Line2D
     hs = [Line2D([], [], marker="s", ls="", ms=7, color=TCOL[t_], label=f"Tile {t_}") for t_ in ptiles]
-    hs += [Line2D([], [], marker="o", ls="", ms=6, color="0.35", label="Selected"),
-           Line2D([], [], marker="o", ls="", ms=6, mfc="white", mec="0.35", mew=1.3, label="Held out"),
-           Line2D([], [], color=INK, lw=2.2, label="Reconstructed")]
+    hs += [Line2D([], [], marker="o", ls="", ms=7, color="0.35", label="Used"),
+           Line2D([], [], marker="o", ls="", ms=5, mfc="white", mec="0.35", mew=1.3, label="Independent repeat"),
+           Line2D([], [], color=INK, lw=3.2, label="Reconstructed mean")]
     fig.legend(handles=hs, loc="upper center", bbox_to_anchor=(0.5, 0.405), ncol=6, frameon=False, fontsize=8, handletextpad=0.3, columnspacing=1.4)
 
     # d: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
@@ -332,18 +332,18 @@ def main():
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
-    axd.text(-0.5, raw["err"] - 0.015, "two recordings of the same vessel", fontsize=8, color=GREY, va="top", ha="left")
+    axd.text(-0.38, raw["err"] - 0.015, "two recordings of the same vessel", fontsize=8, color=GREY, va="top", ha="left")
     for test, dx, mk, lab in (("measured", -0.12, "o", "measured vessels"), ("imputed", 0.12, "D", "withheld vessels")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
         axd.vlines(xs + dx, ci_[:, 0], ci_[:, 1], color=cl, lw=1.4, zorder=2)
-        axd.scatter(xs + dx, e_, marker=mk, s=50, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.5, zorder=3)
+        axd.scatter(xs + dx, e_, marker=mk, s=64, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.5, zorder=3)
         axd.scatter([], [], marker=mk, s=50, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.5, label=lab)
     axd.set_xticks(xs); axd.set_xticklabels(xl, fontsize=9); axd.get_xticklabels()[-1].set_color(BLUE); axd.get_xticklabels()[-1].set_fontweight("bold")
-    axd.set_xlim(-0.55, len(kinds) - 0.45); axd.set_ylim(0, 0.75)
+    axd.set_xlim(-0.45, len(kinds) - 0.55); axd.set_ylim(0, 0.75)
     axd.set_ylabel("median absolute\nlog-ratio error", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
     axd.legend(loc="upper right", frameon=False, fontsize=8, handletextpad=0.3, ncol=2)
-    axd.set_title("Prediction of independent recordings", fontsize=9, pad=4, loc="left")
+    axd.set_title("Held-out prediction error", fontsize=9, pad=4, loc="left")
     for s_ in ("top", "right"):
         axd.spines[s_].set_visible(False)
     fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv = fig.transFigure.inverted(); tb = lambda a_: inv.transform(a_.get_tightbbox(rr_))
@@ -426,7 +426,7 @@ def main():
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
-    axd.text(-0.5, raw["err"] - 0.015, "two recordings of the same vessel", fontsize=8, color=GREY, va="top", ha="left")
+    axd.text(-0.38, raw["err"] - 0.015, "two recordings of the same vessel", fontsize=8, color=GREY, va="top", ha="left")
     for test, dx, mk, lab in (("measured", -0.15, "o", "measured"), ("imputed", 0.15, "D", "withheld")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
@@ -434,7 +434,7 @@ def main():
         axd.scatter(xs + dx, e_, marker=mk, s=36, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.3, zorder=3)
         axd.scatter([], [], marker=mk, s=36, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.3, label=lab + " vessels")
     axd.set_xticks(xs); axd.set_xticklabels(xl, fontsize=8); axd.get_xticklabels()[-1].set_color(BLUE); axd.get_xticklabels()[-1].set_fontweight("bold")
-    axd.set_xlim(-0.55, len(kinds) - 0.45); axd.set_ylim(0, 0.75)
+    axd.set_xlim(-0.45, len(kinds) - 0.55); axd.set_ylim(0, 0.75)
     axd.set_ylabel("error vs independent\nrecordings, median |log ratio|", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
     axd.legend(loc="lower left", frameon=False, fontsize=8, handletextpad=0.3, borderaxespad=0.1)
     axd.set_title("Prediction of independent recordings", **TIT)
