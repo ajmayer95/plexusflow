@@ -339,26 +339,26 @@ def main():
     r_sh = np.array([r_of(rng.permutation(r) ** 4 / ln) for _ in range(N_SHUFFLE)])
     print(f'  r_log measured {r_log:.3f}, uniform {r_uni:.3f}, shuffled {r_sh.mean():.3f} ± {r_sh.std():.3f}')
     gE = gBm[2].subgridspec(1, 2, width_ratios=[1.0, 0.72], wspace=0.08); axE = fig.add_subplot(gE[0])
-    for yi, lab, rv, col in ((2, 'measured radii', r_log, '#2b70b4'), (1, 'uniform radii', r_uni, '#9e9e9e')):
+    RC = {'measured': '#2b70b4', 'uniform': '#8a8a8a', 'shuffled': '#d07a14'}
+    for yi, rv, col in ((2, r_log, RC['measured']), (1, r_uni, RC['uniform'])):
         axE.hlines(yi, 0, rv, color=col, lw=2, alpha=0.8)
-        axE.plot(rv, yi, 'o', color=col, markersize=6, zorder=4)
-        axE.text(rv, yi + 0.28, f'{rv:.2f}', va='bottom', ha='center', fontsize=8, color=col)
-    jit_ = np.random.default_rng(1).uniform(-0.18, 0.18, len(r_sh))          # every shuffle realisation
-    axE.scatter(r_sh, jit_, s=6, color='#e08214', alpha=0.45, linewidths=0, zorder=3)
-    axE.plot([r_sh.mean()] * 2, [-0.3, 0.3], color='#a85a00', lw=1.6, zorder=4)
-    axE.text(r_sh.mean(), 0.36, f'{r_sh.mean():.2f}', va='bottom', ha='center', fontsize=8, color='#e08214')
-    axE.text(r_sh.max() + 0.03, 0, f'{len(r_sh)} shuffles\n(max {r_sh.max():.2f})', va='center', ha='left', fontsize=8, color='#a85a00', linespacing=1.0)
-    axE.set_yticks([2, 1, 0], ['measured radii', 'uniform radii', 'shuffled radii'])
-    axE.set_xlim(0, 1.0); axE.set_ylim(-0.6, 2.9); axE.set_xticks([0, 0.5, 1.0]); axE.set_box_aspect(1.1); axE.set_anchor('N')
-    axE.set_xlabel(r"$r_{\log}$ (all measured)", labelpad=1)
+        axE.plot(rv, yi, 'o', color=col, markersize=5, zorder=4)
+        axE.text(rv + 0.04, yi, f'{rv:.2f}', va='center', ha='left', fontsize=8, color=col)
+    jit_ = np.random.default_rng(1).uniform(-0.2, 0.2, len(r_sh))           # every shuffle realisation
+    axE.scatter(r_sh, jit_, s=5, color=RC['shuffled'], alpha=0.45, linewidths=0, zorder=3)
+    axE.plot([r_sh.mean()] * 2, [-0.3, 0.3], color=RC['shuffled'], lw=1.6, zorder=4)
+    axE.text(r_sh.max() + 0.04, 0, f'{r_sh.mean():.2f} (n = {len(r_sh)})', va='center', ha='left', fontsize=8, color=RC['shuffled'])
+    axE.set_yticks([2, 1, 0], ['measured', 'uniform', 'shuffled'])
+    axE.set_xlim(0, 1.0); axE.set_ylim(-0.55, 2.55); axE.set_xticks([0, 0.5, 1.0]); axE.tick_params(axis='y', length=0)
+    axE.set_xlabel(r"$r_{\log}$ with Q′ (all measured vessels)", labelpad=1)
     axE.spines['right'].set_visible(False); axE.spines['top'].set_visible(False)
     letter(axE, 'e', 'Radius controls', dx=-0.3)
     # inset: the flow field with uniform radii (same boundary fluxes), on the colour scale of a
     Qu = passive(np.mean(r) ** 4 / ln, fb, dom)
     Qsh1 = passive(np.random.default_rng(7).permutation(r) ** 4 / ln, fb, dom)        # one shuffled-radius realisation
-    gEm = gE[1].subgridspec(2, 1, hspace=0.18)
-    for k_, (Qx, lab_, col_) in enumerate(((Qu, 'uniform radii', '#7a7a7a'), (Qsh1, 'shuffled radii', '#a85a00'))):
-        axU = fig.add_subplot(gEm[k_]); bg(axU); axU.set_ylim(Hm, 0); axU.set_aspect('equal')
+    axUs = []
+    for k_, (Qx, lab_, col_) in enumerate(((Qs, 'measured', RC['measured']), (Qu, 'uniform', RC['uniform']), (Qsh1, 'shuffled', RC['shuffled']))):
+        axU = fig.add_axes([0, 0, 0.1, 0.1]); axUs.append(axU); bg(axU); axU.set_ylim(Hm, 0); axU.set_aspect('equal')
         axU.add_collection(LineCollection(segs, colors=[cAB(nAB(min(max(abs(Qx[c]), vmin), vmax))) for c in range(len(segs))], linewidths=0.25, zorder=3))
         axU.set_title(lab_, fontsize=8, pad=1, color=col_)
         for s_ in axU.spines.values():
@@ -445,6 +445,14 @@ def main():
     axs_[1].text(-0.1, 1.03, 'b', transform=axs_[1].transAxes, fontsize=12, fontweight='bold', va='bottom')
     print('[fig7 SI forcing] ' + '; '.join(f'{l_}: r {v[1]:.3f}, dir {v[2]:.1f}%' for l_, v in zip(labs, list(sc) + [rnd.mean(0), ext])))
     plos_style.save(figF2, OUT_DIR / 'fig7_S_forcing')
+    # bottom row on explicit coordinates: b, c and d share their top (0.40) and bottom (0.11) edges
+    TOP_, BOT_ = 0.40, 0.11
+    axC.set_position([0.02, BOT_, 0.29, TOP_ - BOT_]); axC.set_anchor('N')
+    axD.set_position([0.40, BOT_, 0.23, TOP_ - BOT_]); axD.set_anchor('N')
+    xd0_, wmap_, gap_ = 0.69, 0.092, 0.009
+    for k_, axU in enumerate(axUs):
+        axU.set_position([xd0_ + k_ * (wmap_ + gap_), TOP_ - 0.175, wmap_, 0.15]); axU.set_anchor("N")
+    axE.set_position([xd0_ + 0.05, BOT_ + 0.02, 3 * wmap_ + 2 * gap_ - 0.05, 0.095])
     fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv_ = fig.transFigure.inverted(); tb_ = lambda a_: inv_.transform(a_.get_tightbbox(rr_))
     # one baseline per row, just above the highest artist of that row (excluding text placed above the maps in a)
     yT_ = min(max(LETTERS[k][0].get_position().y1 for k in 'ab') + 0.012, 0.955)
