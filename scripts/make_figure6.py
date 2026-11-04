@@ -246,13 +246,18 @@ def main():
     log(f"patch {PATCH}: {len(pidx)} vessels, tiles {ptiles} at {[tmin[t_] for t_ in ptiles]} min; "
         + "; ".join(f"{num[i]}: Q′ {abs(Qp[i]):.3f} vs " + "/".join(f"{r[1]:.3f}" for r in recs[i]) for i in order))
 
-    fig = plt.figure(figsize=(7.5, 6.4), facecolor="white")
-    gt = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.945, bottom=0.6, width_ratios=[0.85, 1.15], wspace=0.12)
-    axN = fig.add_subplot(gt[0]); allp = np.vstack([np.asarray(G.edges[E[i]]["path"], float) for i in pidx]); pad = 18
+    # graph (x, y) → mosaic image (column, row) = (x, H − y): draw everything in tissue orientation
+    mos = tifffile.imread(str(ST / "fuse" / "maxmed.tif")).astype(float); mos = mos.mean(-1) if mos.ndim == 3 else mos; Hm = mos.shape[0]
+    toimg = lambda q: np.column_stack([q[:, 0], Hm - q[:, 1]]); xy0 = xy; xy = lambda n: toimg(xy0(n)[None])[0]
+    mids = {i: toimg(np.asarray(G.edges[E[i]]["path"], float))[len(G.edges[E[i]]["path"]) // 2] for i in pidx}
+    fig = plt.figure(figsize=(7.5, 7.6), facecolor="white")
+    gt = fig.add_gridspec(1, 2, left=0.02, right=0.985, top=0.95, bottom=0.42, width_ratios=[0.85, 1.15], wspace=0.12)
+    gl = gt[0].subgridspec(2, 1, height_ratios=[1.0, 1.0], hspace=0.12)
+    axN = fig.add_subplot(gl[0]); allp = toimg(np.vstack([np.asarray(G.edges[E[i]]["path"], float) for i in pidx])); pad = 18
     axN.set_xlim(allp[:, 0].min() - pad, allp[:, 0].max() + pad); axN.set_ylim(allp[:, 1].max() + pad, allp[:, 1].min() - pad)
     axN.set_aspect("equal"); axN.axis("off"); qmax = np.abs(Qp[pidx]).max()
     for i in pidx:
-        q = np.asarray(G.edges[E[i]]["path"], float)
+        q = toimg(np.asarray(G.edges[E[i]]["path"], float))
         if np.linalg.norm(q[0] - xy(E[i][0])) > np.linalg.norm(q[-1] - xy(E[i][0])):
             q = q[::-1]                                                       # path from u to v; Q′ > 0 is flow u → v
         axN.plot(q[:, 0], q[:, 1], color="0.6", lw=1.5 + 8 * abs(Qp[i]) / qmax, solid_capstyle="round", zorder=2)
@@ -267,11 +272,36 @@ def main():
     for n in pjun:
         axN.scatter(*xy(n), s=12, color=INK, zorder=3)
     jc = max(pjun, key=lambda n: xy(n)[0])                                 # right-most junction: label in the empty lower right
-    axN.annotate("Σ in = Σ out\nat every junction", xy(jc), xytext=(0.72, 0.06), textcoords="axes fraction", fontsize=8, color=INK, ha="center",
+    axN.annotate("Σ in = Σ out\nat every junction", xy(jc), xytext=(0.93, 0.5), textcoords="axes fraction", fontsize=8, color=INK, ha="center",
                  arrowprops=dict(arrowstyle="-", color="0.4", lw=0.6), linespacing=1.0)
     axN.set_title("Repeated vessel measurements", fontsize=9, loc="left", pad=3)
+    # the same vessels in the tissue (max-median mosaic), inside the overlap of the three tiles
+    axC = fig.add_subplot(gl[1]); cpad = 170
+    c0_, c1_ = int(allp[:, 0].min() - cpad), int(allp[:, 0].max() + cpad); r0_, r1_ = int(allp[:, 1].min() - cpad), int(allp[:, 1].max() + cpad)
+    crop_ = mos[max(r0_, 0):r1_, max(c0_, 0):c1_]; lo_, hi_ = np.percentile(crop_[crop_ > 0], (1, 99.5))
+    axC.imshow(mos, cmap="gray", vmin=lo_, vmax=hi_, interpolation="antialiased"); axC.set_xlim(c0_, c1_); axC.set_ylim(r1_, r0_)
+    axC.set_aspect("equal"); axC.set_xticks([]); axC.set_yticks([])
+    for s_ in axC.spines.values():
+        s_.set_color("0.7"); s_.set_linewidth(0.5)
+    for t_ in ptiles:
+        tg = geom.tiles[int(t_)]; Hv, Wv = tg.video_shape if tg.video_shape else tifffile.imread(str(ST / "tiles" / "maxmed" / f"vid{t_}_maxmed.tif")).shape[:2]
+        fp = np.array([[0, 0, 1], [0, Wv, 1], [Hv, Wv, 1], [Hv, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
+        fp = fp[:, :2] / geom.downsample - [geom.y0, geom.x0]                  # (row, column) in the mosaic
+        axC.fill(fp[:, 1], fp[:, 0], color=TCOL[t_], alpha=0.07, lw=0, zorder=2)
+        axC.plot(fp[:, 1], fp[:, 0], color=TCOL[t_], lw=2.0, zorder=3)
+    for i in pidx:
+        q = toimg(np.asarray(G.edges[E[i]]["path"], float))
+        axC.plot(q[:, 0], q[:, 1], color="black", lw=2.6, zorder=4, solid_capstyle="round"); axC.plot(q[:, 0], q[:, 1], color="#ffd400", lw=1.4, zorder=5, solid_capstyle="round")
+    axC.text(*(allp.mean(0) + [0, -(allp[:, 1].max() - allp[:, 1].min()) / 2 - 30]), "vessels 1–9", color="#ffd400", fontsize=8, ha="center", va="bottom", zorder=5,
+             path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="black")])
+    L_ = 100 / PX_UM; xb_, yb_ = c1_ - 25 - L_, r1_ - 25
+    axC.plot([xb_, xb_ + L_], [yb_, yb_], color="white", lw=2.5, solid_capstyle="butt", zorder=6)
+    axC.text(xb_ + L_ / 2, yb_ - 12, "100 µm", color="white", fontsize=8, ha="center", va="bottom", zorder=6,
+             path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="black")])
+    axC.set_title("In the tissue: overlap of tiles " + ", ".join(str(t_) for t_ in ptiles), fontsize=9, loc="left", pad=3)
     # strip chart: each tile's recording vs the reconstruction
     axS = fig.add_subplot(gt[1]); xs_ = np.arange(1, len(order) + 1)
+    p_ = axS.get_position(); axS.set_position([p_.x0 + 0.04, p_.y0 + 0.02, p_.width - 0.04, p_.height - 0.02])
     for k, i in enumerate(order):
         rs = recs[i]; offs = np.linspace(-0.18, 0.18, len(rs)) if len(rs) > 1 else [0.0]
         used = int(D["tile"][i])                                             # the winner (smallest c): the only recording the reconstruction uses
@@ -287,11 +317,11 @@ def main():
     hs += [Line2D([], [], marker="o", ls="", ms=6, color="0.35", label="used in reconstruction"),
            Line2D([], [], marker="o", ls="", ms=6, mfc="white", mec="0.35", mew=1.3, label="not used (held out)"),
            Line2D([], [], color=INK, lw=2.2, label="reconstructed")]
-    fig.legend(handles=hs, loc="upper center", bbox_to_anchor=(0.55, 0.535), ncol=3, frameon=False, fontsize=8, handletextpad=0.3, columnspacing=1.6)
+    fig.legend(handles=hs, loc="upper center", bbox_to_anchor=(0.55, 0.385), ncol=3, frameon=False, fontsize=8, handletextpad=0.3, columnspacing=1.6)
 
     # b: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
     V = json.loads((P.RESULTS / "dc_weighting_validation.json").read_text())
-    axd = fig.add_axes([0.12, 0.07, 0.68, 0.32])
+    axd = fig.add_axes([0.12, 0.06, 0.68, 0.24])
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
@@ -309,7 +339,7 @@ def main():
     axd.set_title("Held-out prediction error", fontsize=10, pad=4, loc="left")
     for s_ in ("top", "right"):
         axd.spines[s_].set_visible(False)
-    fig.text(0.005, 0.96, "a", **LET); fig.text(0.005, 0.42, "b", **LET)
+    fig.text(0.005, 0.962, "a", **LET); fig.text(0.005, 0.315, "b", **LET)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     plos_style.save(fig, OUT)
     log(f"wrote {OUT}.png/.pdf")
