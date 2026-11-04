@@ -18,7 +18,8 @@ run() { echo; echo "=== $* ==="; "$PY" "$@"; }
 if [[ "${1:-}" != "--figures" ]]; then
   mkdir -p "${PLEXUSFLOW_RESULTS:-$PLEXUSFLOW_STAGE/results}"
   run scripts/dc_reconcile.py          # reliability model + reconciled mean flows   → reliability_model_v1.json, dc_reconciled_v2.pkl
-  run scripts/dc_validate_weighting.py # weighting validation vs repeat recordings   → dc_weighting_validation.json (Fig 6f)
+  run scripts/dc_validate_weighting.py # weighting validation vs repeat recordings   → dc_weighting_validation.json (Fig 6d)
+  run scripts/dc_validate_passive.py   # conservation-only vs passive-constrained      → dc_passive_comparison.json (SI)
   run scripts/ac_field.py              # tile-synchronised harmonic field (paper preset) → ac_field_v7.pkl
   run scripts/mech/ac_estimate.py      # profiled distensibility fit                 → ac_estimate_v8.json
 fi
@@ -26,4 +27,5 @@ fi
 for f in 1 2 3 4 5 6 7dc 7 10; do      # make_figure7dc.py = Fig 7; make_figure7.py = Figs 8 and 9
   run "scripts/make_figure$f.py"
 done
+run scripts/make_figure_S_passive.py   # SI: passive-constrained comparison (add a second stage dir for 21S + 27S)
 run scripts/collect_figures.py         # copies Fig1–Fig10 to <figures>/latest/
