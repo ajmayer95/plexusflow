@@ -300,8 +300,27 @@ def main():
              path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="black")])
     axC.set_title("In the tissue: overlap of tiles " + ", ".join(str(t_) for t_ in ptiles), fontsize=9, loc="left", pad=3)
     # strip chart: each tile's recording vs the reconstruction
-    axS = fig.add_subplot(gt[1]); xs_ = np.arange(1, len(order) + 1)
-    p_ = axS.get_position(); axS.set_position([p_.x0 + 0.04, p_.y0 + 0.02, p_.width - 0.04, p_.height - 0.02])
+    gr = gt[1].subgridspec(2, 1, height_ratios=[0.8, 1.25], hspace=0.42)
+    # waveforms: one vessel recorded in all three tiles — Q(t) per recording, its mean (the DC value), and the reconstruction
+    from plexusflow.reconcile.harmonics import FS as _FS
+    wv = max((i for i in order if len(recs[i]) >= 3), key=lambda i: max(r[1] for r in recs[i]) / min(r[1] for r in recs[i]))
+    axW = fig.add_subplot(gr[0]); p_ = axW.get_position(); axW.set_position([p_.x0 + 0.04, p_.y0, p_.width - 0.04, p_.height])
+    sgn = np.sign(Qp[wv]) or 1.0
+    for m in G.edges[E[wv]]["measurements_piv"]:
+        t_ = int(m["tile_id"])
+        if t_ not in TCOL or m.get("Q_t") is None:
+            continue
+        q = sgn * np.asarray(m["Q_t"], float); tt = np.arange(len(q)) / _FS; sel = tt <= 2.0
+        used = t_ == int(D["tile"][wv])
+        axW.plot(tt[sel], q[sel], color=TCOL[t_], lw=1.3 if used else 0.9, alpha=1.0 if used else 0.7, zorder=3 if used else 2)
+        axW.axhline(q.mean(), color=TCOL[t_], lw=1.0, ls=(0, (3, 2)), zorder=2)
+    axW.axhline(abs(Qp[wv]), color=INK, lw=2.0, zorder=4)
+    axW.set_xlim(0, 2.0); axW.set_xlabel("time (s)", fontsize=8, labelpad=1); axW.set_ylabel("flow (nL/s)", fontsize=8, labelpad=1)
+    axW.tick_params(labelsize=8); axW.spines[["top", "right"]].set_visible(False)
+    axW.set_title(f"Vessel {num[wv]}: recorded three times (dashed: mean)", fontsize=9, loc="left", pad=3)
+    log(f"  waveform panel: vessel {num[wv]} {E[wv]}, means " + ", ".join(f"{r[0]}: {r[1]:.3f}" for r in sorted(recs[wv])) + f"; Q′ {abs(Qp[wv]):.3f}")
+    axS = fig.add_subplot(gr[1]); xs_ = np.arange(1, len(order) + 1)
+    p_ = axS.get_position(); axS.set_position([p_.x0 + 0.04, p_.y0, p_.width - 0.04, p_.height])
     for k, i in enumerate(order):
         rs = recs[i]; offs = np.linspace(-0.18, 0.18, len(rs)) if len(rs) > 1 else [0.0]
         used = int(D["tile"][i])                                             # the winner (smallest c): the only recording the reconstruction uses
