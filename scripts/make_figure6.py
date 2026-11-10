@@ -408,17 +408,16 @@ def main():
     def draw_calibration(axE, big=False):
         """held-out RMS(r_j / σ_j,pred) by quality quintile: quality-dependent c_k vs one constant c (dc_junction_calibration.json)"""
         xq = np.arange(1, 6); ms_ = 6.5 if big else 5.5
-        for lab, colr, mk, dx, name in (("constant", GREY, "s", 0.09, "one constant c"), ("calibrated", BLUE, "o", -0.09, "quality-dependent $c_k$")):
+        for lab, colr, mk, dx, name in (("constant", GREY, "s", 0.09, "constant fractional discrepancy"), ("calibrated", BLUE, "o", -0.09, "quality-dependent ($p$, $a$)")):
             rms_, ci_ = np.array(JC[lab]["rms_z"]), np.array(JC[lab]["rms_z_ci"])
             axE.vlines(xq + dx, ci_[:, 0], ci_[:, 1], color=colr, lw=1.0, zorder=2)
             axE.plot(xq + dx, rms_, marker=mk, ms=ms_, color=colr, lw=1.2, ls="-" if lab == "calibrated" else (0, (3, 2)), mfc=colr, mec=colr, zorder=3, label=name)
-        axE.axhline(1, color=INK, lw=0.7, ls=":", zorder=1); axE.text(0.55, 1.02, "ideal", fontsize=8, color=MUTED, ha="left", va="bottom")
-        axE.set_xticks(xq); axE.set_xticklabels([f"{c_:.2f}" for c_ in JC["quintile_median_c"]], fontsize=8); axE.set_xlim(0.5, 5.5); axE.set_ylim(0.3, 1.7)
-        axE.set_xlabel("junction mean $c_k$ (quintiles)  →  poorer recordings", fontsize=8, labelpad=1)
-        axE.set_ylabel("RMS($r_j$ / σ$_{j,\\mathrm{pred}}$)\n(held-out tiles)", fontsize=8, labelpad=1)
-        axE.text(0.98, 0.03, f"{ST.name.replace('PlexusFlow', '')}, {JC['n_junctions']} same-tile junctions", transform=axE.transAxes, fontsize=8, color=MUTED,
-                 ha="right", va="bottom"); axE.tick_params(labelsize=8)
-        axE.spines[["top", "right"]].set_visible(False); axE.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
+        axE.axhline(1, color=INK, lw=0.7, ls=":", zorder=1); axE.text(0.55, 1.02, "calibrated", fontsize=8, color=MUTED, ha="left", va="bottom")
+        axE.set_xticks(xq); axE.set_xticklabels(["best", "2", "3", "4", "worst"], fontsize=8); axE.set_xlim(0.5, 5.5); axE.set_ylim(0.3, 1.75)
+        axE.set_xlabel("mean recording quality at junction (quintile)", fontsize=8, labelpad=1)
+        axE.set_ylabel("RMS standardized junction\nresidual  $r_j/\\sqrt{V_j}$", fontsize=8, labelpad=1)
+        axE.tick_params(labelsize=8); axE.spines[["top", "right"]].set_visible(False)
+        axE.legend(loc="lower right", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
 
     def draw_relative(axR):
         """observed RMS relative junction imbalance |in − out| / √Σy² by quality quintile vs the scale each model predicts (held-out tiles)"""
@@ -449,6 +448,22 @@ def main():
         axR.text(0.03, 0.97, f"{JC['n_junctions']} same-tile junctions,\nheld-out tiles", transform=axR.transAxes, fontsize=8, color=MUTED, ha="left", va="top")
         axR.spines[["top", "right"]].set_visible(False)
         log(f"panel b: held-out NLL constant − quality-dependent {JC['constant']['heldout_nll'] - JC['calibrated']['heldout_nll']:+.0f} (caption)")
+
+    def draw_withheld_fold(axW2):
+        """withheld-vessel validation as median fold error exp(median |ln(predicted / recorded)|) vs fraction withheld"""
+        WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); cv = WH["curve"]; rp_ = WH["repeat"]
+        x = np.array([100 * c_["frac"] for c_ in cv]); y = np.exp([c_["err"] for c_ in cv]); ci_ = np.exp(np.array([c_["err_ci"] for c_ in cv]))
+        axW2.axhspan(*np.exp(rp_["err_ci"]), color=GREY, alpha=0.18, lw=0, zorder=1)
+        axW2.axhline(np.exp(rp_["err"]), color=GREY, lw=1.0, ls=(0, (3, 2)), zorder=2, label="two recordings of the same vessel")
+        axW2.fill_between(x, ci_[:, 0], ci_[:, 1], color=BLUE, alpha=0.18, lw=0, zorder=2)
+        axW2.plot(x, y, color=BLUE, lw=1.6, marker="D", ms=5, zorder=3, label="reconstruction (95 % CI)")
+        axW2.set_xlim(0, 78); axW2.set_ylim(1, 2.25); axW2.set_xticks([0, 25, 50, 75]); axW2.set_yticks([1, 1.25, 1.5, 1.75, 2, 2.25])
+        axW2.set_yticklabels(["×1", "×1.25", "×1.5", "×1.75", "×2", ""]); axW2.tick_params(labelsize=8)
+        axW2.set_xlabel("measured vessels withheld (%)", fontsize=8, labelpad=1)
+        axW2.set_ylabel("median fold error,\npredicted vs recorded flux", fontsize=8, labelpad=1)
+        axW2.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1); axW2.spines[["top", "right"]].set_visible(False)
+        log(f"caption: direction agreement {100 * cv[0]['dir']:.0f} % → {100 * cv[-1]['dir']:.0f} %; repeat ×{np.exp(rp_['err']):.2f}; "
+            + ", ".join(f"{100 * c_['frac']:.0f} %: ×{np.exp(c_['err']):.2f}" for c_ in cv))
 
     def draw_withholding(axW2):
         """withheld-vessel error vs fraction of measured vessels withheld (dc_withholding_curve.py)"""
@@ -695,19 +710,14 @@ def main():
         ax.plot([xb_, xb_ + L_], [yb_, yb_], color=INK, lw=2.2, solid_capstyle="butt", zorder=8)
         ax.text(xb_ + L_ / 2, yb_ - 5, "50 µm", color=INK, fontsize=8, ha="center", va="bottom", zorder=8)
     # a (calibration plot, top right) and c (withheld validation, bottom)
-    # ---- main figure, 2 × 2: a one same-tile junction | b calibration (calibration + discrimination); c compact reconstructed
-    #      field | d withheld-vessel validation.  The measured | reconstructed pair is SI fig6_S_networks.
-    HF = 6.9; fig = plt.figure(figsize=(7.5, HF), facecolor="white"); T1, T2 = 6.62 / HF, 3.72 / HF
+    # ---- main figure, two panels: a calibration of the discrepancy model (with a same-tile junction inset), b prediction of
+    #      withheld fluxes.  The reconstructed network itself is shown at organ scale in Fig 7 (pair: SI fig6_S_networks).
+    HF = 3.3; fig = plt.figure(figsize=(7.5, HF), facecolor="white"); T1 = 3.1 / HF
     TXT = dict(fontsize=9, color=INK, ha="left", va="bottom")
-    axC2 = fig.add_axes([0.63, 4.3 / HF, 0.345, 2.15 / HF]); draw_relative(axC2)
-    fig.text(0.025, T1, "Imbalance at a junction imaged in one tile", **TXT); fig.text(0.555, T1, "Junction calibration", **TXT)
-    axR_ = fig.add_axes([0.03, 0.3 / HF, 0.41, 3.28 / HF]); draw_recon(axR_)
-    caxR = fig.add_axes([0.455, 0.65 / HF, 0.012, 2.55 / HF]); cbR = fig.colorbar(cm.ScalarMappable(norm_r, cmap_r), cax=caxR, orientation="vertical", extend="both")
-    cbR.set_ticks([-1, 0, 1]); cbR.set_ticklabels(["×½", "×1", "×2"]); cbR.ax.tick_params(labelsize=8)
-    cbR.set_label("reconstructed / measured |flux|", fontsize=8, labelpad=2)
-    fig.text(0.025, T2, "Reconstructed fluxes", **TXT)
-    axD2 = fig.add_axes([0.63, 0.55 / HF, 0.28, 2.95 / HF]); draw_withholding(axD2)
-    fig.text(0.555, T2, "Withheld-vessel validation", **TXT)
+    axC2 = fig.add_axes([0.1, 0.5 / HF, 0.36, 2.4 / HF]); draw_calibration(axC2, big=True)
+    fig.text(0.025, T1, "Calibration of measurement discrepancy", **TXT)
+    axD2 = fig.add_axes([0.63, 0.5 / HF, 0.34, 2.4 / HF]); draw_withheld_fold(axD2)
+    fig.text(0.535, T1, "Prediction of withheld fluxes", **TXT)
     # a: one real recording (EX_TILE, EX_EDGE), rotated so the vessel runs left → right along its flow: dense time-mean optical
     #    flow inside the lumen, every Kloosterman cross-section (kept solid, rejected dashed), and the definition of c_k
     from scipy.ndimage import map_coordinates
@@ -788,7 +798,7 @@ def main():
             q_ = q_[::-1]                                                      # from the junction outward
         cls.append((q_, y_, c_, M[(JTILE, e)]))
     hj = min(1.6 * max(np.linalg.norm(q_ - pn, axis=1).max() for q_, *_ in cls), 110)
-    axJ = fig.add_axes([0.03, 4.2 / HF, 0.47, 2.3 / HF]); r0j, c0j = int(pn[0] - hj), int(pn[1] - hj)
+    axJ = axC2.inset_axes([0.02, 0.6, 0.3, 0.4]); r0j, c0j = int(pn[0] - hj), int(pn[1] - hj)
     cropj = imj[max(r0j, 0):int(pn[0] + hj), max(c0j, 0):int(pn[1] + hj)]
     axJ.imshow(cropj, cmap="gray", extent=[max(c0j, 0), max(c0j, 0) + cropj.shape[1], max(r0j, 0) + cropj.shape[0], max(r0j, 0)],
                vmin=np.percentile(cropj, 1), vmax=np.percentile(cropj, 99.5), alpha=0.85)
@@ -799,16 +809,15 @@ def main():
         k_ = int(0.55 * (len(q_) - 1)); a_, b_ = (q_[k_ - 3], q_[k_ + 3]) if y_ > 0 else (q_[k_ + 3], q_[k_ - 3])   # y > 0: leaves the junction
         axJ.annotate("", xy=(b_[1], b_[0]), xytext=(a_[1], a_[0]), arrowprops=dict(arrowstyle="-|>,head_length=0.6,head_width=0.35", color="#ffd23f", lw=1.6), zorder=4)
         far = q_[-1]; d_ = (far - pn) / np.linalg.norm(far - pn); lab = pn + 0.68 * hj * d_
-        axJ.text(lab[1], lab[0], f"{'out' if y_ > 0 else 'in'}  {abs(y_):.3f} nL/s", fontsize=8, color=INK, ha="center",
-                 va="center", path_effects=HAL, zorder=5)
     axJ.scatter(pn[1], pn[0], s=22, facecolor="white", edgecolor=INK, linewidth=0.9, zorder=6)
     L5 = 20 / PX_UM; axJ.plot([pn[1] + hj - 6 - L5, pn[1] + hj - 6], [pn[0] + hj - 6] * 2, color="white", lw=2, solid_capstyle="butt", zorder=6)
     pJ = axJ.get_position(); qin_ = -yj[yj < 0].sum()
     yin_ = [abs(v_) for v_ in yj if v_ < 0]; yout_ = [v_ for v_ in yj if v_ > 0]
-    fig.text(pJ.x0 + 0.005, pJ.y0 - 0.06 / HF, f"in {sum(yin_):.3f}, out {sum(yout_):.3f} nL/s  →  $|r_j|$ = {abs(rj):.3f} nL/s ({100 * abs(rj) / qin_:.0f} %)",
-             fontsize=8, color=INK, ha="left", va="top")
+    axC2.text(0.34, 0.97, "one junction, one tile:\n$r_j = Q_{\\mathrm{in}} - Q_{\\mathrm{out}}$" + f" = {abs(rj):.3f} nL/s", transform=axC2.transAxes,
+              fontsize=8, color=INK, ha="left", va="top", linespacing=1.2)
+    log(f"caption: junction in {sum(yin_):.3f} ({' + '.join(f'{v_:.3f}' for v_ in yin_)}), out {sum(yout_):.3f}, |r_j| {abs(rj):.3f} ({100 * abs(rj) / qin_:.0f} %)")
     log(f"panel a formula (caption): c = {c0f:.2f} + {cff:.2f}(1 − {pterm}) + {caf:.2f}(1 − a) = {cx:.2f}; p = {np.mean(r2x):.3f} (stored {mx.get('p', float('nan')):.3f})")
-    for x_, y_, l_ in ((0.0, T1, "a"), (0.53, T1, "b"), (0.0, T2, "c"), (0.53, T2, "d")):
+    for x_, y_, l_ in ((0.0, T1, "a"), (0.51, T1, "b")):
         fig.text(x_, y_ - 0.004, l_, **LET)
     plos_style.save(fig, OUT)
     figD = plt.figure(figsize=(3.6, 3.2), facecolor="white"); draw_obs_pred(figD.add_axes([0.2, 0.17, 0.75, 0.75]))   # SI: diagonal calibration
