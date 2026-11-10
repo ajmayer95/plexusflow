@@ -432,7 +432,7 @@ def main():
         axR.set_ylabel("normalized junction\nimbalance (RMS)", fontsize=8, labelpad=1)
         axR.text(0.98, 0.03, f"{JC['n_junctions']} same-tile junctions;\npredictions on held-out tiles", transform=axR.transAxes,
                  fontsize=8, color=MUTED, ha="right", va="bottom")
-        axR.spines[["top", "right"]].set_visible(False); axR.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
+        axR.spines[["top", "right"]].set_visible(False); axR.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.4, labelspacing=0.25, handletextpad=0.4, borderaxespad=0.1)
 
     def draw_withholding(axW2):
         """withheld-vessel error vs fraction of measured vessels withheld (dc_withholding_curve.py)"""
@@ -583,7 +583,7 @@ def main():
     # d reconciled network (conservation imposed) → e independent validation on withheld measurements
     HF = 8.75                                                            # figure height (in); layout below in inches / HF
     fig = plt.figure(figsize=(7.5, HF), facecolor="white")
-    W_, H_ = 0.42, 0.42 * 7.5 / HF; YM = 2.55 / HF; XA, XB = 0.045, 0.525     # block b: the two maps (≈ half the height)
+    W_, H_ = 0.45, 0.45 * 7.5 / HF; YM = 2.35 / HF; XA, XB = 0.03, 0.525     # block b: the two maps (≈ half the height)
     axA = fig.add_axes([XA, YM, W_, H_]); axB = fig.add_axes([XB, YM, W_, H_])
     crop2 = mos[int(ctr[1] - hw):int(ctr[1] + hw), int(ctr[0] - hw):int(ctr[0] + hw)]; lo2, hi2 = np.percentile(crop2[crop2 > 0], (1, 99.5))
     for ax in (axA, axB):
@@ -606,7 +606,7 @@ def main():
         big_ = abs(r_) >= r75
         axA.scatter(*gxy[n], s=rsc * abs(r_), facecolor="none", edgecolor=PINK, linewidth=1.0 if big_ else 0.6, alpha=0.9 if big_ else 0.4, zorder=5)
     for n in ijun:
-        axB.scatter(*gxy[n], s=6, color=INK, zorder=5)
+        axB.scatter(*gxy[n], s=2.5, color="0.35", linewidths=0, zorder=5)
     EXSTY = dict(color="0.2", lw=0.9, ls=(0, (2.5, 1.5)), zorder=2.5)                          # not part of the reconstruction
     for u, v in exE:
         q = toimg(np.asarray(G.edges[u, v]["path"], float))
@@ -639,19 +639,17 @@ def main():
         cbB.ax.text(0.5, -3.6, "white: unmeasured vessel (inferred)", transform=cbB.ax.transAxes, fontsize=8, color=MUTED, ha="center", va="top")
     TA = YM + H_ + 0.05 / HF
     ntl = len({t_ for i in reg if im[i] for t_, *_ in recs_all.get(i, [])})
-    fig.text(XA, TA, f"Aggregated measurements ({ntl} tiles): junctions do not balance", fontsize=9, color=INK, ha="left", va="bottom")
-    fig.text(XB, TA, "Conservation-consistent reference field", fontsize=9, color=INK, ha="left", va="bottom")
-    TB = TA + 0.5 / HF
-    fig.text(0.04, TB, "Constructing a conservation-consistent reference field", fontsize=9.5, color=INK, ha="left", va="bottom", fontweight="bold")
-    fig.text(0.5, TB - 0.23 / HF, r"recordings $\{Q_{k,t}\}$  $\longrightarrow$  quality-weighted aggregation  $\longrightarrow$  $Q_k^{\mathrm{meas}}$"
-             r"  $\longrightarrow$  conservation  $\longrightarrow$  $Q_k^{\star}$", fontsize=9, color=INK, ha="center", va="center")
+    log(f"caption: measured fluxes from {ntl} tiles")
+    fig.text(0.025, TA, "Measured fluxes", fontsize=9, color=INK, ha="left", va="bottom")
+    fig.text(XB + 0.025, TA, "Reconstructed fluxes", fontsize=9, color=INK, ha="left", va="bottom")
     # a (calibration plot, top right) and c (withheld validation, bottom)
-    SB, STP = 6.8 / HF, 8.3 / HF                                         # block a
+    SB, STP = 6.55 / HF, 8.3 / HF                                         # block a
     axC2 = fig.add_axes([0.6, SB, 0.38, STP - SB]); draw_relative(axC2)
-    fig.text(0.04, STP + 0.12 / HF, "Recording quality predicts junction errors", fontsize=9.5, color=INK, ha="left", va="bottom", fontweight="bold")
-    BT, TT2 = 0.42 / HF, 1.75 / HF
+    fig.text(0.025, STP + 0.12 / HF, "Profile quality", fontsize=9, color=INK, ha="left", va="bottom")
+    fig.text(0.56, STP + 0.12 / HF, "Junction calibration", fontsize=9, color=INK, ha="left", va="bottom")
+    BT, TT2 = 0.42 / HF, 1.5 / HF
     axD2 = fig.add_axes([0.13, BT, 0.84, TT2 - BT]); draw_withholding(axD2)
-    fig.text(0.04, TT2 + 0.12 / HF, "Predicting withheld vessel fluxes", fontsize=9.5, color=INK, ha="left", va="bottom", fontweight="bold")
+    fig.text(0.025, TT2 + 0.1 / HF, "Withheld-vessel validation", fontsize=9, color=INK, ha="left", va="bottom")
     # a: one real recording (EX_TILE, EX_EDGE), rotated so the vessel runs left → right along its flow: dense time-mean optical
     #    flow inside the lumen, every Kloosterman cross-section (kept solid, rejected dashed), and the definition of c_k
     from scipy.ndimage import map_coordinates
@@ -682,11 +680,8 @@ def main():
         picks.append(min(ok_, key=lambda i: abs(r2x[i] - tgt)))
     picks = sorted(picks, key=lambda i: us_[i]); poi = lambda x, v0, Rf: v0 * np.maximum(0.0, 1 - (x / Rf) ** 2)
     zs = 2.6 * Rx / np.nanmax([np.nanmax(sgx * profx[i]) for i in picks]); cmap_r2 = mcolors.LinearSegmentedColormap.from_list("r2", ["#d9d9d9", BLUE])
-    axS = fig.add_axes([0.07, 6.42 / HF, 0.5, 2.0 / HF], projection="3d", computed_zorder=False)
+    axS = fig.add_axes([-0.02, 5.95 / HF, 0.58, 2.35 / HF], projection="3d", computed_zorder=False)
     axS.plot_surface(UU, VV, np.zeros_like(UU), facecolors=plt.cm.gray(gim), rstride=1, cstride=1, linewidth=0, antialiased=False, shade=False, zorder=0)
-    for uu, q2 in zip(us_, r2x):
-        for s_ in (-1, 1):
-            axS.plot([uu, uu], [s_ * 1.05 * Rx, s_ * 1.45 * Rx], [0.02, 0.02], color=cmap_r2(q2), lw=0.7, zorder=1)
     vmx = np.nanmax(np.linalg.norm(vfx, axis=-1))
     for uu in np.arange(4, Lx - 12, 16.0):
         for vv in (-0.5 * Rx, 0.5 * Rx):
@@ -710,17 +705,14 @@ def main():
     L5 = 20 / PX_UM; axS.plot([Lx - L5, Lx], [-1.85 * Rx] * 2, [0.05, 0.05], color="white", lw=2, solid_capstyle="butt", zorder=4)
     axS.text(Lx - L5 / 2, -1.85 * Rx, 0.2, "20 µm", color="white", fontsize=7, ha="center", va="bottom", zorder=4,
              path_effects=[matplotlib.patheffects.withStroke(linewidth=1.5, foreground="black")])
-    axS.set_box_aspect((Lx + 1.2 * Rx, 4 * Rx, 3.2 * Rx), zoom=1.08); axS.view_init(elev=22, azim=-58); axS.set_axis_off()
+    axS.set_box_aspect((Lx + 1.2 * Rx, 4 * Rx, 3.2 * Rx), zoom=1.3); axS.view_init(elev=22, azim=-58); axS.set_axis_off()
     axS.set_xlim(u_[0], u_[-1]); axS.set_ylim(v_[0], v_[-1]); axS.set_zlim(0, 3.2 * Rx)
     log(f"panel a: tile {EX_TILE} {EX_EDGE}: kept {validx.sum()}/{len(validx)} (f {fx:.3f}), align {ax_:.3f}, c {cx:.3f}; example sections "
         + ", ".join(f"{int(i)} (R² {r2x[i]:.2f})" for i in picks))
-    xt_ = 0.04; yy_ = 8.12 / HF
-    fig.text(xt_, yy_, f"parabolicity $p$ = {np.mean(r2x):.2f}  (mean section $R^2$)", fontsize=9, color=INK, ha="left", va="center")
-    fig.text(xt_, yy_ - 0.2 / HF, f"alignment $a$ = {ax_:.2f}", fontsize=9, color=INK, ha="left", va="center")
-    fig.text(xt_, yy_ - 0.4 / HF, f"→  discrepancy scale $c$ = {cx:.2f}", fontsize=9, color=INK, ha="left", va="center")
+    fig.text(0.035, 8.12 / HF, f"$p$ = {np.mean(r2x):.2f}    $a$ = {ax_:.2f}    $c$ = {cx:.2f}", fontsize=8.5, color=INK, ha="left", va="center")
     log(f"panel a formula (caption): c = {c0f:.2f} + {cff:.2f}(1 − {pterm}) + {caf:.2f}(1 − a) = {cx:.2f}; p = {np.mean(r2x):.3f} (stored {mx.get('p', float('nan')):.3f})")
-    for y_, l_ in ((STP + 0.12 / HF, "a"), (TB, "b"), (TT2 + 0.12 / HF, "c")):
-        fig.text(0.0, y_ - 0.004, l_, **LET)
+    for x_, y_, l_ in ((0.0, STP + 0.12 / HF, "a"), (0.535, STP + 0.12 / HF, "b"), (0.0, TA, "c"), (XB, TA, "d"), (0.0, TT2 + 0.1 / HF, "e")):
+        fig.text(x_, y_ - 0.004, l_, **LET)
     plos_style.save(fig, OUT)
     log(f"wrote {OUT}.png/.pdf")
 
