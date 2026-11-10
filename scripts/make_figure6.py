@@ -407,15 +407,15 @@ def main():
     BOT, TOPB, TT = 0.075, 0.32, 0.352                                # axes bottom / top, title line (below the tile legend)
     def draw_calibration(axE, big=False):
         """held-out RMS(r_j / σ_j,pred) by quality quintile: quality-dependent c_k vs one constant c (dc_junction_calibration.json)"""
-        xq = np.arange(1, 6); ms_ = 6.5 if big else 5.5
-        for lab, colr, mk, dx, name in (("constant", GREY, "s", 0.09, "constant fractional discrepancy"), ("calibrated", BLUE, "o", -0.09, "quality-dependent ($p$, $a$)")):
+        xq = np.arange(1, 6); ms_ = 4.5
+        for lab, colr, mk, dx, name in (("constant", GREY, "s", 0.09, "constant fractional discrepancy"), ("calibrated", BLUE, "o", -0.09, "quality-dependent")):
             rms_, ci_ = np.array(JC[lab]["rms_z"]), np.array(JC[lab]["rms_z_ci"])
             axE.vlines(xq + dx, ci_[:, 0], ci_[:, 1], color=colr, lw=1.0, zorder=2)
-            axE.plot(xq + dx, rms_, marker=mk, ms=ms_, color=colr, lw=1.2, ls="-" if lab == "calibrated" else (0, (3, 2)), mfc=colr, mec=colr, zorder=3, label=name)
-        axE.axhline(1, color=INK, lw=0.7, ls=":", zorder=1); axE.text(0.55, 1.02, "calibrated", fontsize=8, color=MUTED, ha="left", va="bottom")
-        axE.set_xticks(xq); axE.set_xticklabels(["best", "2", "3", "4", "worst"], fontsize=8); axE.set_xlim(0.5, 5.5); axE.set_ylim(0.3, 1.75)
-        axE.set_xlabel("mean recording quality at junction (quintile)", fontsize=8, labelpad=1)
-        axE.set_ylabel("RMS standardized junction\nresidual  $r_j/\\sqrt{V_j}$", fontsize=8, labelpad=1)
+            axE.plot(xq + dx, rms_, marker=mk, ms=ms_, color=colr, lw=1.3, ls="-" if lab == "calibrated" else (0, (3, 2)), mfc=colr, mec=colr, zorder=3, label=name)
+        axE.axhline(1, color=MUTED, lw=0.8, ls=(0, (4, 3)), zorder=1); axE.text(0.55, 1.02, "expected RMS = 1", fontsize=8, color=MUTED, ha="left", va="bottom")
+        axE.set_xticks(xq); axE.set_xticklabels(["best", "2", "3", "4", "worst"], fontsize=8); axE.set_xlim(0.5, 5.5); axE.set_ylim(0.3, 1.65)
+        axE.set_xlabel("Recording-quality quintile (best to worst)", fontsize=9, labelpad=2)
+        axE.set_ylabel("RMS standardized\njunction residual", fontsize=9, labelpad=2)
         axE.tick_params(labelsize=8); axE.spines[["top", "right"]].set_visible(False)
         axE.legend(loc="lower right", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
 
@@ -454,13 +454,13 @@ def main():
         WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); cv = WH["curve"]; rp_ = WH["repeat"]
         x = np.array([100 * c_["frac"] for c_ in cv]); y = np.exp([c_["err"] for c_ in cv]); ci_ = np.exp(np.array([c_["err_ci"] for c_ in cv]))
         axW2.axhspan(*np.exp(rp_["err_ci"]), color=GREY, alpha=0.18, lw=0, zorder=1)
-        axW2.axhline(np.exp(rp_["err"]), color=GREY, lw=1.0, ls=(0, (3, 2)), zorder=2, label="two recordings of the same vessel")
+        axW2.axhline(np.exp(rp_["err"]), color=GREY, lw=1.0, ls=(0, (3, 2)), zorder=2, label="Repeat recordings")
         axW2.fill_between(x, ci_[:, 0], ci_[:, 1], color=BLUE, alpha=0.18, lw=0, zorder=2)
-        axW2.plot(x, y, color=BLUE, lw=1.6, marker="D", ms=5, zorder=3, label="reconstruction (95 % CI)")
+        axW2.plot(x, y, color=BLUE, lw=1.3, marker="D", ms=4.5, zorder=3, label="Reconstruction")
         axW2.set_xlim(0, 78); axW2.set_ylim(1, 2.25); axW2.set_xticks([0, 25, 50, 75]); axW2.set_yticks([1, 1.25, 1.5, 1.75, 2, 2.25])
         axW2.set_yticklabels(["×1", "×1.25", "×1.5", "×1.75", "×2", ""]); axW2.tick_params(labelsize=8)
-        axW2.set_xlabel("measured vessels withheld (%)", fontsize=8, labelpad=1)
-        axW2.set_ylabel("median fold error,\npredicted vs recorded flux", fontsize=8, labelpad=1)
+        axW2.set_xlabel("Vessel measurements withheld (%)", fontsize=9, labelpad=2)
+        axW2.set_ylabel("Median prediction\nerror (fold)", fontsize=9, labelpad=2)
         axW2.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1); axW2.spines[["top", "right"]].set_visible(False)
         log(f"caption: direction agreement {100 * cv[0]['dir']:.0f} % → {100 * cv[-1]['dir']:.0f} %; repeat ×{np.exp(rp_['err']):.2f}; "
             + ", ".join(f"{100 * c_['frac']:.0f} %: ×{np.exp(c_['err']):.2f}" for c_ in cv))
@@ -712,12 +712,9 @@ def main():
     # a (calibration plot, top right) and c (withheld validation, bottom)
     # ---- main figure, two panels: a calibration of the discrepancy model (with a same-tile junction inset), b prediction of
     #      withheld fluxes.  The reconstructed network itself is shown at organ scale in Fig 7 (pair: SI fig6_S_networks).
-    HF = 3.3; fig = plt.figure(figsize=(7.5, HF), facecolor="white"); T1 = 3.1 / HF
-    TXT = dict(fontsize=9, color=INK, ha="left", va="bottom")
-    axC2 = fig.add_axes([0.1, 0.5 / HF, 0.36, 2.4 / HF]); draw_calibration(axC2, big=True)
-    fig.text(0.025, T1, "Calibration of measurement discrepancy", **TXT)
-    axD2 = fig.add_axes([0.63, 0.5 / HF, 0.34, 2.4 / HF]); draw_withheld_fold(axD2)
-    fig.text(0.535, T1, "Prediction of withheld fluxes", **TXT)
+    HF = 2.7; fig = plt.figure(figsize=(7.5, HF), facecolor="white"); T1 = 2.5 / HF
+    axC2 = fig.add_axes([0.105, 0.52 / HF, 0.37, 1.98 / HF]); draw_calibration(axC2, big=True)
+    axD2 = fig.add_axes([0.615, 0.52 / HF, 0.37, 1.98 / HF]); draw_withheld_fold(axD2)
     # a: one real recording (EX_TILE, EX_EDGE), rotated so the vessel runs left → right along its flow: dense time-mean optical
     #    flow inside the lumen, every Kloosterman cross-section (kept solid, rejected dashed), and the definition of c_k
     from scipy.ndimage import map_coordinates
@@ -798,7 +795,7 @@ def main():
             q_ = q_[::-1]                                                      # from the junction outward
         cls.append((q_, y_, c_, M[(JTILE, e)]))
     hj = min(1.6 * max(np.linalg.norm(q_ - pn, axis=1).max() for q_, *_ in cls), 110)
-    axJ = axC2.inset_axes([0.02, 0.6, 0.3, 0.4]); r0j, c0j = int(pn[0] - hj), int(pn[1] - hj)
+    figJ = plt.figure(figsize=(3.2, 3.0), facecolor="white"); axJ = figJ.add_axes([0.03, 0.17, 0.94, 0.8]); r0j, c0j = int(pn[0] - hj), int(pn[1] - hj)
     cropj = imj[max(r0j, 0):int(pn[0] + hj), max(c0j, 0):int(pn[1] + hj)]
     axJ.imshow(cropj, cmap="gray", extent=[max(c0j, 0), max(c0j, 0) + cropj.shape[1], max(r0j, 0) + cropj.shape[0], max(r0j, 0)],
                vmin=np.percentile(cropj, 1), vmax=np.percentile(cropj, 99.5), alpha=0.85)
@@ -813,11 +810,11 @@ def main():
     L5 = 20 / PX_UM; axJ.plot([pn[1] + hj - 6 - L5, pn[1] + hj - 6], [pn[0] + hj - 6] * 2, color="white", lw=2, solid_capstyle="butt", zorder=6)
     pJ = axJ.get_position(); qin_ = -yj[yj < 0].sum()
     yin_ = [abs(v_) for v_ in yj if v_ < 0]; yout_ = [v_ for v_ in yj if v_ > 0]
-    axC2.text(0.34, 0.97, "one junction, one tile:\n$r_j = Q_{\\mathrm{in}} - Q_{\\mathrm{out}}$" + f" = {abs(rj):.3f} nL/s", transform=axC2.transAxes,
-              fontsize=8, color=INK, ha="left", va="top", linespacing=1.2)
+    figJ.text(0.5, 0.06, f"in {sum(yin_):.3f}, out {sum(yout_):.3f} nL/s;  $r_j$ = {abs(rj):.3f} nL/s", fontsize=8, color=INK, ha="center", va="center")
+    plos_style.save(figJ, OUT.parent / "fig6_S_junction"); log("wrote fig6_S_junction (example same-tile junction)")
     log(f"caption: junction in {sum(yin_):.3f} ({' + '.join(f'{v_:.3f}' for v_ in yin_)}), out {sum(yout_):.3f}, |r_j| {abs(rj):.3f} ({100 * abs(rj) / qin_:.0f} %)")
     log(f"panel a formula (caption): c = {c0f:.2f} + {cff:.2f}(1 − {pterm}) + {caf:.2f}(1 − a) = {cx:.2f}; p = {np.mean(r2x):.3f} (stored {mx.get('p', float('nan')):.3f})")
-    for x_, y_, l_ in ((0.0, T1, "a"), (0.51, T1, "b")):
+    for x_, y_, l_ in ((0.0, T1, "a"), (0.51, T1, "b")):  # panel letters only; the caption names the results
         fig.text(x_, y_ - 0.004, l_, **LET)
     plos_style.save(fig, OUT)
     figD = plt.figure(figsize=(3.6, 3.2), facecolor="white"); draw_obs_pred(figD.add_axes([0.2, 0.17, 0.75, 0.75]))   # SI: diagonal calibration
