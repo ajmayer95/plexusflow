@@ -97,3 +97,23 @@ relative error 0.29 with the reliability weights vs 0.34 for σ ∝ |Q′| alone
 and 0.37 with the reliabilities shuffled.
 
 *Code: `plexusflow.reconcile` (driver `scripts/dc_reconcile.py`); figures `scripts/make_figure6.py` (reliability, reconciliation) and `scripts/make_figure7dc.py` (whole-organ DC, Fig 7).*
+
+## Scope of the error model (diagnostics, 21S, 2026-11-10)
+The reliability model is calibrated on junctions whose vessels were imaged simultaneously (one tile); it describes
+measurement discrepancy, not physiological change between acquisitions or structural uncertainty in the graph.
+Diagnostics of the production reconstruction (scripts in the gitignored `sandbox/`: `redundancy.py`, `correlated_error.py`):
+- Within tiles the model is calibrated: fully measured same-tile junctions RMS z = 0.91 (Fig 6a, held-out 0.97–1.05).
+- Across tiles discrepancies are larger: junctions whose best recordings come from different tiles RMS z = 1.49. A
+  per-tile log-scale term fitted to them gives τ ≈ 0.43 (≈ ×1.5 per tile, 1 SD), matching the between-tile excess
+  (τ ≈ 0.37) of repeat recordings. This mixes physiological change during the ~3 h sequential acquisition with any
+  tile-shared measurement error; it is not corrected (a per-tile factor would normalise away real state changes), and
+  the reconstruction is a conservation-consistent reference field, not a simultaneous snapshot. The spread floor
+  s_between covers disagreement among a vessel's own recordings but not errors shared by all vessels of one tile, so
+  the reconciled uncertainties are optimistic across tiles.
+- Standardized reconciliation adjustments (linearised; z/√r with r = 1 − leverage): robust scale 1.10 overall, 1.00–1.05
+  for the most reliable and ≈ 1.16 for the least reliable vessels; median signed ln(Q′/y) = 0.000 (no normalisation
+  bias); direction reversals 0.1 % (most reliable quintile) → 11 % (least reliable).
+- The quasi-likelihood penalises inflating a flux only logarithmically (variance evaluated at Q′). Interior vessels are
+  held by conservation at both ends; a vessel free at one end is not. Measured dead ends must therefore stay closed (27S
+  test: opening 18 measured dead ends let several near-zero measurements reconcile to ±0.7–1.9 nL/s; reverted). 21S has
+  no measured dead ends (5 unmeasured, closed).
