@@ -197,7 +197,13 @@ def main():
     ezone_e = {e_ for e_ in mall if G.has_edge(*e_) and any(pp_.contains_point(_mid(e_)) for pp_ in _ep)}
     log(f"  early-tile footprint: {len(ezone_e)} vessels")
     RCOL = {"T": "#b23a48", "L": "#8a8a8a", "S": "#2b5c8a"}
-    RLAB = {"T": "early", "L": "", "S": "later"}          # early = f0 below the band (rapid rise); main = analysed set
+    # labels describe the acquisition sequence (the split itself is the a-priori heart-rate criterion above; it coincides with
+    # the first recordings), not a developmental or physiological stage
+    _late = [t for t in ts if t not in early]
+    T_E = f"tiles {min(early)}–{max(early)}, {min(xs_a[ts.index(t)] for t in early):.0f}–{max(xs_a[ts.index(t)] for t in early):.0f} min"
+    T_L = f"{min(xs_a[ts.index(t)] for t in _late):.0f}–{max(xs_a[ts.index(t)] for t in _late):.0f} min"
+    log(f"  earlier recordings: {T_E}; later recordings: {T_L}")
+    RLAB = {"T": "earlier recordings", "L": "", "S": "later recordings"}      # earlier = f0 below the band (rapid rise)
     # detection of the fundamental above broadband noise, per measurement: F-test of the 3-harmonic fit (ρ = explained-variance
     # fraction of n samples, 6 regressors); detected = p < P_DET
     from scipy.stats import f as _Fd
@@ -276,7 +282,7 @@ def main():
                 _th = lambda y_: np.angle(y_["H"][1] * np.conj(y_["H"][0]) ** 2)
                 TH[g_].append((abs(np.degrees(np.angle(np.exp(1j * (_th(ya) - _th(yb)))))), min(ya["rho"], yb["rho"])))
     SP = {k: np.array(v) for k, v in SP.items()}; SCOL = {"E": RCOL["T"], "B": RCOL["S"]}
-    SLAB = {"E": "early", "B": "later"}
+    SLAB = {"E": "earlier recordings", "B": "later recordings"}
     # vessel-level bootstrap (pairs sharing a vessel are not independent): resample vessels, median D of their pairs
     _rng = np.random.default_rng(0); _ve = {g_: list(vD[g_].values()) for g_ in ("E", "B")}
     _bm = lambda g_: np.median(np.concatenate([_ve[g_][i_] for i_ in _rng.integers(0, len(_ve[g_]), len(_ve[g_]))]))
@@ -371,8 +377,8 @@ def main():
     axD.set_xlim(0, 1.1); axD.set_ylim(0, 1.02); axD.set_yticks([0, 0.5, 1]); axD.spines[["top", "right"]].set_visible(False)
     axD.set_xlabel("Waveform-shape difference $D$", fontsize=8, labelpad=1)
     axD.text(0.02, 0.98, "← more reproducible", transform=axD.transAxes, fontsize=8, color="0.4", va="top")
-    axD.text(0.98, 0.26, f"later: {len(SP['B'])} pairs, {len(vD['B'])} vessels", color=SCOL["B"], fontsize=8, transform=axD.transAxes, va="bottom", ha="right")
-    axD.text(0.98, 0.1, f"early: {len(SP['E'])} pairs, {len(vD['E'])} vessels", color=SCOL["E"], fontsize=8, transform=axD.transAxes, va="bottom", ha="right")
+    axD.text(0.98, 0.26, f"{len(SP['B'])} pairs, {len(vD['B'])} vessels", color=SCOL["B"], fontsize=8, transform=axD.transAxes, va="bottom", ha="right")
+    axD.text(0.98, 0.1, f"{len(SP['E'])} pairs, {len(vD['E'])} vessels", color=SCOL["E"], fontsize=8, transform=axD.transAxes, va="bottom", ha="right")
     axD.set_ylabel("Cumulative fraction", fontsize=8, labelpad=0); axD.tick_params(labelsize=7)
 
     pass
@@ -472,8 +478,8 @@ def main():
         axB7.annotate("", xy=(cx_, cy_), xytext=(cx_ + off_[0], cy_ + off_[1]), arrowprops=dict(arrowstyle="-", lw=0.6, color=RCOL[k_]), zorder=5)
         axB7.plot(cx_ + off_[0], cy_ + off_[1], "o", ms=10, mfc=RCOL[k_], mec="white", mew=0.8, zorder=6)
         axB7.text(cx_ + off_[0], cy_ + off_[1], tag_, fontsize=7, ha="center", va="center", fontweight="bold", color="white", zorder=7)
-    axB7.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.28), ec=RCOL["T"], label="early recordings"),
-                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.16), ec="0.35", label="later recordings")],
+    axB7.legend(handles=[matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["T"], 0.28), ec=RCOL["T"], label=f"earlier recordings ({T_E})"),
+                         matplotlib.patches.Patch(fc=mcolors.to_rgba(RCOL["S"], 0.16), ec="0.35", label=f"later recordings ({T_L})")],
                 loc="upper center", bbox_to_anchor=(0.5, 0.0), fontsize=8, frameon=False, ncol=2, handlelength=1.2, borderaxespad=0, columnspacing=0.8)
     fig = figR
     # panel letters on a grid: a/c share the left column's x, b/d the right column's; a/b share the top row's y, c/d the bottom's
@@ -510,13 +516,13 @@ def main():
         axM.plot(cx_ + 150, cy_ - 150, "o", ms=9, mfc="black", mec="white", mew=0.6, zorder=6)
         axM.text(cx_ + 150, cy_ - 150, tag_, fontsize=7, ha="center", va="center", zorder=7, fontweight="bold", color="white")
     e1 = polys[min(early)]; cE = np.vstack([polys[t] for t in early])
-    axM.text(cE[:, 0].mean(), cE[:, 1].min() - 40, f"early tiles {min(early)}–{max(early)} (first {max(xs_a[ts.index(t)] for t in early) + 5:.0f} min)",
+    axM.text(cE[:, 0].mean(), cE[:, 1].min() - 40, f"earlier recordings ({T_E})",
              ha="center", va="bottom", fontsize=7, color="#b23a48", zorder=6)
     axM.text(*(polys[ref].mean(0) + np.array([0, 0])), f"ref.\ntile {ref}", ha="center", va="center", fontsize=6, color="0.15", zorder=6,
              bbox=dict(fc="white", ec="none", alpha=0.7, pad=0.4))
     from matplotlib.lines import Line2D as _L2
     axM.legend(handles=[_L2([], [], color="0.55", lw=0.6, label="vessel sampled (ρ ≥ 0.2)"),
-                        matplotlib.patches.Patch(fc="#f3dfe2", ec="#b23a48", ls="--", lw=0.7, label="early tiles (excluded)")],
+                        matplotlib.patches.Patch(fc="#f3dfe2", ec="#b23a48", ls="--", lw=0.7, label="earlier recordings (excluded)")],
                loc="upper center", bbox_to_anchor=(0.5, -0.1), fontsize=6.5, frameon=False, handlelength=1.4, borderaxespad=0, ncol=2, columnspacing=1.2)
     caxM = axM.inset_axes([0.25, -0.04, 0.5, 0.025]); cbM = fig.colorbar(plt.cm.ScalarMappable(norm=nD, cmap=cmD), cax=caxM, orientation="horizontal",
                                                                         ticks=[0, 0.4, 0.8], extend="max")
@@ -849,7 +855,7 @@ def main():
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch as _Pt
-    axC.legend(handles=[_Pt(fc="white", ec="0.55", hatch="///", lw=0.5, label="Early recordings excluded"),
+    axC.legend(handles=[_Pt(fc="white", ec="0.55", hatch="///", lw=0.5, label="Earlier recordings excluded"),
                         _Pt(fc="0.82", ec="none", label="No reliable fundamental phase"),
                         _Pt(fc="none", ec="0.35", ls="--", lw=1.3, label="Separate phase component")],
                loc="upper center", bbox_to_anchor=(0.5, -0.135), fontsize=8, frameon=False, handlelength=1.6, borderaxespad=0, labelspacing=0.25,

@@ -1,16 +1,20 @@
-"""Fig 6 — DC reconciliation: measurement reliability → held-out calibration → weighted conservative projection → result and
-validation.  PLOS: 7.5 in wide, all text ≥ 8 pt Arial.
+"""Fig 6 — reliability-weighted DC reconstruction, in the order of the method: score reliability → calibrate it on junctions →
+reconcile the network → validate on withheld measurements.  PLOS: 7.5 × 8.75 in, all text ≥ 8 pt Arial.
 
-  a  reliable vs unreliable Kloosterman measurement (tile 30): kept cross-sections, time-mean OF arrows; c, f, align under
-     each; the reliability formula with the fitted coefficients (results/reliability_model_v1.json).
-  b  tile-held-out (5-fold) calibration: RMS predicted junction uncertainty σ_j vs RMS observed imbalance r_j.
-  c  the projection (min Σ w (q − y)² s.t. B_int q = 0, w = 1/(c² Q′² + s0²)) and tile-30 junction 28329 before / after
-     (network-reconciled values from results/dc_reconciled_v2.pkl).
-  d, e  measured / reconciled |flux| in tile 30 (junction-imbalance circles on d).
-  f  validation against independent repeat recordings (results/dc_weighting_validation.json, dc_validate_weighting.py):
-     error of measured (reconciled) and hidden (imputed) vessels for four weightings, trusted references c < 0.5.
+  a  one real recording (tile 24): dense time-mean flow, cross-section ticks shaded by their parabolic fit R²; parabolicity
+     p = mean clip(R², 0, 1), directional alignment a = mean |cos θ|, reliability c = c0 + c_p(1 − p) + c_a(1 − a)
+  b  calibration: normalized junction imbalance |in − out| / √Σy² (RMS) by junction measurement quality (quintile of mean c_k),
+     measured vs the quality-dependent and constant-error models fitted on other tiles (dc_junction_calibration.json)
+  c  measured network around the tile 22/26/27 overlap (vessels drawn to the frame edge): best recording per vessel, colour =
+     c_k, width = |y|; rings (area ∝ |in − out|, largest quarter emphasised); unimaged segments < 2 radii = one junction
+  d  reconciled network: width = |Q′| (same scale), colour = reconstructed / measured flux magnitude (neutral grey);
+     conservation imposed at every interior junction
+  e  prediction of withheld measurements: flux measurements removed (network kept), disagreement with the vessels' own
+     independent recordings vs fraction withheld, repeat-recording benchmark, direction agreement (dc_withholding.json)
+SI: fig6_S_example (9-vessel patch, repeated recordings, per-vessel flows, one single-tile junction), fig6_S_weighting (four
+weightings), fig6_S_corrections, fig6_S_reliability (real good / poor recordings), fig6_S_heldout.
 
-Run: python3 -u scripts/make_figure6.py   (writes figures/fig6/fig6.{png,pdf,tif} and the SI figure fig6_S_heldout)
+Run: python3 -u scripts/make_figure6.py   (writes figures/fig6/fig6.{png,pdf,tif} and the SI figures)
 """
 import sys, json, gzip, pickle, time, argparse
 from pathlib import Path
@@ -20,10 +24,10 @@ import tifffile
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
-import matplotlib.colors as mcolors, matplotlib.cm as cm, matplotlib.patheffects
+import matplotlib.colors as mcolors, matplotlib.cm as cm, matplotlib.patheffects, matplotlib.transforms
 import plexusflow.paths as P
-from plexusflow.reconcile.reliability import measurement_table, same_tile_junctions, c_of
-from plexusflow.analyze.kloosterman import kloosterman_scalar
+from plexusflow.reconcile.reliability import profile_coef, measurement_table, same_tile_junctions, c_of
+from plexusflow.analyze.kloosterman import kloosterman_scalar, PRODUCTION_KW
 from plexusflow.analyze.centerline import _centerline_geometry
 from plexusflow.analyze.geometry import load_tile_geometry, graph_to_tile_batch
 from plexusflow.config import StageConfig
@@ -34,14 +38,16 @@ _ap.parse_args()
 OUT = P.FIGURES / "fig6" / "fig6"
 Z_S = 5.0                                         # junction-circle area per z²
 TILE, NODE = 30, 28329
-SHOW_IMBALANCE = False                            # Fig 6a junction-imbalance labels (off: reviewer, panel a overloaded)
-PATCH, PATCH_HOPS = 59219, 2                      # Fig 6a: 9 vessels each recorded in ≥ 2 of tiles 22/26/27; Q′ within every vessel's recordings
+SHOW_IMBALANCE = False                            # Fig 6c junction-imbalance labels (off: reviewer, panel a overloaded)
+JNODE, JTILE = 58340, 22                          # SI fig6_S_example: patch vessels 2/1/3, all three recorded in tile 22
+EX_TILE, EX_EDGE = 24, (64960, 65010)             # Fig 6a example recording: long, straight, f 0.67, align 0.68
+REGION_HALF = 160                                 # Fig 6c/d: view = vessels within ± this many graph px (≈ 270 µm) of PATCH; every vessel entering the view is drawn
+PATCH, PATCH_HOPS = 59219, 2                      # Fig 6c/d: 9 vessels each recorded in ≥ 2 of tiles 22/26/27; Q′ within every vessel's recordings
 import os as _os
 PATCH = int(_os.environ.get("FIG6_PATCH", PATCH)); PATCH_HOPS = int(_os.environ.get("FIG6_PATCH_HOPS", PATCH_HOPS))
 HIGH, LOW = (28304, 28329), (35992, 36030)
 PX_UM = 1.7
-KW = dict(dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="median_band", median_lo=0.5, median_hi=1.5, R_slice_lo=0.5,
-          R_slice_hi=2.0, min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0)
+KW = PRODUCTION_KW
 COL = ["#0072B2", "#E69F00", "#CC79A7"]          # Okabe–Ito, as fig6v3
 LOWCOL = "#009E73"
 INK, MUTED = "#1a1a1a", "#6b6b6b"
@@ -143,7 +149,7 @@ def main():
         for j in same_tile_junctions(G, t, {e for (tt, e) in M if tt == t}):
             y = np.array([s * M[(t, e)]["Q"] for e, s in j]); c = np.array([c_of(mod, M[(t, e)]) for e, s in j])
             sj = np.sqrt(np.sum((y * c) ** 2) + s0 ** 2); z.append(y.sum() / sj); rs_.append((y.sum(), sj))
-            jt_.append(t); jQ_.append(np.abs(y)); jf_.append([M[(t, e)]["f"] for e, _ in j])
+            jt_.append(t); jQ_.append(np.abs(y)); jf_.append([M[(t, e)][profile_coef(mod)[0]] for e, _ in j])
             ja_.append([M[(t, e)]["align"] if np.isfinite(M[(t, e)]["align"]) else 1.0 for e, _ in j])
     z = np.array(z); rms, p95 = np.sqrt(np.mean(z ** 2)), np.mean(np.abs(z) < 1.96)
     rr_, ss_ = np.array(rs_).T; qb = np.quantile(ss_, np.linspace(0, 1, 9))
@@ -164,7 +170,7 @@ def main():
     yl = yp; yp = np.empty_like(y)
     for k, ((e, s), yy) in enumerate(zip(jn, y)):
         i = eix.get(e, eix.get(e[::-1])); sg = 1 if e in eix else -1; yp[k] = s * sg * D["Qp"][i]
-        assert abs(s * sg * D["Qm"][i] - yy) < 1e-9
+        assert D.get("per_vessel", "winner") == "average" or abs(s * sg * D["Qm"][i] - yy) < 1e-9   # winner input = this recording
         log(f"  {e}: measured {yy:+.4f}, single-junction projection {yl[k]:+.4f}, network-reconciled {yp[k]:+.4f}")
     log(f"  network-reconciled Σ s Q' = {yp.sum():+.1e}")
 
@@ -178,7 +184,7 @@ def main():
         res = kloosterman_scalar(np.asarray(ki["vfield_mean"], float), np.asarray(ki["cl_used"], float), float(ki["R_prior_px"]),
                                  mask=ki.get("ridge_mask_roi"), **KW)
         valid = np.asarray(res["valid_mask"], bool); m = M[(TILE, e)]
-        ex[e] = dict(ki=ki, valid=valid, f=m["f"], align=m["align"], c=c_of(mod, m))
+        ex[e] = dict(ki=ki, valid=valid, f=m[profile_coef(mod)[0]], align=m["align"], c=c_of(mod, m))
         log(f"  {e}: kept {valid.sum()}/{len(valid)} (stored f {m['f']:.3f}), align {m['align']:.2f}, c {ex[e]['c']:.2f}")
 
     # ---------------------------------------------------------------- layout (7.5 in wide, PLOS max)
@@ -200,6 +206,13 @@ def main():
             path[(u, v)] = q
     pe = [i for i, e in enumerate(E) if e in path]; ps = set(E[i] for i in pe)
     Qm, Qp, im, sig = D["Qm"], D["Qp"], D["imaged"].astype(bool), D["sigma"]
+    AVG = D.get("per_vessel", "winner") == "average"                  # vessel input = weighted average of all its recordings
+    AGG_TEXT = (r"repeat recordings aggregated before reconstruction:  $Q_k = \sum_t w_{k,t}\,Q_{k,t}\,/\sum_t w_{k,t}$,  $w_{k,t} = 1/c_{k,t}^2$,"
+                r"  $c_k = (\sum_t w_{k,t}\,c_{k,t}^2\,/\sum_t w_{k,t})^{1/2}$" if AVG else "")
+    recs_all = {}
+    for (t_, e_), m_ in M.items():
+        if tuple(e_) in eix:
+            recs_all.setdefault(eix[tuple(e_)], []).append((int(m_["tile"]),))
     rad = {e: G.edges[e].get("radius", 5.0) for e in path}; rmax = np.percentile(list(rad.values()), 95)
     lw_of = lambda e: 0.7 + 2.0 * min(rad[e] / rmax, 1.0)
     qa = np.abs(np.r_[Qm[[i for i in pe if im[i]]], Qp[pe]]); qa = qa[qa > 0]
@@ -347,12 +360,14 @@ def main():
         t_ = int(m["tile_id"])
         if t_ not in TCOL or m.get("Q_t") is None:
             continue
-        q = sgn * np.asarray(m["Q_t"], float); tt = np.arange(len(q)) / _FS; sel = tt <= 2.0; used = t_ == int(D["tile"][wv])
+        q = sgn * np.asarray(m["Q_t"], float); tt = np.arange(len(q)) / _FS; sel = tt <= 2.0; used = AVG or t_ == int(D["tile"][wv])
         axW.plot(tt[sel], q[sel], color=TCOL[t_], lw=1.4 if used else 0.9, alpha=1.0 if used else 0.7, zorder=3 if used else 2)
         axW.axhline(q.mean(), color=TCOL[t_], lw=1.0, ls=(0, (3, 2)), zorder=2)
     axW.axhline(abs(Qp[wv]), color=INK, lw=2.0, zorder=4)
-    axW.text(1.98, abs(Qp[wv]) * 0.93, "reconstructed mean Q′", fontsize=8, color=INK, va="top", ha="right", zorder=6,
-             bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.5))
+    from matplotlib.lines import Line2D as _L2b
+    axW.legend(handles=[_L2b([], [], color=INK, lw=2.0, label="reconstructed mean Q′")], loc="upper left", frameon=False, fontsize=8,
+               handlelength=1.6, borderaxespad=0.1)
+    axW.set_ylim(top=axW.get_ylim()[1] * 1.22)                                   # room for the key above the traces
     axW.set_xlim(0, 2.0); axW.set_xlabel("time since recording start (s)", fontsize=8, labelpad=1); axW.set_ylabel("flow (nL/s)", fontsize=8, labelpad=1)
     axW.tick_params(labelsize=8); axW.spines[["top", "right"]].set_visible(False)
     axW.set_title(f"Repeated recordings of vessel {num[wv]} (dashed: means)", fontsize=9, loc="left", pad=3)
@@ -363,50 +378,360 @@ def main():
     p_ = axS.get_position(); axS.set_position([p_.x0 + 0.05, p_.y0, p_.width - 0.05, p_.height])
     for k, i in enumerate(order):
         rs = recs[i]; offs = np.linspace(-0.18, 0.18, len(rs)) if len(rs) > 1 else [0.0]
-        used = int(D["tile"][i])                                             # the winner (smallest c): the only recording the reconstruction uses
+        used = int(D["tile"][i])                                             # winner input: the only recording the reconstruction uses
         assert used in [r[0] for r in rs] and min(rs, key=lambda r: r[2])[0] == used, (i, used, rs)
         for (t_, q_, c_, s_), dx in zip(sorted(rs), offs):
-            axS.scatter(k + 1 + dx, q_, s=52 if t_ == used else 24, facecolors=TCOL[t_] if t_ == used else "white", edgecolors=TCOL[t_], linewidths=1.3,
-                        alpha=1.0 if t_ == used else 0.6, zorder=3)
+            u_ = AVG or t_ == used                                           # averaged input: every recording is used
+            axS.scatter(k + 1 + dx, q_, s=52 if u_ else 24, facecolors=TCOL[t_] if u_ else "white", edgecolors=TCOL[t_], linewidths=1.3,
+                        alpha=1.0 if u_ else 0.6, zorder=3)
+        if AVG:
+            axS.plot([k + 1 - 0.38, k + 1 + 0.38], [abs(Qm[i])] * 2, color="0.6", lw=1.6, zorder=3.5, solid_capstyle="butt")
         axS.plot([k + 1 - 0.38, k + 1 + 0.38], [abs(Qp[i])] * 2, color=INK, lw=3.2, zorder=4, solid_capstyle="butt")
     axS.set_yscale("log"); axS.set_xticks(xs_); axS.set_xticklabels([str(x) for x in xs_], fontsize=8); axS.set_xlim(0.4, len(order) + 0.6)
-    axS.set_xlabel("Vessel ID", fontsize=8, labelpad=1); axS.set_ylabel("mean flow (nL/s)", fontsize=8, labelpad=1); axS.tick_params(labelsize=8)
+    axS.set_xlabel("Vessel ID", fontsize=8, labelpad=1); axS.set_ylabel("|mean flow| (nL/s)", fontsize=8, labelpad=1); axS.tick_params(labelsize=8)
     axS.spines[["top", "right"]].set_visible(False); axS.set_title("Conservation-consistent reference flows", fontsize=9, loc="left", pad=3)
     from matplotlib.lines import Line2D
     hs = [Line2D([], [], marker="s", ls="", ms=7, color=TCOL[t_], label=f"Tile {t_}") for t_ in ptiles]
-    hs += [Line2D([], [], marker="o", ls="", ms=7, color="0.35", label="Used"),
-           Line2D([], [], marker="o", ls="", ms=5, mfc="white", mec="0.35", mew=1.3, label="Not used"),
-           Line2D([], [], color=INK, lw=3.2, label="Reconstructed")]
+    hs += ([Line2D([], [], marker="o", ls="", ms=7, color="0.35", label="Recording"), Line2D([], [], color="0.6", lw=1.6, label="Weighted average")]
+           if AVG else [Line2D([], [], marker="o", ls="", ms=7, color="0.35", label="Used"),
+                        Line2D([], [], marker="o", ls="", ms=5, mfc="white", mec="0.35", mew=1.3, label="Not used")]) \
+          + [Line2D([], [], color=INK, lw=3.2, label="Reconstructed")]
     fig.legend(handles=hs, loc="upper center", bbox_to_anchor=(0.5, 0.425), ncol=6, frameon=False, fontsize=8, handletextpad=0.3, columnspacing=1.4)
 
-    # d: independent validation (results/dc_weighting_validation.json, scripts/dc_validate_weighting.py)
-    V = json.loads((P.RESULTS / "dc_weighting_validation.json").read_text())
-    axd = fig.add_axes([0.09, 0.065, 0.88, 0.24])
+    # ---- bottom row: how the reconstruction is calibrated and checked.  d one simultaneously recorded junction (imbalance r_j vs
+    #      the σ_j its vessels' c_k predict) · e c_k vs one constant c on held-out tiles (dc_junction_calibration.py) · f prediction
+    #      of independent recordings, selected model only (dc_validate_weighting.py; the four-weighting comparison is SI)
+    V = json.loads((P.RESULTS / "dc_weighting_validation.json").read_text()); JC = json.loads((P.RESULTS / "dc_junction_calibration.json").read_text())
+    BOT, TOPB, TT = 0.075, 0.32, 0.352                                # axes bottom / top, title line (below the tile legend)
+    def draw_calibration(axE, big=False):
+        """held-out RMS(r_j / σ_j,pred) by quality quintile: quality-dependent c_k vs one constant c (dc_junction_calibration.json)"""
+        xq = np.arange(1, 6); ms_ = 6.5 if big else 5.5
+        for lab, colr, mk, dx, name in (("constant", GREY, "s", 0.09, "one constant c"), ("calibrated", BLUE, "o", -0.09, "quality-dependent $c_k$")):
+            rms_, ci_ = np.array(JC[lab]["rms_z"]), np.array(JC[lab]["rms_z_ci"])
+            axE.vlines(xq + dx, ci_[:, 0], ci_[:, 1], color=colr, lw=1.0, zorder=2)
+            axE.plot(xq + dx, rms_, marker=mk, ms=ms_, color=colr, lw=1.2, ls="-" if lab == "calibrated" else (0, (3, 2)), mfc=colr, mec=colr, zorder=3, label=name)
+        axE.axhline(1, color=INK, lw=0.7, ls=":", zorder=1); axE.text(0.55, 1.02, "ideal", fontsize=8, color=MUTED, ha="left", va="bottom")
+        axE.set_xticks(xq); axE.set_xticklabels([f"{c_:.2f}" for c_ in JC["quintile_median_c"]], fontsize=8); axE.set_xlim(0.5, 5.5); axE.set_ylim(0.3, 1.7)
+        axE.set_xlabel("junction mean $c_k$ (quintiles)  →  poorer recordings", fontsize=8, labelpad=1)
+        axE.set_ylabel("RMS($r_j$ / σ$_{j,\\mathrm{pred}}$)\n(held-out tiles)", fontsize=8, labelpad=1)
+        axE.text(0.98, 0.03, f"{ST.name.replace('PlexusFlow', '')}, {JC['n_junctions']} same-tile junctions", transform=axE.transAxes, fontsize=8, color=MUTED,
+                 ha="right", va="bottom"); axE.tick_params(labelsize=8)
+        axE.spines[["top", "right"]].set_visible(False); axE.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
+
+    def draw_relative(axR):
+        """observed RMS relative junction imbalance |in − out| / √Σy² by quality quintile vs the scale each model predicts (held-out tiles)"""
+        R_ = JC["relative"]; xq = np.arange(1, 6); ci_ = np.array(R_["observed_ci"])
+        axR.plot(xq, R_["predicted_constant"], color=GREY, lw=1.4, ls=(0, (3, 2)), marker="s", ms=5, label="constant-error model", zorder=2)
+        axR.plot(xq, R_["predicted_calibrated"], color=BLUE, lw=1.6, marker="o", ms=5, mfc="white", mew=1.4, label="quality-dependent model", zorder=3)
+        axR.vlines(xq, ci_[:, 0], ci_[:, 1], color=INK, lw=1.2, zorder=4)
+        axR.plot(xq, R_["observed"], ls="", marker="o", ms=6.5, color=INK, label="measured imbalance", zorder=5)
+        axR.set_xticks(xq); axR.set_xticklabels(["best", "2", "3", "4", "worst"], fontsize=8); axR.set_xlim(0.6, 5.4)
+        axR.set_ylim(0, max(1.0, 1.05 * max(R_["predicted_constant"]))); axR.tick_params(labelsize=8)
+        axR.set_xlabel("junction measurement quality", fontsize=8, labelpad=1)
+        axR.set_ylabel("normalized junction\nimbalance (RMS)", fontsize=8, labelpad=1)
+        axR.text(0.98, 0.03, f"{JC['n_junctions']} same-tile junctions;\npredictions on held-out tiles", transform=axR.transAxes,
+                 fontsize=8, color=MUTED, ha="right", va="bottom")
+        axR.spines[["top", "right"]].set_visible(False); axR.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
+
+    def draw_withholding(axW2):
+        """withheld-vessel error vs fraction of measured vessels withheld (dc_withholding_curve.py)"""
+        WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); cv = WH["curve"]
+        x = np.array([100 * c_["frac"] for c_ in cv]); y = np.array([c_["err"] for c_ in cv]); ci_ = np.array([c_["err_ci"] for c_ in cv])
+        rp = WH["repeat"]
+        axW2.axhspan(*rp["err_ci"], color=GREY, alpha=0.18, lw=0, zorder=1)
+        axW2.axhline(rp["err"], color=GREY, lw=1.0, ls=(0, (3, 2)), zorder=2)
+        axW2.text(77, rp["err_ci"][0] - 0.015, "disagreement between repeat recordings", fontsize=8, color=MUTED, ha="right", va="top")
+        axW2.fill_between(x, ci_[:, 0], ci_[:, 1], color=BLUE, alpha=0.18, lw=0, zorder=2)
+        axW2.plot(x, y, color=BLUE, lw=1.6, marker="D", ms=5.5, zorder=3, label="reconstructed, vessel withheld")
+        from matplotlib.patches import Patch as _Pt
+        axW2.legend(handles=[(_Pt(color=BLUE, alpha=0.18, lw=0), matplotlib.lines.Line2D([], [], color=BLUE, lw=1.6, marker="D", ms=5))],
+                    labels=["reconstructed withheld vessels (95 % CI)"], loc="upper left", frameon=False, fontsize=8, handlelength=2.0, borderaxespad=0.1)
+        axW2.text(0.98, 0.97, f"direction agreement: {100 * cv[0]['dir']:.0f} % → {100 * cv[-1]['dir']:.0f} %", transform=axW2.transAxes,
+                  fontsize=8, color=BLUE, ha="right", va="top")
+        un = D["metrics"]["contracted"]; fu = 100 * un["n_unimaged"] / un["n_vessels"]
+        axW2.axvline(fu, color=INK, lw=0.8, ls=":", zorder=1)
+        axW2.text(fu + 1.2, 0.04, f"already unmeasured: {fu:.0f} %", fontsize=8, color=INK, ha="left", va="bottom")
+        axW2.set_xlim(0, 78); axW2.set_ylim(0, 0.95); axW2.set_xticks([0, 25, 50, 75]); axW2.tick_params(labelsize=8)
+        axW2.set_xlabel("measured vessels withheld (%)", fontsize=8, labelpad=1)
+        axW2.set_ylabel("disagreement with\nindependent measurements\n(median |log ratio|)", fontsize=8, labelpad=2)
+        axW2.spines[["top", "right"]].set_visible(False)
+
+    def draw_check(axF):
+        """prediction of independent recordings (trusted references, c < 0.5; vessel-bootstrap 95 % intervals)"""
+        rowsF = (("raw measurement", V["measured"]["raw"]["trusted"], GREY, "o", GREY),
+                 ("reconstructed, measured vessel", V["measured"]["calibrated"]["trusted"], BLUE, "o", "white"),
+                 ("reconstructed, withheld vessel", V["imputed"]["calibrated"]["trusted"], BLUE, "D", BLUE))
+        for k_, (lab, q_, colr, mk_, fc_) in enumerate(rowsF):
+            yk = 2 - k_
+            axF.plot(q_["err_ci"], [yk, yk], color=colr, lw=2.2, solid_capstyle="butt", alpha=0.45, zorder=2)
+            axF.plot(q_["err"], yk, marker=mk_, ms=6.5, mfc=fc_, mec=colr, mew=1.4, ls="", zorder=3)
+            axF.text(0.01, yk + 0.3, lab, fontsize=8, color=INK if colr == GREY else BLUE, ha="left", va="center")
+            axF.text(0.6, yk, f"{100 * q_['dir']:.0f} %", fontsize=8, color=colr, ha="right", va="center")
+            log(f"panel check: {lab}: err {q_['err']:.3f} [{q_['err_ci'][0]:.3f}, {q_['err_ci'][1]:.3f}], same sign {100 * q_['dir']:.1f} %, n {q_['n']} refs / {q_['n_vessels']} vessels")
+        axF.text(0.6, 2.62, "same sign", fontsize=8, color=MUTED, ha="right", va="bottom")
+        axF.set_yticks([]); axF.set_ylim(-0.45, 2.75); axF.spines[["top", "right", "left"]].set_visible(False)
+        axF.set_xlim(0, 0.6); axF.set_xticks([0, 0.2, 0.4]); axF.tick_params(labelsize=8)
+        axF.set_xlabel("median |log ratio| to an\nindependent recording", fontsize=8, labelpad=1)
+
+    # d: junction JNODE in tile JTILE — measured fluxes of all incident vessels from one recording
+    jinc = [((JNODE, m_), 1.0) if (JNODE, m_) in eidx else ((m_, JNODE), -1.0) for m_ in Hn.neighbors(JNODE)]
+    yj = np.array([s_ * M[(JTILE, e)]["Q"] for e, s_ in jinc]); cjk = np.array([c_of(mod, M[(JTILE, e)]) for e, _ in jinc])
+    sj = float(np.sqrt(np.sum((cjk * yj) ** 2) + s0 ** 2)); rj = -yj.sum(); qin = -yj[yj < 0].sum()            # r = in − out
+    log(f"panel d: junction {JNODE} tile {JTILE}: y (out +) {np.round(yj, 4)}, c {np.round(cjk, 2)}, in − out {rj:+.4f} ({100 * rj / qin:.0f} % of inflow), σ_j {sj:.4f}, z {rj / sj:+.2f}")
+    axJ = fig.add_axes([0.345, 0.02, 0.31, TOPB - 0.02]); axJ.set_ylim(-1.5, 1.42); axJ.set_xlim(-1.4, 1.4); axJ.set_aspect("equal", adjustable="datalim"); axJ.axis("off")
+    pj = xy(JNODE); jc = TCOL[JTILE]; ymax = np.abs(yj).max()
+    for (e, s_), y_, c_ in zip(jinc, yj, cjk):
+        other = e[1] if e[0] == JNODE else e[0]; pq = toimg(np.asarray(G.edges[e]["path"], float))
+        far = pq[-1] if np.linalg.norm(pq[-1] - pj) > np.linalg.norm(pq[0] - pj) else pq[0]
+        u_ = (far - pj) / np.linalg.norm(far - pj); u_ = np.array([u_[0], -u_[1]])                           # image → axes (y up)
+        a0, a1 = 0.13 * u_, 0.74 * u_; tail, head = (a0, a1) if y_ > 0 else (a1, a0)                         # y > 0: flow leaves the node
+        axJ.annotate("", xy=head, xytext=tail, arrowprops=dict(arrowstyle="-|>,head_length=0.5,head_width=0.28", lw=1.2 + 4.0 * abs(y_) / ymax,
+                                                                color=jc, shrinkA=0, shrinkB=0), zorder=3)
+        lab = 0.86 * u_
+        axJ.text(*lab, f"vessel {num[eidx[e]]}\n{abs(y_):.4f} nL/s\nc = {c_:.2f}", fontsize=8, color=INK, ha="center",
+                 va="bottom" if u_[1] > 0.3 else ("top" if u_[1] < -0.3 else "center"), linespacing=1.05)
+    axJ.add_patch(Circle((0, 0), 0.07, fc="white", ec=INK, lw=0.9, zorder=4))
+    axJ.text(0.0, -1.36, f"observed  $r_j$ = in − out = {rj:+.4f} nL/s\npredicted scale  σ$_{{j,\\mathrm{{pred}}}}$ = {sj:.4f} nL/s", fontsize=8, color=INK, ha="center", va="bottom", linespacing=1.15)
+    fig.text(0.38, TT, f"One junction, one recording (tile {JTILE})", fontsize=9, color=INK, ha="left", va="bottom")
+    fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv = fig.transFigure.inverted(); tb = lambda a_: inv.transform(a_.get_tightbbox(rr_))
+    xr = min(tb(axW)[0, 0], tb(axS)[0, 0]) - 0.012
+    yT = max(tb(axC)[1, 1], tb(axW)[1, 1])                                 # a and b on one line; d, e, f on one line
+    yB = TT - 0.004                                                       # d, e, f letters on the bottom-row title line
+    for x_, y_, l_ in ((0.005, yT, "a"), (xr, yT, "b"), (xr, tb(axS)[1, 1], "c"), (0.345, yB, "d")):
+        fig.text(x_, min(y_ + 0.004, 0.985), l_, **LET)
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    plos_style.save(fig, OUT.parent / "fig6_S_example")                 # SI: the worked example (formerly the main figure)
+    log("wrote fig6_S_example")
+
+    # ================================================================ main figure: the network before / after, then the evidence
+    #  a measured field (best recording per vessel): colour = reliability c_k, width = |y|, circles = junction imbalance |r_j|
+    #  b reconstructed field: width = |Q′| (same scale), colour = correction Q′/y; imputed (unimaged) vessels marked; no imbalance
+    #  c junction calibration c_k vs constant c (held-out tiles) · d prediction of independent recordings
+    bnodes = {D["nodes"][i] for i in np.r_[D["inj"], D["out"]]}                   # network boundary: flow enters / leaves, no balance imposed
+    p0 = np.array([G.nodes[PATCH]["x"], G.nodes[PATCH]["y"]]); inreg = lambda n: np.all(np.abs(np.array([G.nodes[n]["x"], G.nodes[n]["y"]]) - p0) < REGION_HALF)
+    reg = [i for i, e in enumerate(E) if inreg(e[0]) and inreg(e[1])]; rnodes = {n for i in reg for n in E[i]}
+    rjun = []
+    for n in rnodes:
+        if Hn.degree(n) < 3 or n in bnodes or not all(inreg(m_) for m_ in Hn.neighbors(n)) or G.nodes[n].get("boundary_type") in ("source", "sink"):
+            continue
+        inc = [(eidx[(n, m_)], 1.0) if (n, m_) in eidx else (eidx[(m_, n)], -1.0) for m_ in Hn.neighbors(n)]
+        if all(im[i_] for i_, _ in inc):
+            rjun.append((n, sum(s_ * Qm[i_] for i_, s_ in inc), sum(s_ * Qp[i_] for i_, s_ in inc), len({int(D["tile"][i_]) for i_, _ in inc})))
+    rpath = {i: toimg(np.asarray(G.edges[E[i]]["path"], float)) for i in reg}
+    exE = [(u, v) for u, v in G.edges() if (inreg(u) or inreg(v)) and (u, v) not in eidx and (v, u) not in eidx and G.edges[u, v].get("path") is not None]
+    ijun = [n for n in rnodes if Hn.degree(n) >= 3 and n not in bnodes and all(inreg(m_) for m_ in Hn.neighbors(n))]; rb = [n for n in bnodes if inreg(n)]
+    corr = np.where(im, np.log2(np.maximum(np.abs(Qp), 1e-9) / np.maximum(np.abs(Qm), 1e-9)), np.nan); flips = [i for i in reg if im[i] and np.sign(Qp[i]) != np.sign(Qm[i])]
+    log(f"main a/b: region ±{REGION_HALF} px around {PATCH}: {len(reg)} vessels ({sum(im[i] for i in reg)} imaged), {len(rjun)} fully measured junctions "
+        f"(single-tile {sum(1 for j in rjun if j[3] == 1)}); median |r_j| {np.median([abs(j[1]) for j in rjun]):.4f}, max |Σ Q′| {max(abs(j[2]) for j in rjun):.1e}; "
+        f"|correction| median ×{2 ** np.nanmedian(np.abs(corr[reg])):.2f}, sign flips {len(flips)}")
+    allq = np.vstack(list(rpath.values())); ctr = (allq.min(0) + allq.max(0)) / 2; hw = 0.5 * (allq.max(0) - allq.min(0)).max() + 12
+    # everything that enters the view is drawn (clipped at the frame); junctions = nodes inside the frame
+    inbox = lambda q: np.any((np.abs(q[:, 0] - ctr[0]) < hw) & (np.abs(q[:, 1] - ctr[1]) < hw))
+    reg = [i for i in range(len(E)) if inbox(toimg(np.asarray(G.edges[E[i]]["path"], float)))]; rpath = {i: toimg(np.asarray(G.edges[E[i]]["path"], float)) for i in reg}
+    # unimaged segments shorter than two radii lie inside a junction's lumen (vectorisation splits one crossing into two degree-3
+    # nodes): drawn as ONE effective junction.  Exact for the reconstruction — the segment's flow only links the two node balances,
+    # so eliminating it = summing them (up to the ε ridge on unimaged vessels).
+    SH = {i for i in reg if D["short_unimaged"][i]}                     # network.contract_short_unimaged (stored by reconcile_dc)
+    par = {}
+    def root(n):
+        while par.get(n, n) != n:
+            n = par[n]
+        return n
+    for i in SH:
+        a_, b_ = root(E[i][0]), root(E[i][1])
+        if a_ != b_:
+            par[a_] = b_
+    grp = {}
+    for n in {n for i in reg for n in E[i]}:
+        grp.setdefault(root(n), []).append(n)
+    gxy = {k: np.mean([xy(n) for n in v], axis=0) for k, v in grp.items()}
+    for i in reg:                                                     # vessel ends meet at the effective junction
+        if i in SH:
+            continue
+        q = rpath[i]; k0, k1 = root(E[i][0]), root(E[i][1])
+        if np.linalg.norm(q[0] - xy(E[i][0])) > np.linalg.norm(q[-1] - xy(E[i][0])):
+            q = q[::-1]
+        if len(grp[k0]) > 1:
+            q = np.vstack([gxy[k0], q])
+        if len(grp[k1]) > 1:
+            q = np.vstack([q, gxy[k1]])
+        rpath[i] = q
+    reg = [i for i in reg if i not in SH]
+    rjun, ijun = [], []
+    for k, ns in grp.items():
+        if not np.all(np.abs(gxy[k] - ctr) < hw) or any(n in bnodes for n in ns):
+            continue
+        inc = [(eidx[(n, m_)], 1.0) if (n, m_) in eidx else (eidx[(m_, n)], -1.0) for n in ns for m_ in Hn.neighbors(n)]
+        inc = [(i_, s_) for i_, s_ in inc if i_ not in SH]
+        if len(inc) < 3:
+            continue
+        ijun.append(k)
+        if all(im[i_] for i_, _ in inc):
+            rjun.append((k, sum(s_ * Qm[i_] for i_, s_ in inc), sum(s_ * Qp[i_] for i_, s_ in inc), len({int(D["tile"][i_]) for i_, _ in inc})))
+    nin = lambda n: np.all(np.abs(xy(n) - ctr) < hw); rb = [n for n in bnodes if nin(n)]
+    log(f"  {len(SH)} unimaged segments < 2 radii drawn as effective junctions ({sum(len(v) > 1 for v in grp.values())} merged junctions)")
+    exE = [(u, v) for u, v in G.edges() if (u, v) not in eidx and (v, u) not in eidx and G.edges[u, v].get("path") is not None
+           and inbox(toimg(np.asarray(G.edges[u, v]["path"], float)))]
+    log(f"  view: {len(reg)} vessels drawn to the frame ({sum(im[i] for i in reg)} imaged), {len(rjun)} fully measured junctions in view, "
+        f"{len(exE)} excluded vessels, {len(rb)} boundary nodes; median |r_j| {np.median([abs(j[1]) for j in rjun]):.4f}")
+    qref = float(np.percentile(np.abs(np.r_[Qm[[i for i in reg if im[i]]], Qp[reg]]), 95))
+    lw_q = lambda q: 0.6 + 4.2 * np.sqrt(min(abs(q) / qref, 1.3))
+    cmap_c = mcolors.LinearSegmentedColormap.from_list("rel", ["#1f5fa8", "#7fb0d8", "#e9c46a", "#d1495b", "#8c1c4a"]); norm_c = mcolors.Normalize(0.1, 1.0)
+    cmap_r = mcolors.LinearSegmentedColormap.from_list("corr", ["#2d004b", "#8073ac", "#b8b8b8", "#e08214", "#7f3b08"])   # neutral grey stays visible
+    norm_r = mcolors.TwoSlopeNorm(0, -1.5, 1.5)
+    # reading order = the method: a reliability of one recording → b its calibration at junctions → c measured network →
+    # d reconciled network (conservation imposed) → e independent validation on withheld measurements
+    HF = 8.75                                                            # figure height (in); layout below in inches / HF
+    fig = plt.figure(figsize=(7.5, HF), facecolor="white")
+    W_, H_ = 0.42, 0.42 * 7.5 / HF; YM = 2.66 / HF; XA, XB = 0.045, 0.535
+    axA = fig.add_axes([XA, YM, W_, H_]); axB = fig.add_axes([XB, YM, W_, H_])
+    crop2 = mos[int(ctr[1] - hw):int(ctr[1] + hw), int(ctr[0] - hw):int(ctr[0] + hw)]; lo2, hi2 = np.percentile(crop2[crop2 > 0], (1, 99.5))
+    for ax in (axA, axB):
+        ax.imshow(mos, cmap="gray", vmin=lo2, vmax=hi2 * 1.2, interpolation="antialiased", alpha=0.2)
+        ax.set_xlim(ctr[0] - hw, ctr[0] + hw); ax.set_ylim(ctr[1] + hw, ctr[1] - hw); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
+        for s_ in ax.spines.values():
+            s_.set_color("0.75"); s_.set_linewidth(0.5)
+    for i in reg:
+        q = rpath[i]
+        if im[i]:
+            axA.plot(q[:, 0], q[:, 1], color=cmap_c(norm_c(D["c"][i])), lw=lw_q(Qm[i]), solid_capstyle="round", zorder=3)
+            axB.plot(q[:, 0], q[:, 1], color=cmap_r(norm_r(corr[i])), lw=lw_q(Qp[i]), solid_capstyle="round", zorder=3)
+        else:
+            axA.plot(q[:, 0], q[:, 1], color="0.45", lw=0.9, ls=(0, (1.2, 1.2)), zorder=3)
+            axB.plot(q[:, 0], q[:, 1], color="black", lw=lw_q(Qp[i]) + 1.4, solid_capstyle="round", zorder=3)
+            axB.plot(q[:, 0], q[:, 1], color="white", lw=lw_q(Qp[i]), solid_capstyle="round", zorder=3.1)
+    rsc = 260.0 / np.percentile([abs(j[1]) for j in rjun], 90)                                   # circle area ∝ |r_j|
+    r75 = np.percentile([abs(j[1]) for j in rjun], 75)                                           # emphasise the largest quarter
+    for n, r_, rq_, nt_ in rjun:
+        big_ = abs(r_) >= r75
+        axA.scatter(*gxy[n], s=rsc * abs(r_), facecolor="none", edgecolor=PINK, linewidth=1.0 if big_ else 0.6, alpha=0.9 if big_ else 0.4, zorder=5)
+    for n in ijun:
+        axB.scatter(*gxy[n], s=6, color=INK, zorder=5)
+    EXSTY = dict(color="0.2", lw=0.9, ls=(0, (2.5, 1.5)), zorder=2.5)                          # not part of the reconstruction
+    for u, v in exE:
+        q = toimg(np.asarray(G.edges[u, v]["path"], float))
+        for ax in (axA, axB):
+            ax.plot(q[:, 0], q[:, 1], **EXSTY)
+    for n in rb:
+        for ax in (axA, axB):
+            ax.scatter(*xy(n), s=34, marker="s", facecolor="white", edgecolor=INK, linewidth=1.1, zorder=6)
+    # region box on the patch of the SI example (vessels 1–9)
+    for ax in (axA, axB):
+        L_ = 50 / PX_UM; xb_, yb_ = ctr[0] + hw - 10 - L_, ctr[1] + hw - 10
+        ax.add_patch(matplotlib.patches.Rectangle((xb_ - 5, yb_ - 24), L_ + 10, 30, fc="white", ec="none", alpha=0.85, zorder=7.9))
+        ax.plot([xb_, xb_ + L_], [yb_, yb_], color=INK, lw=2.2, solid_capstyle="butt", zorder=8)
+        ax.text(xb_ + L_ / 2, yb_ - 5, "50 µm", color=INK, fontsize=8, ha="center", va="bottom", zorder=8)
+    # keys: circle sizes (a), widths (b), colour bars below
+    from matplotlib.lines import Line2D
+    med_r = float(np.median([abs(j[1]) for j in rjun])); med_q = float(np.median(np.abs(Qp[reg])))
+    axA.legend(handles=[Line2D([], [], ls="", marker="o", ms=np.sqrt(rsc * med_r), mfc="none", mec=PINK, mew=1.0,
+                               label=f"ring: junction imbalance |in − out|\n(area; median {med_r:.3f} nL/s)")]
+                       + ([Line2D([], [], ls="", marker="s", ms=6, mfc="white", mec=INK, mew=1.1, label="network boundary (flow in / out)")] if rb else [])
+                       + ([Line2D([], [], color=EXSTY["color"], lw=EXSTY["lw"], ls=EXSTY["ls"], label="not reconstructed (porous region)")] if exE else []),
+               fontsize=8, loc="upper left", frameon=True, framealpha=0.9, edgecolor="none", handletextpad=0.6, borderpad=0.5)
+    axB.legend(handles=[Line2D([], [], color="0.35", lw=lw_q(med_q), solid_capstyle="butt", label=f"median vessel |flow|, {med_q:.3f} nL/s"),
+                        Line2D([], [], color="white", lw=3.0, path_effects=[matplotlib.patheffects.withStroke(linewidth=4.4, foreground="black")],
+                               label="not imaged (imputed)")][:2 if any(not im[i] for i in reg) else 1],
+               fontsize=8, loc="upper left", frameon=True, framealpha=0.9, edgecolor="none", handlelength=2.2, handletextpad=0.6, borderpad=0.5)
+    caxA = fig.add_axes([XA + 0.12 * W_, YM - 0.27 / HF, 0.76 * W_, 0.08 / HF]); cbA = fig.colorbar(cm.ScalarMappable(norm_c, cmap_c), cax=caxA, orientation="horizontal", extend="max")
+    cbA.set_label("vessel colour: reliability $c_k$ of the aggregated input (larger = less reliable)", fontsize=8, labelpad=1); cbA.ax.tick_params(labelsize=8)
+    caxB = fig.add_axes([XB + 0.12 * W_, YM - 0.27 / HF, 0.76 * W_, 0.08 / HF]); cbB = fig.colorbar(cm.ScalarMappable(norm_r, cmap_r), cax=caxB, orientation="horizontal", extend="both")
+    cbB.set_ticks([-1.5, -1, 0, 1, 1.5]); cbB.set_ticklabels(["", "×½", "×1", "×2", ""]); cbB.set_label("reconstructed / measured flux (magnitude)", fontsize=8, labelpad=1); cbB.ax.tick_params(labelsize=8)
+    cbB.ax.text(0.0, 1.15, "decreased", transform=cbB.ax.transAxes, fontsize=8, color="#542788", ha="left", va="bottom")
+    cbB.ax.text(1.0, 1.15, "increased", transform=cbB.ax.transAxes, fontsize=8, color="#b35806", ha="right", va="bottom")
+    TA = YM + H_ + 0.06 / HF
+    fig.text(XA, TA, f"Asynchronous measurements violate conservation ({len({t_ for i in reg if im[i] for t_, *_ in recs_all.get(i, [])})} tiles)",
+             fontsize=9, color=INK, ha="left", va="bottom")
+    fig.text(XB, TA, "A reconciled reference field satisfies conservation", fontsize=9, color=INK, ha="left", va="bottom")
+    fig.text(0.5, TA + 0.25 / HF, AGG_TEXT, fontsize=8.5, color=INK, ha="center", va="bottom")
+    # b (calibration, top right) and e (withheld validation, bottom)
+    SB, STP = 6.62 / HF, 8.3 / HF                                        # top row
+    axC2 = fig.add_axes([0.67, SB, 0.31, STP - SB]); draw_relative(axC2)
+    fig.text(0.585, STP + 0.1 / HF, "Recording quality predicts junction imbalance", fontsize=9, color=INK, ha="left", va="bottom")
+    BT, TT2 = 0.42 / HF, 1.72 / HF
+    axD2 = fig.add_axes([0.13, BT, 0.84, TT2 - BT]); draw_withholding(axD2)
+    fig.text(XA, TT2 + 0.1 / HF, "Predicting withheld vessel measurements (flux measurements removed, network kept)", fontsize=9, color=INK, ha="left", va="bottom")
+    # a: one real recording (EX_TILE, EX_EDGE), rotated so the vessel runs left → right along its flow: dense time-mean optical
+    #    flow inside the lumen, every Kloosterman cross-section (kept solid, rejected dashed), and the definition of c_k
+    from scipy.ndimage import map_coordinates
+    c0f, (pterm, cff), caf = mod["c0"], profile_coef(mod), mod["c_a"]
+    klx = pickle.load(gzip.open(ST / "batch_kl_inputs" / f"tile_{EX_TILE}.pkl.gz"))["kl_inputs"]; kx = klx.get(EX_EDGE) or klx.get(EX_EDGE[::-1])
+    imx = tifffile.imread(str(ST / "tiles" / "maxmed" / f"vid{EX_TILE}_maxmed.tif")).astype(float); imx = imx.mean(-1) if imx.ndim == 3 else imx
+    clx = np.asarray(kx["cl_used"], float); offx = np.asarray(kx["roi_offset"], float); Rx = float(kx["R_prior_px"]); vfx = np.asarray(kx["vfield_mean"], float)
+    rx_ = kloosterman_scalar(vfx, clx, Rx, mask=kx.get("ridge_mask_roi"), **KW); validx = np.asarray(rx_["valid_mask"], bool)
+    r2x = np.clip(np.nan_to_num(np.asarray(rx_["per_slice_r2"], float), nan=0.0), 0, 1)              # section fit quality (0 = no fit)
+    mx = M.get((EX_TILE, EX_EDGE)) or M.get((EX_TILE, EX_EDGE[::-1])); fx, ax_, cx = mx["f"], mx["align"], c_of(mod, mx)
+    vec_rc = lambda q: np.array([vfx[int(round(q[0])), int(round(q[1]))][1], vfx[int(round(q[0])), int(round(q[1]))][0]])   # (drow, dcol)
+    tdir = clx[-1] - clx[0]; tdir /= np.linalg.norm(tdir)
+    if np.mean([vec_rc(q) @ tdir for q in clx if 0 <= q[0] < vfx.shape[0] - 0.5 and 0 <= q[1] < vfx.shape[1] - 0.5]) < 0:
+        clx, validx, r2x, tdir = clx[::-1], validx[::-1], r2x[::-1], -tdir                          # flow runs left → right
+    ndir = np.array([-tdir[1], tdir[0]]); org = clx[0]
+    Lx = float((clx[-1] - org) @ tdir); u_ = np.arange(-0.6 * Rx, Lx + 0.6 * Rx, 0.5); v_ = np.arange(-2.15 * Rx, 1.75 * Rx, 0.5)
+    UU, VV = np.meshgrid(u_, v_); pr = org[0] + UU * tdir[0] + VV * ndir[0] + offx[0]; pc = org[1] + UU * tdir[1] + VV * ndir[1] + offx[1]
+    rot = map_coordinates(imx, [pr, pc], order=1)
+    axS = fig.add_axes([0.02, 7.3 / HF, 0.52, 1.0 / HF]); axS.set_aspect("equal", anchor="SW")
+    axS.imshow(rot, cmap="gray", origin="lower", extent=[u_[0], u_[-1], v_[0], v_[-1]], vmin=np.percentile(rot, 1), vmax=np.percentile(rot, 99.5), alpha=0.75)
+    axS.set_xlim(u_[0], u_[-1]); axS.set_ylim(v_[0], v_[-1]); axS.set_xticks([]); axS.set_yticks([])
+    for s_ in axS.spines.values():
+        s_.set_visible(False)
+    us_ = (clx - org) @ tdir                                                     # cross-sections, every one Kloosterman used
+    cmap_r2 = mcolors.LinearSegmentedColormap.from_list("r2", ["#e6e6e6", BLUE])
+    for uu, ok_ in zip(us_, r2x):                                                # one tick per cross-section, shaded by its fit R²
+        for sg_ in (-1, 1):
+            axS.plot([uu, uu], [sg_ * 1.05 * Rx, sg_ * 1.45 * Rx], color=cmap_r2(ok_), lw=0.9, solid_capstyle="butt", zorder=3)
+    for sg_ in (-1, 1):
+        axS.plot([us_[0], us_[-1]], [sg_ * Rx, sg_ * Rx], color="white", lw=0.6, alpha=0.8, zorder=3)
+    gu, gv = np.meshgrid(np.arange(1.5, Lx - 1, 5.0), np.arange(-0.75 * Rx, 0.76 * Rx, 0.25 * Rx)); A_, B_ = [], []
+    for uu, vv in zip(gu.ravel(), gv.ravel()):
+        q = org + uu * tdir + vv * ndir
+        if 0 <= q[0] < vfx.shape[0] - 0.5 and 0 <= q[1] < vfx.shape[1] - 0.5:
+            w_ = vec_rc(q); A_.append((uu, vv)); B_.append((w_ @ tdir, w_ @ ndir))
+    A_, B_ = np.array(A_), np.array(B_); sc_ = 4.2 / np.percentile(np.linalg.norm(B_, axis=1), 90)
+    axS.quiver(A_[:, 0], A_[:, 1], B_[:, 0] * sc_, B_[:, 1] * sc_, angles="xy", scale_units="xy", scale=1, color="#ffd23f", edgecolor=INK,
+               linewidth=0.3, width=0.006, headwidth=3.5, headlength=3.5, headaxislength=3, pivot="middle", zorder=4)
+    axS.plot([us_[0], us_[-1]], [0, 0], color="white", lw=0.6, ls=(0, (3, 3)), zorder=3.5)
+    L5 = 20 / PX_UM; axS.plot([u_[-1] - 2 - L5, u_[-1] - 2], [v_[0] + 3.0] * 2, color="white", lw=2, solid_capstyle="butt", zorder=6)
+    axS.text(u_[-1] - 4 - L5 - 1.5, v_[0] + 3.0, "20 µm", color="white", fontsize=8, ha="right", va="center", zorder=6,
+             path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="black")])
+    log(f"panel a: tile {EX_TILE} {EX_EDGE}: kept {validx.sum()}/{len(validx)} (f {fx:.3f}), align {ax_:.3f}, c {cx:.3f}; {len(A_)} flow arrows")
+    axS.apply_aspect(); pS = axS.get_position(); xt_ = pS.x0 + 0.01
+    fig.text(pS.x1, pS.y0 - 0.03 / HF, "cross-section ticks shaded by parabolic fit $R^2$ (0 → 1)", fontsize=8, color=MUTED, ha="right", va="top")
+    for k_, (lab_, val_, col_) in enumerate((("parabolic fit quality $p$", f"{np.mean(r2x):.2f}", BLUE), ("directional alignment", f"{ax_:.2f}", INK),
+                                             ("reliability score $c$", f"{cx:.2f}", INK))):
+        yy_ = pS.y0 - (0.33 + 0.19 * k_) / HF
+        fig.text(xt_, yy_, lab_, fontsize=9, color=col_, ha="left", va="center"); fig.text(xt_ + 0.25, yy_, val_, fontsize=9, color=INK, ha="left", va="center")
+    fig.text(xt_ + 0.32, pS.y0 - 0.71 / HF, "(larger $c$ = less reliable)", fontsize=8, color=MUTED, ha="left", va="center")
+    fig.text(xt_, pS.y0 - 0.92 / HF, r"$c_{k,t} = c_0 + c_p\,(1-p_{k,t}) + c_a\,(1-a_{k,t})$, coefficients fitted on simultaneous junctions (b)",
+             fontsize=8, color=MUTED, ha="left", va="center")
+    log(f"panel a formula (caption): c = {c0f:.2f} + {cff:.2f}(1 − {pterm}) + {caf:.2f}(1 − a) = {cx:.2f}; p = {np.mean(r2x):.3f} (stored {mx.get('p', float('nan')):.3f})")
+    fig.text(0.02, STP + 0.1 / HF, "Recording quality from velocity profiles", fontsize=9, color=INK, ha="left", va="bottom")
+    for x_, y_, l_ in ((0.0, STP + 0.1 / HF, "a"), (0.555, STP + 0.1 / HF, "b"), (0.0, TA, "c"), (XB - 0.03, TA, "d"), (0.0, TT2 + 0.1 / HF, "e")):
+        fig.text(x_, y_ - 0.004, l_, **LET)
+    plos_style.save(fig, OUT)
+    log(f"wrote {OUT}.png/.pdf")
+
+    # ---- SI: the four weightings (formerly main panel d) — reconciliation and imputation error, trusted references
+    fw = plt.figure(figsize=(7.5, 2.9), facecolor="white"); axd = fw.add_axes([0.09, 0.2, 0.88, 0.68])
     kinds = ("uniform", "quality", "measured_scale", "calibrated"); xl = ("Uniform", "Quality", "Relative", "Calibrated")
     xs = np.arange(len(kinds)); raw = V["measured"]["raw"]["trusted"]
     axd.axhline(raw["err"], color=GREY, lw=0.8, ls=(0, (3, 2)), zorder=1)
-    axd.text(-0.38, raw["err"] + 0.012, "repeat-recording disagreement", fontsize=7.5, color=GREY, va="bottom", ha="left")
-    for test, dx, mk, lab in (("measured", -0.12, "o", "Reconciliation"), ("imputed", 0.12, "D", "Imputation")):
+    axd.text(-0.38, raw["err"] + 0.012, "repeat-recording disagreement", fontsize=8, color=GREY, va="bottom", ha="left")
+    for test, dx, mk, lab in (("measured", -0.12, "o", "Reconciliation (vessel used)"), ("imputed", 0.12, "D", "Imputation (vessel withheld)")):
         r_ = [V[test][k]["trusted"] for k in kinds]; e_ = np.array([q["err"] for q in r_]); ci_ = np.array([q["err_ci"] for q in r_])
         cl = [BLUE if k == "calibrated" else GREY for k in kinds]
-        # no error bars in the main figure: paired vessel- and tile-bootstrap intervals are in the SI (dc_weighting_validation.json)
-        axd.scatter(xs + dx, e_, marker=mk, s=56, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.5, zorder=3)
-        axd.scatter([], [], marker=mk, s=50, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.5, label=lab)
+        for x_, (lo_, hi_), c_ in zip(xs + dx, ci_, cl):
+            axd.plot([x_, x_], [lo_, hi_], color=c_, lw=1.0, zorder=2)
+        axd.scatter(xs + dx, e_, marker=mk, s=46, facecolors=["white" if test == "measured" else c_ for c_ in cl], edgecolors=cl, linewidths=1.4, zorder=3)
+        axd.scatter([], [], marker=mk, s=40, facecolors="white" if test == "measured" else GREY, edgecolors=GREY, linewidths=1.4, label=lab)
     axd.set_xticks(xs); axd.set_xticklabels(xl, fontsize=9); axd.get_xticklabels()[-1].set_color(BLUE); axd.get_xticklabels()[-1].set_fontweight("bold")
-    axd.set_xlim(-0.45, len(kinds) - 0.55); axd.set_ylim(0, 0.75)
-    axd.set_ylabel("median absolute\nlog-ratio error", fontsize=8, labelpad=2); axd.tick_params(labelsize=8)
-    axd.legend(loc="upper right", frameon=False, fontsize=8, handletextpad=0.3, ncol=2)
-    axd.set_title("Held-out prediction error", fontsize=9, pad=4, loc="left")
-    for s_ in ("top", "right"):
-        axd.spines[s_].set_visible(False)
-    fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv = fig.transFigure.inverted(); tb = lambda a_: inv.transform(a_.get_tightbbox(rr_))
-    xr = min(tb(axW)[0, 0], tb(axS)[0, 0]) - 0.012
-    yT = max(tb(axC)[1, 1], tb(axW)[1, 1])                                 # a and b on one line; a and d in one column
-    for x_, y_, l_ in ((0.005, yT, "a"), (xr, yT, "b"), (xr, tb(axS)[1, 1], "c"), (0.005, tb(axd)[1, 1], "d")):
-        fig.text(x_, min(y_ + 0.004, 0.985), l_, **LET)
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    plos_style.save(fig, OUT)
-    log(f"wrote {OUT}.png/.pdf")
+    for x_, w_ in zip(xs, ("all equal", "1/c²", "1/(cy)²", "1/(cQ′)²")):
+        axd.annotate(w_, (x_, 0), xycoords=("data", "axes fraction"), xytext=(0, -20), textcoords="offset points", ha="center", va="top",
+                     fontsize=8, color=BLUE if x_ == xs[-1] else GREY)
+    axd.annotate("weight:", (0, 0), xycoords="axes fraction", xytext=(-4, -20), textcoords="offset points", fontsize=8, color=GREY, ha="right", va="top")
+    axd.set_xlim(-0.45, len(kinds) - 0.55); axd.set_ylim(0, 0.75); axd.set_ylabel("median |log ratio| to an\nindependent recording", fontsize=8, labelpad=2)
+    axd.tick_params(labelsize=8); axd.legend(loc="upper right", frameon=False, fontsize=8, handletextpad=0.3, ncol=2)
+    axd.spines[["top", "right"]].set_visible(False)
+    plos_style.save(fw, OUT.parent / "fig6_S_weighting"); log("wrote fig6_S_weighting")
 
     # ---- SI: the full-tile correction map with the example junction (formerly the main panels)
     sel_t = np.array([i for i in pe if im[i]])
@@ -511,9 +836,9 @@ def main():
         ax = fs2.add_subplot(ga[k]); x = ex[e]; draw_measurement(ax, img, x["ki"], colr, x["valid"]); axA.append(ax)
         ax.set_title(lab, fontsize=8.5, color=colr, pad=2)
         ax.text(0.5, -0.04, f"c = {x['c']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=9, color=colr, fontweight="bold")
-        ax.text(0.5, -0.19, f"f {x['f']:.2f}, align {x['align']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=8)
+        ax.text(0.5, -0.19, f"{profile_coef(mod)[0]} {x['f']:.2f}, align {x['align']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=8)
     pa0, pa1 = axA[0].get_position(), axA[1].get_position()
-    fs2.text((pa0.x0 + pa1.x1) / 2, 0.04, r"$c = %.2f + %.2f\,(1 - f) + %.2f\,(1 - \mathrm{align})$" % (c0_, mod["c_f"], mod["c_a"]), ha="center", fontsize=8.5)
+    fs2.text((pa0.x0 + pa1.x1) / 2, 0.04, (r"$c = %.2f + %.2f\,(1 - " + profile_coef(mod)[0] + r") + %.2f\,(1 - \mathrm{align})$") % (c0_, profile_coef(mod)[1], mod["c_a"]), ha="center", fontsize=8.5)
     axc = fs2.add_subplot(g2[1]); R_ = cal["rows"]; lo_, hi_ = R_[:, 0].min() / 1.6, R_[:, 0].max() * 1.6
     axc.plot([lo_, hi_], [lo_, hi_], color=GREY, lw=0.8, ls=(0, (3, 2)))
     axc.errorbar(R_[:, 0], R_[:, 1], yerr=[R_[:, 1] - R_[:, 2], R_[:, 3] - R_[:, 1]], fmt="o", ms=4, color=BLUE, mec="white", mew=0.5, ecolor=BLUE, capsize=0)

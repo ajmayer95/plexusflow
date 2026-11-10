@@ -289,7 +289,7 @@ def main():
     axC.add_collection(LineCollection([segs[c] for c in np.flatnonzero(mr)],
                                       colors=[cC(nC(E[c])) for c in np.flatnonzero(mr)], linewidths=0.8, zorder=3))
     q_floor = max(vmin * 3, 3e-3)
-    # noise level = each vessel's calibrated measurement uncertainty σ_e = sqrt((c_e y_e)² + σ0²) (Fig 6b); a direction is only
+    # noise level = each vessel's calibrated measurement uncertainty σ_e = sqrt((c_e y_e)² + σ0²) (Fig 6); a direction is only
     # judged where the reconciled flow is clearly above it, |Q'| > 2σ_e
     sig_ok = np.abs(Qp) > 2 * D['sigma']
     mism = m & sig_ok & (np.sign(Qp) != np.sign(Qs))

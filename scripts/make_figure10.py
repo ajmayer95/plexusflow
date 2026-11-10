@@ -6,13 +6,15 @@ profiled objective over a D grid).
 
   a  2 × 3 maps (rows measured / RC network): pulsatility fraction (|H1|²+|H2|²)/Q̄², H1 and H2 phase lag (deg) behind the
      Fig 9 reference (ρ-weighted tile-14 dorsal-aorta + vitelline-vein stub phase, H_n in each vessel's own flow direction);
-     both rows on the same reference
+     both rows on the same reference.  Measured row: AC-eligible vessels; RC-network row: every vessel of the carved
+     network, unmeasured ones included (the model is solved everywhere)
   b  normalised-harmonic residual sqrt(Σ_k=1,2 |h_k,meas − h_k,sim|²), h_k = H_k sgn(Q̄)/|Q̄| (complex; not the classical
      PI = (Q_max − Q_min)/Q̄); examples of e marked
   c  pulsatile RMS measured vs RC network (log), with r_log, n and median H1/H2 phase errors
   d  profiled fitting objective vs D (boundary group corrections re-fitted at each D; η = 0) — a composite pseudo-likelihood,
      conditional on the radii, resistance scale and boundary model; no interval drawn
-  e  Q/Q̄ over one beat at three well-measured vessels at the 20th / 50th / 80th percentile of the harmonic residual
+  e  Q/Q̄ over one beat at three well-measured vessels (marked in b), each titled with the RC network's mean flow relative to the measured mean (Q/Q̄ divides each
+     curve by its own mean)
 SI fig10_S_distensibility: H1 lag and pulsatility fraction, measured vs the network at low / fitted / high D (boundary
 forcing held at the D̂ fit).  Writes figures/fig10/fig10[_<tag>].*; nothing to any graph.
 """
@@ -64,6 +66,8 @@ def main():
     ap.add_argument('--bc-json', default=None, help='profiled fit (D, η, boundary forcing, D profile); default results/ac_estimate_v8.json')
     ap.add_argument('--field', default='ac_field_v7', help='results/<field>.pkl (canonical 2026-10-23: ac_field_v5_cont, DA anchor + seam continuity)')
     ap.add_argument('--tag', default=None, help='output name suffix: fig10_<tag>')
+    ap.add_argument('--abs-q', action='store_true', help='panel e in nL/s (each vessel in its own flow direction, own y axis) '
+                    'instead of Q/Q̄; the model curve then also shows its mean-flow mismatch')
     args = ap.parse_args()
 
     plos_style.apply()
@@ -183,13 +187,13 @@ def main():
     gA = top[0].subgridspec(2, 3, hspace=0.05, wspace=0.04)
     gB = top[1].subgridspec(2, 1, hspace=0.62)
     bot = outer[1].subgridspec(1, 2, width_ratios=[1.0, 3.0], wspace=0.28)
-    gE = bot[1].subgridspec(1, 3, wspace=0.12)
+    gE = bot[1].subgridspec(1, 3, wspace=0.32 if args.abs_q else 0.12)
 
     nPF = mcolors.LogNorm(0.05, 0.6); cPF = plt.cm.magma
     nPH = mcolors.Normalize(-30, 330); cPH = plt.cm.twilight_shifted          # cyclic: −30° ≡ 330°
     allmask = np.ones(nE, bool); axes_A = {}
     for row, (side, pf, Hr, dcr, mask, pmask) in enumerate((('Measured', pf_m, Hm_, Qp, e, e if gcorr else ph_ok),
-                                                            ('RC network', pf_s, Hs, Qdc_s, e, e if gcorr else ph_ok))):   # same vessels as measured
+                                                            ('RC network', pf_s, Hs, Qdc_s, allmask, allmask))):   # whole carved network
         for col in range(3):
             ax = fig.add_subplot(gA[row, col]); bg(ax); axes_A[row, col] = ax
             if col == 0: edgemap(ax, pf, mask, nPF, cPF, 0.5)
@@ -244,18 +248,26 @@ def main():
     # e  waveforms, Q/Q̄ over one beat
     t = np.linspace(0, 1, 400)
     def wave(dc_, Hk):
-        return (dc_ + sum((Hk[k] * np.exp(2j * np.pi * k * t)).real for k in (1, 2))) / dc_
+        q = dc_ + sum((Hk[k] * np.exp(2j * np.pi * k * t)).real for k in (1, 2))
+        return q * np.sign(dc_) if args.abs_q else q / dc_
     axs_e = []
     for k, c in enumerate(picks):
-        ax = fig.add_subplot(gE[k], sharey=axs_e[0] if axs_e else None); axs_e.append(ax)
+        ax = fig.add_subplot(gE[k], sharey=None if args.abs_q or not axs_e else axs_e[0]); axs_e.append(ax)
         if c is None:
             ax.text(0.5, 0.5, 'not in carved network', transform=ax.transAxes, ha='center', color='red', fontsize=8); continue
-        ax.axhline(1, color='0.85', lw=0.5, zorder=1)
+        if not args.abs_q:
+            ax.axhline(1, color='0.85', lw=0.5, zorder=1)
         ax.plot(t, wave(Qp[c], {j: Hm_[j][c] for j in (1, 2)}), color='#2ca02c', lw=1.4, zorder=2, label='Measured')
         ax.plot(t, wave(Qdc_s[c], {j: Hs[j][c] for j in (1, 2)}), color='#d62728', lw=1.0, ls='--', zorder=3, label='RC network')
         ax.set_xticks([0, 0.5, 1]); ax.set_xticklabels(['0', '0.5', '1']); ax.tick_params(labelsize=8)
         ax.spines[['top', 'right']].set_visible(False)
-        if k > 0:
+        dm = 100 * (abs(Qdc_s[c]) / abs(Qp[c]) - 1)          # RC-network mean flow vs the measured (reconciled) mean
+        ax.set_title(f'Model mean {dm:+.0f} %'.replace('-', '\u2212'), fontsize=8, pad=3, color='#d62728')
+        if args.abs_q:
+            ax.set_ylim(bottom=0)
+            if k == 0:
+                ax.set_ylabel('$Q$ (nL/s)', fontsize=8, labelpad=1)
+        elif k > 0:
             ax.tick_params(labelleft=False)
         else:
             ax.set_ylabel(r'$Q/\bar Q$', fontsize=8, labelpad=1)
@@ -263,7 +275,6 @@ def main():
             ax.set_xlabel('$t/T$', fontsize=8, labelpad=1)
         ax.text(0.04, 0.95, str(k + 1), transform=ax.transAxes, ha='center', va='center', fontsize=8, fontweight='bold',
                 bbox=dict(fc='#f5d400', ec='black', lw=0.6, boxstyle='circle,pad=0.2'))
-        ax.set_title(f"{('Good', 'Typical', 'Poor')[k]} fit", fontsize=9, pad=3, loc='center')
         print(f"[fig10] e{k + 1} ({('good', 'typical', 'poor')[k]}): edge {edges[c]}, harmonic residual {pires[c]:.2f}")
     axs_e[0].legend(fontsize=8, loc='lower left', frameon=False, borderaxespad=0.1, handlelength=1.8)
 

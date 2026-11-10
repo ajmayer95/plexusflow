@@ -5,7 +5,7 @@ The representative vessel (edge 75489–75638) in its own tile (36), the tile of
      sample points), the centreline from the mapped graph and every 5th cross-section
   b  axial-speed profiles across five cross-sections and their Poiseuille fits v(ρ) = v_CL (1 − ρ²/R_s²)
   c  per-cross-section mean flux Q̄_s = (π/2) R_s² v_CL,s along the vessel (radius R_s on the right axis); the vessel's mean
-     flow is the mean of the sections within 0.5–1.5× their median (Kloosterman et al. 2014)
+     flow is the mean of the shape-valid sections (Kloosterman et al. 2014 section fits; no flow-rate band since 2026-11-09)
   d  Q(t) over the recording (250 fps) and its harmonic model Q̂(t) = Q̄ + Σ_k Re(H_k e^{2πik f0 t}), k = 1..3
   e  every beat folded on the cardiac phase (grey) against the model, and the model's fundamental / 2nd / 3rd harmonic
 
@@ -25,7 +25,7 @@ import matplotlib.patheffects as pe
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src")); sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plexusflow.paths as _paths
-from plexusflow.analyze.kloosterman import kloosterman_scalar
+from plexusflow.analyze.kloosterman import kloosterman_scalar, PRODUCTION_KW
 from plexusflow.analyze.centerline import _centerline_geometry
 from plexusflow.analyze.constants import PX_SIZE_UM, FRAME_DT_S
 from plexusflow.reconcile.harmonics import phasors, FS
@@ -34,8 +34,7 @@ import plos_style
 EDGE, TILE = (75489, 75638), 36
 INK, MEAS, MODEL, VCOL = "#1a1a1a", "#2ca02c", "#1f4e8c", "#d62728"
 HCOL = ["#1f4e8c", "#d95f02", "#7570b3"]
-KW = dict(dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="median_band", median_lo=0.5, median_hi=1.5, R_slice_lo=0.5,
-          R_slice_hi=2.0, min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0)
+KW = PRODUCTION_KW
 UMS = PX_SIZE_UM / FRAME_DT_S
 HALO = [pe.withStroke(linewidth=1.6, foreground="black")]
 

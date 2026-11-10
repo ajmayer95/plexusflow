@@ -17,10 +17,13 @@ run() { echo; echo "=== $* ==="; "$PY" "$@"; }
 
 if [[ "${1:-}" != "--figures" ]]; then
   mkdir -p "${PLEXUSFLOW_RESULTS:-$PLEXUSFLOW_STAGE/results}"
+  # (after a change of the Kloosterman section rule: python3 scripts/kl_reaggregate.py — numpy<2 — rewrites the graph first)
   run scripts/dc_reconcile.py          # reliability model + reconciled mean flows   → reliability_model_v1.json, dc_reconciled_v2.pkl
   RES="${PLEXUSFLOW_RESULTS:-$PLEXUSFLOW_STAGE/results}"
-  if [[ -d "$RES/stokes_bench/ensemble" ]]; then run scripts/benchmark/c_truth_calibration.py; fi   # c vs known truth → c_truth_calibration.json (Fig 6b)
-  run scripts/dc_validate_weighting.py # weighting validation vs repeat recordings   → dc_weighting_validation.json (Fig 6d)
+  if [[ -d "$RES/stokes_bench/ensemble" ]]; then run scripts/benchmark/c_truth_calibration.py; fi   # c vs known truth → c_truth_calibration.json (SI)
+  run scripts/dc_validate_weighting.py # validation vs repeat recordings            → dc_weighting_validation.json (SI weighting)
+  run scripts/dc_junction_calibration.py # c_k vs constant c on held-out tiles     → dc_junction_calibration.json (Fig 6b)
+  run scripts/dc_withholding_curve.py  # withhold 5–75 % of measured vessels       → dc_withholding.json (Fig 6e)
   run scripts/dc_validate_passive.py   # conservation-only vs passive-constrained      → dc_passive_comparison.json (SI)
   run scripts/benchmark/dc_reconstruction.py  # known-truth benchmark, noise × radius error → dc_synthetic_benchmark.json (SI)
   run scripts/benchmark/dc_async.py    # known-truth benchmark, tiles see different fields → dc_async_benchmark.json (SI)
@@ -32,6 +35,7 @@ for f in 1 2 3 4 5 6 7dc 7 10; do      # make_figure7dc.py = Fig 7; make_figure7
   run "scripts/make_figure$f.py"
 done
 run scripts/make_figure_S_passive.py   # SI: passive-constrained comparison (add a second stage dir for 21S + 27S)
+run scripts/make_figure_S_junction_calibration.py   # SI: junction calibration per stage, Fig 6b companion (add a second stage dir for 21S + 27S)
 run scripts/make_figure_S_synthetic_dc.py  # SI: known-truth benchmark
 run scripts/make_figure_S_async_dc.py      # SI: asynchronous acquisition / tile-scale bias
 run scripts/collect_figures.py         # copies Fig1–Fig10 to <figures>/latest/
