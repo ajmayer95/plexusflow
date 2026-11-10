@@ -250,7 +250,7 @@ def compute_of_profile_and_Q(
     # so the number of per-slice Kloosterman cross-sections scales with vessel
     # LENGTH instead of the arbitrary graph-path point density.  Short vessels
     # were getting only a handful of slices (whatever the graph stored) and
-    # failing the median-band / R² gates.  0 disables.
+    # failing the R² gate.  0 disables.
     cl_resample_px: float = 1.0,
     # Centreline refinement
     refine_centerline: bool = False,
@@ -265,9 +265,9 @@ def compute_of_profile_and_Q(
     # R_prior (True).  Default False = fitted radius (the defensible choice).
     kl_use_r_prior_area: bool = False,
     # Per-slice fitted-R sanity bounds as fractions of R_prior.  Kept LOOSE
-    # (thesis: "fitted diameter ≤ 2× the cross-section linear dimension") so
-    # railed slices are rejected by the median-flow-rate band, not pinned to a
-    # tight R cap — the median-Q gate is the intended outlier mechanism.
+    # (thesis: "fitted diameter ≤ 2× the cross-section linear dimension"); a fit
+    # that rails at a bound is rejected (R_low / R_hi) — in practice none do
+    # (2026-11-09: 0 % of rejections), shape (R²) failures dominate.
     kl_r_slice_lo: float = 0.5,
     kl_r_slice_hi: float = 2.0,
     # Velocity-relative inclusion threshold (fraction of centerline velocity)
@@ -305,7 +305,7 @@ def compute_of_profile_and_Q(
     (backwards-compatible), including the four Q variants:
       * ``Q_plug_mean``     — direct pixel-integration of v_axial × π R²
       * ``Q_pois_mean``     — R-fixed Poiseuille ``v0_fixed × π R² / 2``
-      * ``Q_kloosterman``   — per-slice Poiseuille + median-band
+      * ``Q_kloosterman``   — per-slice Poiseuille, shape-valid sign-matched sections averaged
       * plus the raw fit params: ``v0_fixed``, ``v0_free``, ``R_fit_free``,
         etc. — from which ``Q_pois_free = v0_free × π R_free² / 2`` can
         be computed downstream.
@@ -604,7 +604,7 @@ def compute_of_profile_and_Q(
         _kl = kloosterman_scalar(
             vfield_mean, cl_used, R, dt=1,
             slice_window=2, n_bins=n_bins, fit_fraction=kl_fit_fraction,
-            outlier_mode="median_band", median_lo=0.5, median_hi=1.5,
+            outlier_mode="sign",
             R_slice_lo=kl_r_slice_lo, R_slice_hi=kl_r_slice_hi,
             min_valid_slices=2,
             use_r_prior_area=kl_use_r_prior_area,
@@ -648,6 +648,7 @@ def compute_of_profile_and_Q(
         Q_kloosterman_n_valid=_kl.get("n_valid", 0),
         Q_kloosterman_per_slice=_kl.get("per_slice_Q", np.array([])),
         R_kloosterman_per_slice=_kl.get("per_slice_R", np.array([])),
+        R2_kloosterman_per_slice=_kl.get("per_slice_r2", np.array([])),
         # Time-resolved centreline velocity for downstream harmonic fits
         v0_fixed_t=per_frame_v0_fixed,
         R_used=R,

@@ -316,7 +316,7 @@ class OpticalFlowMixin:
                  (arrow length = the fitted Poiseuille profile).  Plus the
                  radial profile with all three fits.
           Fig 4  Kloosterman deep-dive  — per-slice R / V_CL / Q, the
-                 median-band gate, the reject-reason breakdown, the vessel
+                 section gates, the reject-reason breakdown, the vessel
                  with per-slice half-widths, and how (Q_char, V_CL_char,
                  R_char) are derived.
           Fig 5  Q estimators & temporal — estimator comparison, cycle Q(t),
@@ -640,7 +640,7 @@ class OpticalFlowMixin:
                         if _sh is not None else ""), fontsize=9)
         _orient(ax, H, W); ax.set_xticks([]); ax.set_yticks([])
 
-        # (1,1) per-slice Q + median-band gate  (the spatial per-slice accept/
+        # (1,1) per-slice Q + section gates  (the spatial per-slice accept/
         # reject + fitted half-widths now live in the 3D panel below — this is
         # the quantitative gate view, no longer duplicated as a 2D half-widths
         # panel).
@@ -662,12 +662,10 @@ class OpticalFlowMixin:
                                 fontsize=6, color='#666', ha='center')
         if np.isfinite(Qmed_p):
             ax.axhline(Qmed_p, color='k', lw=1.0, label=f'median {Qmed_p:.3f}')
-            ax.axhspan(0.5 * Qmed_p, 1.5 * Qmed_p, color='green', alpha=0.07,
-                       label='band [0.5,1.5]·med')
         if np.isfinite(Q_char_p):
             ax.axhline(Q_char_p, color='#1f77b4', ls='--', lw=1.6, label=f'Q_char {Q_char_p:.3f}')
         ax.set_xlabel('slice'); ax.set_ylabel('Q_slice (nL/s)')
-        ax.set_title("per-slice Q + median-band gate", fontsize=9)
+        ax.set_title("per-slice Q (shape-valid, sign-matched)", fontsize=9)
         ax.legend(fontsize=6.5); ax.grid(alpha=0.3)
 
         # (1,2) Q estimator bar
@@ -769,8 +767,8 @@ class OpticalFlowMixin:
             "──────────────────────\n"
             f"  incl: |v| > {diag.get('kl_v_incl_frac', 0.25):.2f}·v_peak"
             f" (contiguous extent → wall)\n"
-            f"  R gate [{lo:.1f},{hi:.1f}]·R_seg (loose; median-Q rejects)\n"
-            f"  outlier: |Q| in [0.5,1.5]·median, sign-matched\n"
+            f"  R gate [{lo:.1f},{hi:.1f}]·R_seg (loose)\n"
+            f"  outlier: sign-matched to the median (no flow-rate band)\n"
             f"  outcomes: {cat_str}\n"
             f"  Q_char {_f(Q_char,'{:.4f}')}   V_CL {_f(V_char,'{:.0f}')}"
             f"   R_char {_f(R_char_um,'{:.1f}')} µm"
