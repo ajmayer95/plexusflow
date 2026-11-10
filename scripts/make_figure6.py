@@ -434,6 +434,20 @@ def main():
                  fontsize=8, color=MUTED, ha="right", va="bottom")
         axR.spines[["top", "right"]].set_visible(False); axR.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.4, labelspacing=0.25, handletextpad=0.4, borderaxespad=0.1)
 
+    def draw_obs_pred(axR):
+        """observed vs predicted relative junction imbalance |r_j| / √Σy² (RMS per bin of held-out prediction); diagonal = perfect calibration"""
+        B_ = JC["by_predicted"]["calibrated"]; x = np.array(B_["predicted"]); y = np.array(B_["observed"]); ci_ = np.array(B_["observed_ci"])
+        hi = 1.1 * max(x.max(), ci_.max()); axR.plot([0, hi], [0, hi], color=GREY, lw=0.9, ls=(0, (3, 2)), zorder=1)
+        axR.text(0.97 * hi, 0.04 * hi, "dashed: perfect calibration", fontsize=8, color=MUTED, ha="right", va="bottom")
+        axR.vlines(x, ci_[:, 0], ci_[:, 1], color=BLUE, lw=1.2, zorder=2)
+        axR.plot(x, y, ls="", marker="o", ms=5.5, color=BLUE, zorder=3)
+        axR.set_xlim(0, hi); axR.set_ylim(0, hi); axR.set_aspect("equal", adjustable="box"); axR.tick_params(labelsize=8)
+        axR.set_xlabel("predicted imbalance (RMS)", fontsize=8, labelpad=1)
+        axR.set_ylabel("observed imbalance (RMS)", fontsize=8, labelpad=1)
+        axR.text(0.03, 0.97, f"{JC['n_junctions']} same-tile junctions,\nheld-out tiles", transform=axR.transAxes, fontsize=8, color=MUTED, ha="left", va="top")
+        axR.spines[["top", "right"]].set_visible(False)
+        log(f"panel b: held-out NLL constant − quality-dependent {JC['constant']['heldout_nll'] - JC['calibrated']['heldout_nll']:+.0f} (caption)")
+
     def draw_withholding(axW2):
         """withheld-vessel error vs fraction of measured vessels withheld (dc_withholding_curve.py)"""
         WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); cv = WH["curve"]
@@ -644,7 +658,7 @@ def main():
     fig.text(XB + 0.025, TA, "Reconstructed fluxes", fontsize=9, color=INK, ha="left", va="bottom")
     # a (calibration plot, top right) and c (withheld validation, bottom)
     SB, STP = 6.55 / HF, 8.3 / HF                                         # block a
-    axC2 = fig.add_axes([0.6, SB, 0.38, STP - SB]); draw_relative(axC2)
+    axC2 = fig.add_axes([0.6, SB, 0.38, STP - SB]); draw_obs_pred(axC2)
     fig.text(0.025, STP + 0.12 / HF, "Profile quality", fontsize=9, color=INK, ha="left", va="bottom")
     fig.text(0.56, STP + 0.12 / HF, "Junction calibration", fontsize=9, color=INK, ha="left", va="bottom")
     BT, TT2 = 0.42 / HF, 1.5 / HF

@@ -80,6 +80,18 @@ def main():
     R_ = out["relative"]
     log("  relative imbalance RMS by quintile: observed " + " ".join(f"{x:.3f}" for x in R_["observed"]) + " | calibrated " +
         " ".join(f"{x:.3f}" for x in R_["predicted_calibrated"]) + " | constant " + " ".join(f"{x:.3f}" for x in R_["predicted_constant"]))
+    # observed vs predicted (Fig 6b): junctions binned by their held-out PREDICTED relative imbalance σ_j / √Σ y_k²; per bin the RMS
+    # predicted and the RMS observed |r_j| / √Σ y_k² (tile-bootstrap 95 %); the diagonal is perfect calibration
+    N_B = 8; out["by_predicted"] = {}
+    for lab in sig:
+        pr = sig[lab] / S; be = np.quantile(pr, np.linspace(0, 1, N_B + 1)); bb = np.clip(np.searchsorted(be, pr, side="right") - 1, 0, N_B - 1)
+        So_ = np.zeros((len(tiles), N_B)); No_ = np.zeros((len(tiles), N_B)); np.add.at(So_, (ti, bb), rel2); np.add.at(No_, (ti, bb), 1)
+        bo = np.array([np.sqrt(So_[p_].sum(0) / np.maximum(No_[p_].sum(0), 1)) for p_ in rng.integers(0, len(tiles), (N_BOOT, len(tiles)))])
+        out["by_predicted"][lab] = dict(predicted=[float(np.sqrt(np.mean(pr[bb == b] ** 2))) for b in range(N_B)],
+                                        observed=np.sqrt(So_.sum(0) / No_.sum(0)).tolist(), observed_ci=np.percentile(bo, [2.5, 97.5], axis=0).T.tolist(),
+                                        n=No_.sum(0).astype(int).tolist())
+        B_ = out["by_predicted"][lab]
+        log(f"  observed vs predicted ({lab}): " + "  ".join(f"{p_:.2f}→{o_:.2f}" for p_, o_ in zip(B_["predicted"], B_["observed"])))
     # Kloosterman-style relative imbalance
     yin = np.array([sum(max(-s * M[(t, e)]["Q"], 0) for e, s in j) for t, j in J]); yout = np.array([sum(max(s * M[(t, e)]["Q"], 0) for e, s in j) for t, j in J])
     ok = yin > 0; delta = (yin - yout)[ok] / yin[ok]; ratio = np.bincount(idx, dc ** 2, minlength=nJ)[ok] / yin[ok] ** 2
