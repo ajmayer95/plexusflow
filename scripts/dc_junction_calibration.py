@@ -80,6 +80,11 @@ def main():
     R_ = out["relative"]
     log("  relative imbalance RMS by quintile: observed " + " ".join(f"{x:.3f}" for x in R_["observed"]) + " | calibrated " +
         " ".join(f"{x:.3f}" for x in R_["predicted_calibrated"]) + " | constant " + " ".join(f"{x:.3f}" for x in R_["predicted_constant"]))
+    # per-junction held-out standardized residuals (Fig 6a, continuous version): z under each model, the flux-weighted effective
+    # discrepancy score c_eff = √(Σ c_k² y_k² / Σ y_k²) of the production model (same ordering for both curves), the plain mean c, tile
+    c_eff = np.sqrt(np.bincount(idx, ck ** 2 * dc ** 2, minlength=nJ) / np.bincount(idx, dc ** 2, minlength=nJ))
+    out["per_junction"] = dict(z_calibrated=(net / sig["calibrated"]).tolist(), z_constant=(net / sig["constant"]).tolist(),
+                               c_eff=c_eff.tolist(), c_mean=jq.tolist(), tile=[int(t) for t in jt])
     # observed vs predicted (Fig 6b): junctions binned by their held-out PREDICTED relative imbalance σ_j / √Σ y_k²; per bin the RMS
     # predicted and the RMS observed |r_j| / √Σ y_k² (tile-bootstrap 95 %); the diagonal is perfect calibration
     N_B = 8; out["by_predicted"] = {}

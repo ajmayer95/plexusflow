@@ -48,6 +48,7 @@ import os as _os
 PATCH = int(_os.environ.get("FIG6_PATCH", PATCH)); PATCH_HOPS = int(_os.environ.get("FIG6_PATCH_HOPS", PATCH_HOPS))
 HIGH, LOW = (28304, 28329), (35992, 36030)
 PX_UM = 1.7
+SEED_FIG = 0                                       # bootstrap seed for figure bands
 KW = PRODUCTION_KW
 NEUT = "#4a6378"                                   # measured-network vessels (neutral: the rings carry the message)
 COL = ["#0072B2", "#E69F00", "#CC79A7"]          # Okabe–Ito, as fig6v3
@@ -419,6 +420,29 @@ def main():
         axE.tick_params(labelsize=8); axE.spines[["top", "right"]].set_visible(False)
         axE.legend(loc="lower right", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
 
+    def draw_calibration_cont(axE, k=600, n_boot=300):
+        """held-out standardized junction residuals, rolling RMS over the k junctions nearest in c_eff (flux-weighted effective
+        discrepancy score of the production model, same ordering for both models); tile-bootstrap 95 % bands"""
+        PJ = JC["per_junction"]; q = np.array(PJ["c_eff"]); t = np.array(PJ["tile"]); ut = np.unique(t); tix = {u: np.flatnonzero(t == u) for u in ut}
+        def roll(qq, z2):
+            o = np.argsort(qq); qq, z2 = qq[o], z2[o]; cs = np.r_[0, np.cumsum(z2)]; st = max(k // 6, 20)
+            a_ = np.arange(0, len(qq) - k + 1, st); return np.array([np.median(qq[i:i + k]) for i in a_]), np.sqrt((cs[a_ + k] - cs[a_]) / k)
+        grid = np.quantile(q, np.linspace(0.07, 0.93, 40)); rng_ = np.random.default_rng(SEED_FIG)
+        for lab, colr, ls_, name in (("z_constant", GREY, (0, (3, 2)), "constant fractional discrepancy"), ("z_calibrated", BLUE, "-", "quality-dependent")):
+            z2 = np.array(PJ[lab]) ** 2; xs, ys = roll(q, z2)
+            B = []
+            for _ in range(n_boot):
+                b = np.concatenate([tix[u] for u in rng_.choice(ut, len(ut))]); xb, yb = roll(q[b], z2[b]); B.append(np.interp(grid, xb, yb))
+            lo, hi = np.percentile(B, [2.5, 97.5], axis=0); axE.fill_between(grid, lo, hi, color=colr, alpha=0.2, lw=0, zorder=2)
+            axE.plot(xs, ys, color=colr, lw=1.4, ls=ls_, zorder=3, label=name)
+            log(f"panel a ({lab}): rolling RMS (k {k}) {ys.min():.2f}–{ys.max():.2f}")
+        axE.axhline(1, color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1, label="expected = 1")
+        axE.set_xscale("log"); axE.set_xticks([0.2, 0.3, 0.5, 0.8]); axE.set_xticklabels(["0.2", "0.3", "0.5", "0.8"]); axE.minorticks_off()
+        axE.set_xlim(grid[0] * 0.95, grid[-1] * 1.05); axE.set_ylim(0.25, 1.65); axE.tick_params(labelsize=8)
+        axE.set_xlabel("Effective discrepancy score $c_{\\mathrm{eff}}$ at junction", fontsize=9, labelpad=2)
+        axE.set_ylabel("Observed / predicted\njunction error (RMS)", fontsize=9, labelpad=2)
+        axE.spines[["top", "right"]].set_visible(False); axE.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
+
     def draw_relative(axR):
         """observed RMS relative junction imbalance |in − out| / √Σy² by quality quintile vs the scale each model predicts (held-out tiles)"""
         R_ = JC["relative"]; xq = np.arange(1, 6); ci_ = np.array(R_["observed_ci"])
@@ -713,7 +737,7 @@ def main():
     # ---- main figure, two panels: a calibration of the discrepancy model (with a same-tile junction inset), b prediction of
     #      withheld fluxes.  The reconstructed network itself is shown at organ scale in Fig 7 (pair: SI fig6_S_networks).
     HF = 2.7; fig = plt.figure(figsize=(7.5, HF), facecolor="white"); T1 = 2.5 / HF
-    axC2 = fig.add_axes([0.105, 0.52 / HF, 0.37, 1.98 / HF]); draw_calibration(axC2, big=True)
+    axC2 = fig.add_axes([0.105, 0.52 / HF, 0.37, 1.98 / HF]); draw_calibration_cont(axC2)
     axD2 = fig.add_axes([0.615, 0.52 / HF, 0.37, 1.98 / HF]); draw_withheld_fold(axD2)
     # a: one real recording (EX_TILE, EX_EDGE), rotated so the vessel runs left → right along its flow: dense time-mean optical
     #    flow inside the lumen, every Kloosterman cross-section (kept solid, rejected dashed), and the definition of c_k
