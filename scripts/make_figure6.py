@@ -664,10 +664,13 @@ def main():
     vec_rc = lambda q: np.array([vfx[int(round(q[0])), int(round(q[1]))][1], vfx[int(round(q[0])), int(round(q[1]))][0]])   # (drow, dcol)
     tdir = clx[-1] - clx[0]; tdir /= np.linalg.norm(tdir)
     profx = np.asarray(rx_["per_slice_profiles"], float); rhox = np.asarray(rx_["rho"], float)
+    from plexusflow.analyze.centerline import _centerline_geometry
+    _, _, nlx = _centerline_geometry(clx)                                    # each section's own normal (the estimator's ρ axis)
     if np.mean([vec_rc(q) @ tdir for q in clx if 0 <= q[0] < vfx.shape[0] - 0.5 and 0 <= q[1] < vfx.shape[1] - 0.5]) < 0:
-        clx, validx, r2x, profx, tdir = clx[::-1], validx[::-1], r2x[::-1], profx[::-1], -tdir      # flow runs left → right
+        clx, validx, r2x, profx, nlx, tdir = clx[::-1], validx[::-1], r2x[::-1], profx[::-1], nlx[::-1], -tdir   # flow runs left → right
     sgx = np.sign(np.nanmedian(np.asarray(rx_["per_slice_Q"], float))) or 1.0            # axial velocity positive along the flow
-    ndir = np.array([-tdir[1], tdir[0]]); org = clx[0]; us_ = (clx - org) @ tdir; Lx = float(us_[-1])
+    ndir = np.array([-tdir[1], tdir[0]]); org = clx[0]; us_ = (clx - org) @ tdir; vs_ = (clx - org) @ ndir; Lx = float(us_[-1])
+    nfr = np.column_stack([nlx @ tdir, nlx @ ndir])                          # section normals in the drawing frame
     inside = lambda q: 0 <= q[0] < vfx.shape[0] - 0.5 and 0 <= q[1] < vfx.shape[1] - 0.5
     # 3-D view: the straightened vessel is the x–y plane (image, cross-section ticks shaded by fit R², flow arrows); three
     # cross-sections (good / middle / poor fit) stand on it — measured axial velocity (points) and the fitted parabola
@@ -689,19 +692,22 @@ def main():
             if inside(q):
                 w_ = vec_rc(q); a_, b_ = w_ @ tdir, w_ @ ndir; sc_ = 9.0 / max(np.hypot(a_, b_), 1e-12)          # direction only (alignment); fixed length
                 axS.quiver(uu, vv, 0.05, a_ * sc_, b_ * sc_, 0, color="#ffc300", lw=1.3, arrow_length_ratio=0.35, zorder=2)
+    axS.plot(us_, vs_, np.full_like(us_, 0.03), color="white", lw=0.8, ls=(0, (3, 2)), zorder=2.5)    # refined centreline
     for i in picks:
-        p_ = sgx * profx[i]; okp = np.isfinite(p_) & (np.abs(rhox) <= 1.6 * Rx); x0 = us_[i]; good = r2x[i] >= 0.5; col_ = BLUE if good else "#c0392b"
-        axS.plot([x0, x0], [-1.6 * Rx, 1.6 * Rx], [0, 0], color=INK, lw=0.8, zorder=3)
-        for yy, zz in zip(rhox[okp], p_[okp] * zs):
-            axS.plot([x0, x0], [yy, yy], [0, max(zz, 0)], color="0.6", lw=0.3, zorder=3)
-        axS.scatter(np.full(okp.sum(), x0), rhox[okp], p_[okp] * zs, s=3, color=INK, depthshade=False, zorder=5)
+        p_ = sgx * profx[i]; okp = np.isfinite(p_) & (np.abs(rhox) <= 1.6 * Rx); good = r2x[i] >= 0.5; col_ = BLUE if good else "#c0392b"
+        X_ = lambda rr: us_[i] + rr * nfr[i, 0]; Y_ = lambda rr: vs_[i] + rr * nfr[i, 1]      # section line: centreline point + ρ·normal
+        x0 = us_[i]
+        axS.plot(X_(np.array([-1.6, 1.6]) * Rx), Y_(np.array([-1.6, 1.6]) * Rx), [0, 0], color=INK, lw=0.8, zorder=3)
+        for rr, zz in zip(rhox[okp], p_[okp] * zs):
+            axS.plot([X_(rr)] * 2, [Y_(rr)] * 2, [0, max(zz, 0)], color="0.6", lw=0.3, zorder=3)
+        axS.scatter(X_(rhox[okp]), Y_(rhox[okp]), p_[okp] * zs, s=3, color=INK, depthshade=False, zorder=5)
         ft = np.isfinite(p_) & (np.abs(rhox) <= Rx)
         try:
             (v0_, Rf_), _ = curve_fit(poi, rhox[ft], p_[ft], p0=[np.nanmax(p_), Rx], bounds=([0, 0.5 * Rx], [np.inf, 2 * Rx]))
-            xx = np.linspace(-Rf_, Rf_, 60); axS.plot(np.full_like(xx, x0), xx, poi(xx, v0_, Rf_) * zs, color=col_, lw=1.5, zorder=6)
+            xx = np.linspace(-Rf_, Rf_, 60); axS.plot(X_(xx), Y_(xx), poi(xx, v0_, Rf_) * zs, color=col_, lw=1.5, zorder=6)
         except Exception:
             pass
-        axS.text(x0, 0, max(np.nanmax(p_) * zs, 0) + 0.35 * Rx, f"$R^2$ {r2x[i]:.2f}", fontsize=8, color=col_, ha="center", zorder=7)
+        axS.text(x0, vs_[i], max(np.nanmax(p_) * zs, 0) + 0.35 * Rx, f"$R^2$ {r2x[i]:.2f}", fontsize=8, color=col_, ha="center", zorder=7)
     L5 = 20 / PX_UM; axS.plot([Lx - L5, Lx], [-1.85 * Rx] * 2, [0.05, 0.05], color="white", lw=2, solid_capstyle="butt", zorder=4)
     axS.text(Lx - L5 / 2, -1.85 * Rx, 0.2, "20 µm", color="white", fontsize=7, ha="center", va="bottom", zorder=4,
              path_effects=[matplotlib.patheffects.withStroke(linewidth=1.5, foreground="black")])
