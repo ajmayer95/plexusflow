@@ -738,9 +738,38 @@ def main():
     # a (calibration plot, top right) and c (withheld validation, bottom)
     # ---- main figure, two panels: a calibration of the discrepancy model (with a same-tile junction inset), b prediction of
     #      withheld fluxes.  The reconstructed network itself is shown at organ scale in Fig 7 (pair: SI fig6_S_networks).
-    HF = 2.7; fig = plt.figure(figsize=(7.5, HF), facecolor="white"); T1 = 2.5 / HF
-    axC2 = fig.add_axes([0.105, 0.52 / HF, 0.37, 1.98 / HF]); draw_calibration_cont(axC2)
-    axD2 = fig.add_axes([0.615, 0.52 / HF, 0.37, 1.98 / HF]); draw_withheld_fold(axD2)
+    HF = 6.0; fig = plt.figure(figsize=(7.5, HF), facecolor="white"); T1 = 5.82 / HF; T2 = 2.95 / HF
+    axC2 = fig.add_axes([0.105, 3.85 / HF, 0.37, 1.95 / HF]); draw_calibration_cont(axC2)
+    axD2 = fig.add_axes([0.615, 3.85 / HF, 0.37, 1.95 / HF]); draw_withheld_fold(axD2)
+    # c: worked example — the nine-vessel patch at the tile 22/26/27 overlap: every recording (tile colour), the 1/c²-weighted
+    #    aggregate (diamond) and the full-network reconciled flux Q′ (bar), signed along each vessel's reconstructed flow direction
+    axP = fig.add_axes([0.02, 0.35 / HF, 0.33, 2.45 / HF]); axQ = fig.add_axes([0.47, 0.5 / HF, 0.51, 2.3 / HF])
+    pts_ = np.vstack([toimg(np.asarray(G.edges[E[i]]["path"], float)) for i in pidx]); cx_, cy_ = pts_.mean(0); hh = 0.62 * np.ptp(pts_, axis=0).max()
+    cropP = mos[int(cy_ - hh):int(cy_ + hh), int(cx_ - hh):int(cx_ + hh)]
+    axP.imshow(mos, cmap="gray", vmin=np.percentile(cropP, 1), vmax=np.percentile(cropP, 99.5), alpha=0.55)
+    axP.set_xlim(cx_ - hh, cx_ + hh); axP.set_ylim(cy_ + hh, cy_ - hh); axP.set_aspect("equal"); axP.set_xticks([]); axP.set_yticks([])
+    for i in pidx:
+        q = toimg(np.asarray(G.edges[E[i]]["path"], float)); axP.plot(q[:, 0], q[:, 1], color=NEUT, lw=2.2, solid_capstyle="round", zorder=3)
+        mq = q[len(q) // 2]; axP.text(*mq, str(num[i]), fontsize=8, fontweight="bold", color=INK, ha="center", va="center", zorder=5,
+                                       bbox=dict(boxstyle="circle,pad=0.15", fc="white", ec=INK, lw=0.6))
+    L_ = 50 / PX_UM; xb_, yb_ = cx_ + hh - 8 - L_, cy_ + hh - 8
+    axP.plot([xb_, xb_ + L_], [yb_, yb_], color=INK, lw=2, solid_capstyle="butt", zorder=6); axP.text(xb_ + L_ / 2, yb_ - 4, "50 µm", fontsize=8, ha="center", va="bottom")
+    for k_, i in enumerate(order):
+        o_ = np.sign(Qp[i]) or 1.0; yrow = len(order) - k_
+        for (t_, q_, c_, s_) in sorted(recs[i]):
+            axQ.scatter(o_ * s_ * q_, yrow, s=26, facecolor="white", edgecolor=TCOL[t_], linewidth=1.3, zorder=3)
+        axQ.scatter(o_ * Qm[i], yrow, s=34, marker="D", color=BLUE, zorder=4)
+        axQ.plot([o_ * Qp[i]] * 2, [yrow - 0.3, yrow + 0.3], color=INK, lw=2.4, solid_capstyle="butt", zorder=5)
+    axQ.axvline(0, color="0.8", lw=0.6, zorder=1); axQ.set_yticks(range(1, len(order) + 1)); axQ.set_yticklabels([str(num[i]) for i in order[::-1]], fontsize=8)
+    axQ.set_ylim(0.4, len(order) + 0.6); axQ.set_xlim(left=min(0, axQ.get_xlim()[0])); axQ.tick_params(labelsize=8)
+    axQ.set_ylabel("Vessel", fontsize=9, labelpad=2); axQ.set_xlabel("Mean flux along the reconstructed flow direction (nL/s)", fontsize=9, labelpad=2)
+    axQ.spines[["top", "right"]].set_visible(False)
+    from matplotlib.lines import Line2D as _L2c
+    hq = [_L2c([], [], ls="", marker="o", ms=5, mfc="white", mec=TCOL[t_], mew=1.3, label=f"recording, tile {t_}") for t_ in ptiles]
+    hq += [_L2c([], [], ls="", marker="D", ms=5, color=BLUE, label="weighted mean"), _L2c([], [], color=INK, lw=2.4, label="reconciled $Q'$")]
+    axQ.legend(handles=hq, loc="lower right", frameon=False, fontsize=8, handletextpad=0.3, labelspacing=0.3, borderaxespad=0.1)
+    log("panel c: " + "; ".join(f"{num[i]}: recs " + "/".join(f"{np.sign(Qp[i]) * s_ * q_:+.3f}" for (_, q_, _, s_) in sorted(recs[i]))
+                                 + f", mean {np.sign(Qp[i]) * Qm[i]:+.3f}, Q′ {abs(Qp[i]):.3f}" for i in order))
     # a: one real recording (EX_TILE, EX_EDGE), rotated so the vessel runs left → right along its flow: dense time-mean optical
     #    flow inside the lumen, every Kloosterman cross-section (kept solid, rejected dashed), and the definition of c_k
     from scipy.ndimage import map_coordinates
@@ -840,7 +869,7 @@ def main():
     plos_style.save(figJ, OUT.parent / "fig6_S_junction"); log("wrote fig6_S_junction (example same-tile junction)")
     log(f"caption: junction in {sum(yin_):.3f} ({' + '.join(f'{v_:.3f}' for v_ in yin_)}), out {sum(yout_):.3f}, |r_j| {abs(rj):.3f} ({100 * abs(rj) / qin_:.0f} %)")
     log(f"panel a formula (caption): c = {c0f:.2f} + {cff:.2f}(1 − {pterm}) + {caf:.2f}(1 − a) = {cx:.2f}; p = {np.mean(r2x):.3f} (stored {mx.get('p', float('nan')):.3f})")
-    for x_, y_, l_ in ((0.0, T1, "a"), (0.51, T1, "b")):  # panel letters only; the caption names the results
+    for x_, y_, l_ in ((0.0, T1, "a"), (0.51, T1, "b"), (0.0, T2, "c")):  # panel letters only; the caption names the results
         fig.text(x_, y_ - 0.004, l_, **LET)
     plos_style.save(fig, OUT)
     figD = plt.figure(figsize=(3.6, 3.2), facecolor="white"); draw_obs_pred(figD.add_axes([0.2, 0.17, 0.75, 0.75]))   # SI: diagonal calibration
