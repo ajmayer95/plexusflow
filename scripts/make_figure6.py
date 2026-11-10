@@ -420,27 +420,29 @@ def main():
         axE.tick_params(labelsize=8); axE.spines[["top", "right"]].set_visible(False)
         axE.legend(loc="lower right", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
 
-    def draw_calibration_cont(axE, k=600, n_boot=300):
+    def draw_calibration_cont(axE, k=900, n_boot=300):
         """held-out standardized junction residuals, rolling RMS over the k junctions nearest in c_eff (flux-weighted effective
         discrepancy score of the production model, same ordering for both models); tile-bootstrap 95 % bands"""
         PJ = JC["per_junction"]; q = np.array(PJ["c_eff"]); t = np.array(PJ["tile"]); ut = np.unique(t); tix = {u: np.flatnonzero(t == u) for u in ut}
         def roll(qq, z2):
             o = np.argsort(qq); qq, z2 = qq[o], z2[o]; cs = np.r_[0, np.cumsum(z2)]; st = max(k // 6, 20)
             a_ = np.arange(0, len(qq) - k + 1, st); return np.array([np.median(qq[i:i + k]) for i in a_]), np.sqrt((cs[a_ + k] - cs[a_]) / k)
-        grid = np.quantile(q, np.linspace(0.07, 0.93, 40)); rng_ = np.random.default_rng(SEED_FIG)
+        xs0, _ = roll(q, np.ones_like(q)); grid = np.geomspace(xs0[0], xs0[-1], 40); rng_ = np.random.default_rng(SEED_FIG)   # bands on the curve's own range
         for lab, colr, ls_, name in (("z_constant", GREY, (0, (3, 2)), "constant fractional discrepancy"), ("z_calibrated", BLUE, "-", "quality-dependent")):
             z2 = np.array(PJ[lab]) ** 2; xs, ys = roll(q, z2)
             B = []
             for _ in range(n_boot):
                 b = np.concatenate([tix[u] for u in rng_.choice(ut, len(ut))]); xb, yb = roll(q[b], z2[b]); B.append(np.interp(grid, xb, yb))
-            lo, hi = np.percentile(B, [2.5, 97.5], axis=0); axE.fill_between(grid, lo, hi, color=colr, alpha=0.2, lw=0, zorder=2)
+            lo, hi = np.percentile(B, [2.5, 97.5], axis=0); axE.fill_between(grid, lo, hi, color=colr, alpha=0.12 if lab == "z_constant" else 0.2, lw=0, zorder=2)
             axE.plot(xs, ys, color=colr, lw=1.4, ls=ls_, zorder=3, label=name)
             log(f"panel a ({lab}): rolling RMS (k {k}) {ys.min():.2f}–{ys.max():.2f}")
         axE.axhline(1, color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1, label="expected = 1")
         axE.set_xscale("log"); axE.set_xticks([0.2, 0.3, 0.5, 0.8]); axE.set_xticklabels(["0.2", "0.3", "0.5", "0.8"]); axE.minorticks_off()
-        axE.set_xlim(grid[0] * 0.95, grid[-1] * 1.05); axE.set_ylim(0.25, 1.65); axE.tick_params(labelsize=8)
-        axE.set_xlabel("Effective discrepancy score $c_{\\mathrm{eff}}$ at junction", fontsize=9, labelpad=2)
-        axE.set_ylabel("Observed / predicted\njunction error (RMS)", fontsize=9, labelpad=2)
+        axE.set_xlim(grid[0] * 0.93, grid[-1] * 1.07); axE.set_ylim(0.25, 1.65); axE.tick_params(labelsize=8)
+        axE.set_xlabel("Junction measurement-quality score $c_{j,\\mathrm{eff}}$", fontsize=9, labelpad=2)
+        axE.set_ylabel("RMS standardized\njunction imbalance", fontsize=9, labelpad=2)
+        axE.text(0.0, -0.2, "more reliable", transform=axE.transAxes, fontsize=8, color=MUTED, ha="left", va="top")
+        axE.text(1.0, -0.2, "less reliable", transform=axE.transAxes, fontsize=8, color=MUTED, ha="right", va="top")
         axE.spines[["top", "right"]].set_visible(False); axE.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
 
     def draw_relative(axR):
@@ -478,11 +480,11 @@ def main():
         WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); cv = WH["curve"]; rp_ = WH["repeat"]
         x = np.array([100 * c_["frac"] for c_ in cv]); y = np.exp([c_["err"] for c_ in cv]); ci_ = np.exp(np.array([c_["err_ci"] for c_ in cv]))
         axW2.axhspan(*np.exp(rp_["err_ci"]), color=GREY, alpha=0.18, lw=0, zorder=1)
-        axW2.axhline(np.exp(rp_["err"]), color=GREY, lw=1.0, ls=(0, (3, 2)), zorder=2, label="Repeat recordings")
+        axW2.axhline(np.exp(rp_["err"]), color=GREY, lw=1.0, ls=(0, (3, 2)), zorder=2, label="Repeat-recording disagreement")
         axW2.fill_between(x, ci_[:, 0], ci_[:, 1], color=BLUE, alpha=0.18, lw=0, zorder=2)
         axW2.plot(x, y, color=BLUE, lw=1.3, marker="D", ms=4.5, zorder=3, label="Reconstruction")
         axW2.set_xlim(0, 78); axW2.set_ylim(1, 2.25); axW2.set_xticks([0, 25, 50, 75]); axW2.set_yticks([1, 1.25, 1.5, 1.75, 2, 2.25])
-        axW2.set_yticklabels(["×1", "×1.25", "×1.5", "×1.75", "×2", ""]); axW2.tick_params(labelsize=8)
+        axW2.set_yticklabels(["1", "1.25", "1.5", "1.75", "2", ""]); axW2.tick_params(labelsize=8)
         axW2.set_xlabel("Vessel measurements withheld (%)", fontsize=9, labelpad=2)
         axW2.set_ylabel("Median prediction\nerror (fold)", fontsize=9, labelpad=2)
         axW2.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1); axW2.spines[["top", "right"]].set_visible(False)
