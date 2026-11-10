@@ -655,6 +655,7 @@ def main():
     # a: one real recording (EX_TILE, EX_EDGE), rotated so the vessel runs left → right along its flow: dense time-mean optical
     #    flow inside the lumen, every Kloosterman cross-section (kept solid, rejected dashed), and the definition of c_k
     from scipy.ndimage import map_coordinates
+    from scipy.optimize import curve_fit
     c0f, (pterm, cff), caf = mod["c0"], profile_coef(mod), mod["c_a"]
     klx = pickle.load(gzip.open(ST / "batch_kl_inputs" / f"tile_{EX_TILE}.pkl.gz"))["kl_inputs"]; kx = klx.get(EX_EDGE) or klx.get(EX_EDGE[::-1])
     imx = tifffile.imread(str(ST / "tiles" / "maxmed" / f"vid{EX_TILE}_maxmed.tif")).astype(float); imx = imx.mean(-1) if imx.ndim == 3 else imx
@@ -664,42 +665,59 @@ def main():
     mx = M.get((EX_TILE, EX_EDGE)) or M.get((EX_TILE, EX_EDGE[::-1])); fx, ax_, cx = mx["f"], mx["align"], c_of(mod, mx)
     vec_rc = lambda q: np.array([vfx[int(round(q[0])), int(round(q[1]))][1], vfx[int(round(q[0])), int(round(q[1]))][0]])   # (drow, dcol)
     tdir = clx[-1] - clx[0]; tdir /= np.linalg.norm(tdir)
+    profx = np.asarray(rx_["per_slice_profiles"], float); rhox = np.asarray(rx_["rho"], float)
     if np.mean([vec_rc(q) @ tdir for q in clx if 0 <= q[0] < vfx.shape[0] - 0.5 and 0 <= q[1] < vfx.shape[1] - 0.5]) < 0:
-        clx, validx, r2x, tdir = clx[::-1], validx[::-1], r2x[::-1], -tdir                          # flow runs left → right
-    ndir = np.array([-tdir[1], tdir[0]]); org = clx[0]
-    Lx = float((clx[-1] - org) @ tdir); u_ = np.arange(-0.6 * Rx, Lx + 0.6 * Rx, 0.5); v_ = np.arange(-2.15 * Rx, 1.75 * Rx, 0.5)
-    UU, VV = np.meshgrid(u_, v_); pr = org[0] + UU * tdir[0] + VV * ndir[0] + offx[0]; pc = org[1] + UU * tdir[1] + VV * ndir[1] + offx[1]
-    rot = map_coordinates(imx, [pr, pc], order=1)
-    axS = fig.add_axes([0.03, 7.12 / HF, 0.5, 1.18 / HF]); axS.set_aspect("equal", anchor="SW")
-    axS.imshow(rot, cmap="gray", origin="lower", extent=[u_[0], u_[-1], v_[0], v_[-1]], vmin=np.percentile(rot, 1), vmax=np.percentile(rot, 99.5), alpha=0.75)
-    axS.set_xlim(u_[0], u_[-1]); axS.set_ylim(v_[0], v_[-1]); axS.set_xticks([]); axS.set_yticks([])
-    for s_ in axS.spines.values():
-        s_.set_visible(False)
-    us_ = (clx - org) @ tdir                                                     # cross-sections, every one Kloosterman used
-    cmap_r2 = mcolors.LinearSegmentedColormap.from_list("r2", ["#e6e6e6", BLUE])
-    for uu, ok_ in zip(us_, r2x):                                                # one tick per cross-section, shaded by its fit R²
-        for sg_ in (-1, 1):
-            axS.plot([uu, uu], [sg_ * 1.05 * Rx, sg_ * 1.45 * Rx], color=cmap_r2(ok_), lw=0.9, solid_capstyle="butt", zorder=3)
-    for sg_ in (-1, 1):
-        axS.plot([us_[0], us_[-1]], [sg_ * Rx, sg_ * Rx], color="white", lw=0.6, alpha=0.8, zorder=3)
-    gu, gv = np.meshgrid(np.arange(1.5, Lx - 1, 5.0), np.arange(-0.75 * Rx, 0.76 * Rx, 0.25 * Rx)); A_, B_ = [], []
-    for uu, vv in zip(gu.ravel(), gv.ravel()):
-        q = org + uu * tdir + vv * ndir
-        if 0 <= q[0] < vfx.shape[0] - 0.5 and 0 <= q[1] < vfx.shape[1] - 0.5:
-            w_ = vec_rc(q); A_.append((uu, vv)); B_.append((w_ @ tdir, w_ @ ndir))
-    A_, B_ = np.array(A_), np.array(B_); sc_ = 4.2 / np.percentile(np.linalg.norm(B_, axis=1), 90)
-    axS.quiver(A_[:, 0], A_[:, 1], B_[:, 0] * sc_, B_[:, 1] * sc_, angles="xy", scale_units="xy", scale=1, color="#ffd23f", edgecolor=INK,
-               linewidth=0.3, width=0.006, headwidth=3.5, headlength=3.5, headaxislength=3, pivot="middle", zorder=4)
-    axS.plot([us_[0], us_[-1]], [0, 0], color="white", lw=0.6, ls=(0, (3, 3)), zorder=3.5)
-    L5 = 20 / PX_UM; axS.plot([u_[-1] - 2 - L5, u_[-1] - 2], [v_[0] + 3.0] * 2, color="white", lw=2, solid_capstyle="butt", zorder=6)
-    axS.text(u_[-1] - 4 - L5 - 1.5, v_[0] + 3.0, "20 µm", color="white", fontsize=8, ha="right", va="center", zorder=6,
-             path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="black")])
-    log(f"panel a: tile {EX_TILE} {EX_EDGE}: kept {validx.sum()}/{len(validx)} (f {fx:.3f}), align {ax_:.3f}, c {cx:.3f}; {len(A_)} flow arrows")
-    axS.apply_aspect(); pS = axS.get_position(); xt_ = pS.x0 + 0.01
-    fig.text(xt_, pS.y0 - 0.03 / HF, "ticks: cross-sections, shaded by parabolic fit $R^2$", fontsize=8, color=MUTED, ha="left", va="top")
-    yy_ = pS.y0 - 0.33 / HF
-    fig.text(xt_, yy_, f"parabolicity $p$ = {np.mean(r2x):.2f}     alignment $a$ = {ax_:.2f}", fontsize=9, color=INK, ha="left", va="center")
-    fig.text(xt_, yy_ - 0.22 / HF, f"→  calibrated discrepancy scale  $c$ = {cx:.2f}", fontsize=9, color=INK, ha="left", va="center")
+        clx, validx, r2x, profx, tdir = clx[::-1], validx[::-1], r2x[::-1], profx[::-1], -tdir      # flow runs left → right
+    sgx = np.sign(np.nanmedian(np.asarray(rx_["per_slice_Q"], float))) or 1.0            # axial velocity positive along the flow
+    ndir = np.array([-tdir[1], tdir[0]]); org = clx[0]; us_ = (clx - org) @ tdir; Lx = float(us_[-1])
+    inside = lambda q: 0 <= q[0] < vfx.shape[0] - 0.5 and 0 <= q[1] < vfx.shape[1] - 0.5
+    # 3-D view: the straightened vessel is the x–y plane (image, cross-section ticks shaded by fit R², flow arrows); three
+    # cross-sections (good / middle / poor fit) stand on it — measured axial velocity (points) and the fitted parabola
+    u_ = np.arange(-0.6 * Rx, Lx + 0.6 * Rx, 1.0); v_ = np.arange(-2.0 * Rx, 2.0 * Rx + 0.1, 1.0); UU, VV = np.meshgrid(u_, v_)
+    rot = map_coordinates(imx, [org[0] + UU * tdir[0] + VV * ndir[0] + offx[0], org[1] + UU * tdir[1] + VV * ndir[1] + offx[1]], order=1)
+    gim = np.clip(0.35 + 0.6 * (rot - np.percentile(rot, 1)) / (np.percentile(rot, 99.5) - np.percentile(rot, 1)), 0, 1)
+    cand = np.arange(8, len(us_) - 8); picks = []
+    for tgt in (0.95, 0.6, 0.25):                                              # spread along the vessel
+        ok_ = [i for i in cand if all(abs(i - a_) > len(us_) // 5 for a_ in picks) and np.isfinite(profx[i]).sum() > 8]
+        picks.append(min(ok_, key=lambda i: abs(r2x[i] - tgt)))
+    picks = sorted(picks, key=lambda i: us_[i]); poi = lambda x, v0, Rf: v0 * np.maximum(0.0, 1 - (x / Rf) ** 2)
+    zs = 2.6 * Rx / np.nanmax([np.nanmax(sgx * profx[i]) for i in picks]); cmap_r2 = mcolors.LinearSegmentedColormap.from_list("r2", ["#d9d9d9", BLUE])
+    axS = fig.add_axes([0.07, 6.42 / HF, 0.5, 2.0 / HF], projection="3d", computed_zorder=False)
+    axS.plot_surface(UU, VV, np.zeros_like(UU), facecolors=plt.cm.gray(gim), rstride=1, cstride=1, linewidth=0, antialiased=False, shade=False, zorder=0)
+    for uu, q2 in zip(us_, r2x):
+        for s_ in (-1, 1):
+            axS.plot([uu, uu], [s_ * 1.05 * Rx, s_ * 1.45 * Rx], [0.02, 0.02], color=cmap_r2(q2), lw=0.7, zorder=1)
+    vmx = np.nanmax(np.linalg.norm(vfx, axis=-1))
+    for uu in np.arange(4, Lx - 12, 16.0):
+        for vv in (-0.5 * Rx, 0.5 * Rx):
+            q = org + uu * tdir + vv * ndir
+            if inside(q):
+                w_ = vec_rc(q); a_, b_ = w_ @ tdir, w_ @ ndir; sc_ = 9.0 / max(np.hypot(a_, b_), 1e-12)          # direction only (alignment); fixed length
+                axS.quiver(uu, vv, 0.05, a_ * sc_, b_ * sc_, 0, color="#ffc300", lw=1.3, arrow_length_ratio=0.35, zorder=2)
+    for i in picks:
+        p_ = sgx * profx[i]; okp = np.isfinite(p_) & (np.abs(rhox) <= 1.6 * Rx); x0 = us_[i]; good = r2x[i] >= 0.5; col_ = BLUE if good else "#c0392b"
+        axS.plot([x0, x0], [-1.6 * Rx, 1.6 * Rx], [0, 0], color=INK, lw=0.8, zorder=3)
+        for yy, zz in zip(rhox[okp], p_[okp] * zs):
+            axS.plot([x0, x0], [yy, yy], [0, max(zz, 0)], color="0.6", lw=0.3, zorder=3)
+        axS.scatter(np.full(okp.sum(), x0), rhox[okp], p_[okp] * zs, s=3, color=INK, depthshade=False, zorder=5)
+        ft = np.isfinite(p_) & (np.abs(rhox) <= Rx)
+        try:
+            (v0_, Rf_), _ = curve_fit(poi, rhox[ft], p_[ft], p0=[np.nanmax(p_), Rx], bounds=([0, 0.5 * Rx], [np.inf, 2 * Rx]))
+            xx = np.linspace(-Rf_, Rf_, 60); axS.plot(np.full_like(xx, x0), xx, poi(xx, v0_, Rf_) * zs, color=col_, lw=1.5, zorder=6)
+        except Exception:
+            pass
+        axS.text(x0, 0, max(np.nanmax(p_) * zs, 0) + 0.35 * Rx, f"$R^2$ {r2x[i]:.2f}", fontsize=8, color=col_, ha="center", zorder=7)
+    L5 = 20 / PX_UM; axS.plot([Lx - L5, Lx], [-1.85 * Rx] * 2, [0.05, 0.05], color="white", lw=2, solid_capstyle="butt", zorder=4)
+    axS.text(Lx - L5 / 2, -1.85 * Rx, 0.2, "20 µm", color="white", fontsize=7, ha="center", va="bottom", zorder=4,
+             path_effects=[matplotlib.patheffects.withStroke(linewidth=1.5, foreground="black")])
+    axS.set_box_aspect((Lx + 1.2 * Rx, 4 * Rx, 3.2 * Rx), zoom=1.08); axS.view_init(elev=22, azim=-58); axS.set_axis_off()
+    axS.set_xlim(u_[0], u_[-1]); axS.set_ylim(v_[0], v_[-1]); axS.set_zlim(0, 3.2 * Rx)
+    log(f"panel a: tile {EX_TILE} {EX_EDGE}: kept {validx.sum()}/{len(validx)} (f {fx:.3f}), align {ax_:.3f}, c {cx:.3f}; example sections "
+        + ", ".join(f"{int(i)} (R² {r2x[i]:.2f})" for i in picks))
+    xt_ = 0.04; yy_ = 8.12 / HF
+    fig.text(xt_, yy_, f"parabolicity $p$ = {np.mean(r2x):.2f}  (mean section $R^2$)", fontsize=9, color=INK, ha="left", va="center")
+    fig.text(xt_, yy_ - 0.2 / HF, f"alignment $a$ = {ax_:.2f}", fontsize=9, color=INK, ha="left", va="center")
+    fig.text(xt_, yy_ - 0.4 / HF, f"→  discrepancy scale $c$ = {cx:.2f}", fontsize=9, color=INK, ha="left", va="center")
     log(f"panel a formula (caption): c = {c0f:.2f} + {cff:.2f}(1 − {pterm}) + {caf:.2f}(1 − a) = {cx:.2f}; p = {np.mean(r2x):.3f} (stored {mx.get('p', float('nan')):.3f})")
     for y_, l_ in ((STP + 0.12 / HF, "a"), (TB, "b"), (TT2 + 0.12 / HF, "c")):
         fig.text(0.0, y_ - 0.004, l_, **LET)
