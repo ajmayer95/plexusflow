@@ -48,6 +48,7 @@ PATCH = int(_os.environ.get("FIG6_PATCH", PATCH)); PATCH_HOPS = int(_os.environ.
 HIGH, LOW = (28304, 28329), (35992, 36030)
 PX_UM = 1.7
 KW = PRODUCTION_KW
+NEUT = "#4a6378"                                   # measured-network vessels (neutral: the rings carry the message)
 COL = ["#0072B2", "#E69F00", "#CC79A7"]          # Okabe–Ito, as fig6v3
 LOWCOL = "#009E73"
 INK, MUTED = "#1a1a1a", "#6b6b6b"
@@ -421,7 +422,7 @@ def main():
     def draw_relative(axR):
         """observed RMS relative junction imbalance |in − out| / √Σy² by quality quintile vs the scale each model predicts (held-out tiles)"""
         R_ = JC["relative"]; xq = np.arange(1, 6); ci_ = np.array(R_["observed_ci"])
-        axR.plot(xq, R_["predicted_constant"], color=GREY, lw=1.4, ls=(0, (3, 2)), marker="s", ms=5, label="constant-error model", zorder=2)
+        axR.plot(xq, R_["predicted_constant"], color=GREY, lw=1.4, ls=(0, (3, 2)), marker="s", ms=5, label="constant fractional-discrepancy model", zorder=2)
         axR.plot(xq, R_["predicted_calibrated"], color=BLUE, lw=1.6, marker="o", ms=5, mfc="white", mew=1.4, label="quality-dependent model", zorder=3)
         axR.vlines(xq, ci_[:, 0], ci_[:, 1], color=INK, lw=1.2, zorder=4)
         axR.plot(xq, R_["observed"], ls="", marker="o", ms=6.5, color=INK, label="measured imbalance", zorder=5)
@@ -440,20 +441,19 @@ def main():
         rp = WH["repeat"]
         axW2.axhspan(*rp["err_ci"], color=GREY, alpha=0.18, lw=0, zorder=1)
         axW2.axhline(rp["err"], color=GREY, lw=1.0, ls=(0, (3, 2)), zorder=2)
-        axW2.text(77, rp["err_ci"][0] - 0.015, "disagreement between repeat recordings", fontsize=8, color=MUTED, ha="right", va="top")
         axW2.fill_between(x, ci_[:, 0], ci_[:, 1], color=BLUE, alpha=0.18, lw=0, zorder=2)
         axW2.plot(x, y, color=BLUE, lw=1.6, marker="D", ms=5.5, zorder=3, label="reconstructed, vessel withheld")
         from matplotlib.patches import Patch as _Pt
-        axW2.legend(handles=[(_Pt(color=BLUE, alpha=0.18, lw=0), matplotlib.lines.Line2D([], [], color=BLUE, lw=1.6, marker="D", ms=5))],
-                    labels=["reconstructed withheld vessels (95 % CI)"], loc="upper left", frameon=False, fontsize=8, handlelength=2.0, borderaxespad=0.1)
-        axW2.text(0.98, 0.97, f"direction agreement: {100 * cv[0]['dir']:.0f} % → {100 * cv[-1]['dir']:.0f} %", transform=axW2.transAxes,
-                  fontsize=8, color=BLUE, ha="right", va="top")
+        axW2.legend(handles=[(_Pt(color=BLUE, alpha=0.18, lw=0), matplotlib.lines.Line2D([], [], color=BLUE, lw=1.6, marker="D", ms=5)),
+                             (_Pt(color=GREY, alpha=0.18, lw=0), matplotlib.lines.Line2D([], [], color=GREY, lw=1.0, ls=(0, (3, 2))))],
+                    labels=["reconstruction, withheld vessels (95 % CI)", "independent recordings of the same vessel"], loc="upper left", frameon=False, fontsize=8, handlelength=2.0, borderaxespad=0.1)
+        log(f"caption: direction agreement {100 * cv[0]['dir']:.0f} % (5 % withheld) → {100 * cv[-1]['dir']:.0f} % (75 %)")
         un = D["metrics"]["contracted"]; fu = 100 * un["n_unimaged"] / un["n_vessels"]
         axW2.axvline(fu, color=INK, lw=0.8, ls=":", zorder=1)
-        axW2.text(fu + 1.2, 0.04, f"already unmeasured: {fu:.0f} %", fontsize=8, color=INK, ha="left", va="bottom")
+        log(f"caption: dotted line = vessels already unmeasured ({fu:.0f} %)")
         axW2.set_xlim(0, 78); axW2.set_ylim(0, 0.95); axW2.set_xticks([0, 25, 50, 75]); axW2.tick_params(labelsize=8)
-        axW2.set_xlabel("measured vessels withheld (%)", fontsize=8, labelpad=1)
-        axW2.set_ylabel("disagreement with\nindependent measurements\n(median |log ratio|)", fontsize=8, labelpad=2)
+        axW2.set_xlabel("additional vessel measurements withheld (%)", fontsize=8, labelpad=1)
+        axW2.set_ylabel("median |log flux\ndiscrepancy|", fontsize=8, labelpad=2)
         axW2.spines[["top", "right"]].set_visible(False)
 
     def draw_check(axF):
@@ -583,18 +583,18 @@ def main():
     # d reconciled network (conservation imposed) → e independent validation on withheld measurements
     HF = 8.75                                                            # figure height (in); layout below in inches / HF
     fig = plt.figure(figsize=(7.5, HF), facecolor="white")
-    W_, H_ = 0.42, 0.42 * 7.5 / HF; YM = 2.66 / HF; XA, XB = 0.045, 0.535
+    W_, H_ = 0.42, 0.42 * 7.5 / HF; YM = 2.55 / HF; XA, XB = 0.045, 0.525     # block b: the two maps (≈ half the height)
     axA = fig.add_axes([XA, YM, W_, H_]); axB = fig.add_axes([XB, YM, W_, H_])
     crop2 = mos[int(ctr[1] - hw):int(ctr[1] + hw), int(ctr[0] - hw):int(ctr[0] + hw)]; lo2, hi2 = np.percentile(crop2[crop2 > 0], (1, 99.5))
     for ax in (axA, axB):
-        ax.imshow(mos, cmap="gray", vmin=lo2, vmax=hi2 * 1.2, interpolation="antialiased", alpha=0.2)
+        ax.imshow(mos, cmap="gray", vmin=lo2, vmax=hi2 * 1.2, interpolation="antialiased", alpha=0.13)
         ax.set_xlim(ctr[0] - hw, ctr[0] + hw); ax.set_ylim(ctr[1] + hw, ctr[1] - hw); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
         for s_ in ax.spines.values():
             s_.set_color("0.75"); s_.set_linewidth(0.5)
     for i in reg:
         q = rpath[i]
         if im[i]:
-            axA.plot(q[:, 0], q[:, 1], color=cmap_c(norm_c(D["c"][i])), lw=lw_q(Qm[i]), solid_capstyle="round", zorder=3)
+            axA.plot(q[:, 0], q[:, 1], color=NEUT, lw=lw_q(Qm[i]), solid_capstyle="round", zorder=3)
             axB.plot(q[:, 0], q[:, 1], color=cmap_r(norm_r(corr[i])), lw=lw_q(Qp[i]), solid_capstyle="round", zorder=3)
         else:
             axA.plot(q[:, 0], q[:, 1], color="0.45", lw=0.9, ls=(0, (1.2, 1.2)), zorder=3)
@@ -621,36 +621,37 @@ def main():
         ax.add_patch(matplotlib.patches.Rectangle((xb_ - 5, yb_ - 24), L_ + 10, 30, fc="white", ec="none", alpha=0.85, zorder=7.9))
         ax.plot([xb_, xb_ + L_], [yb_, yb_], color=INK, lw=2.2, solid_capstyle="butt", zorder=8)
         ax.text(xb_ + L_ / 2, yb_ - 5, "50 µm", color=INK, fontsize=8, ha="center", va="bottom", zorder=8)
-    # keys: circle sizes (a), widths (b), colour bars below
+    # keys below the maps (nothing drawn over the network); median values go to the caption
     from matplotlib.lines import Line2D
     med_r = float(np.median([abs(j[1]) for j in rjun])); med_q = float(np.median(np.abs(Qp[reg])))
-    axA.legend(handles=[Line2D([], [], ls="", marker="o", ms=np.sqrt(rsc * med_r), mfc="none", mec=PINK, mew=1.0,
-                               label=f"ring: junction imbalance |in − out|\n(area; median {med_r:.3f} nL/s)")]
-                       + ([Line2D([], [], ls="", marker="s", ms=6, mfc="white", mec=INK, mew=1.1, label="network boundary (flow in / out)")] if rb else [])
-                       + ([Line2D([], [], color=EXSTY["color"], lw=EXSTY["lw"], ls=EXSTY["ls"], label="not reconstructed (porous region)")] if exE else []),
-               fontsize=8, loc="upper left", frameon=True, framealpha=0.9, edgecolor="none", handletextpad=0.6, borderpad=0.5)
-    axB.legend(handles=[Line2D([], [], color="0.35", lw=lw_q(med_q), solid_capstyle="butt", label=f"median vessel |flow|, {med_q:.3f} nL/s"),
-                        Line2D([], [], color="white", lw=3.0, path_effects=[matplotlib.patheffects.withStroke(linewidth=4.4, foreground="black")],
-                               label="not imaged (imputed)")][:2 if any(not im[i] for i in reg) else 1],
-               fontsize=8, loc="upper left", frameon=True, framealpha=0.9, edgecolor="none", handlelength=2.2, handletextpad=0.6, borderpad=0.5)
-    caxA = fig.add_axes([XA + 0.12 * W_, YM - 0.27 / HF, 0.76 * W_, 0.08 / HF]); cbA = fig.colorbar(cm.ScalarMappable(norm_c, cmap_c), cax=caxA, orientation="horizontal", extend="max")
-    cbA.set_label("vessel colour: reliability $c_k$ of the aggregated input (larger = less reliable)", fontsize=8, labelpad=1); cbA.ax.tick_params(labelsize=8)
-    caxB = fig.add_axes([XB + 0.12 * W_, YM - 0.27 / HF, 0.76 * W_, 0.08 / HF]); cbB = fig.colorbar(cm.ScalarMappable(norm_r, cmap_r), cax=caxB, orientation="horizontal", extend="both")
-    cbB.set_ticks([-1.5, -1, 0, 1, 1.5]); cbB.set_ticklabels(["", "×½", "×1", "×2", ""]); cbB.set_label("reconstructed / measured flux (magnitude)", fontsize=8, labelpad=1); cbB.ax.tick_params(labelsize=8)
+    log(f"caption: median junction imbalance (measured, in view) {med_r:.3f} nL/s; median vessel |flow| {med_q:.3f} nL/s")
+    hA = [Line2D([], [], color=NEUT, lw=2.4, label=r"vessel width $\propto$ |flux|"),
+          Line2D([], [], ls="", marker="o", ms=9, mfc="none", mec=PINK, mew=1.0, label=r"ring area $\propto$ junction imbalance")]
+    hA += ([Line2D([], [], ls="", marker="s", ms=6, mfc="white", mec=INK, mew=1.1, label="network boundary")] if rb else [])
+    hA += ([Line2D([], [], color=EXSTY["color"], lw=EXSTY["lw"], ls=EXSTY["ls"], label="not reconstructed")] if exE else [])
+    fig.legend(handles=hA, loc="upper center", bbox_to_anchor=(XA + W_ / 2, YM - 0.04 / HF), ncol=2, frameon=False, fontsize=8,
+               handlelength=1.8, handletextpad=0.5, columnspacing=1.2)
+    caxB = fig.add_axes([XB + 0.12 * W_, YM - 0.24 / HF, 0.76 * W_, 0.075 / HF]); cbB = fig.colorbar(cm.ScalarMappable(norm_r, cmap_r), cax=caxB, orientation="horizontal", extend="both")
+    cbB.set_ticks([-1.5, -1, 0, 1, 1.5]); cbB.set_ticklabels(["", "×½", "×1", "×2", ""]); cbB.set_label("change in flux magnitude (reconciled / measured)", fontsize=8, labelpad=1); cbB.ax.tick_params(labelsize=8)
     cbB.ax.text(0.0, 1.15, "decreased", transform=cbB.ax.transAxes, fontsize=8, color="#542788", ha="left", va="bottom")
     cbB.ax.text(1.0, 1.15, "increased", transform=cbB.ax.transAxes, fontsize=8, color="#b35806", ha="right", va="bottom")
-    TA = YM + H_ + 0.06 / HF
-    fig.text(XA, TA, f"Asynchronous measurements violate conservation ({len({t_ for i in reg if im[i] for t_, *_ in recs_all.get(i, [])})} tiles)",
-             fontsize=9, color=INK, ha="left", va="bottom")
-    fig.text(XB, TA, "A reconciled reference field satisfies conservation", fontsize=9, color=INK, ha="left", va="bottom")
-    fig.text(0.5, TA + 0.25 / HF, AGG_TEXT, fontsize=8.5, color=INK, ha="center", va="bottom")
-    # b (calibration, top right) and e (withheld validation, bottom)
-    SB, STP = 6.62 / HF, 8.3 / HF                                        # top row
-    axC2 = fig.add_axes([0.67, SB, 0.31, STP - SB]); draw_relative(axC2)
-    fig.text(0.585, STP + 0.1 / HF, "Recording quality predicts junction imbalance", fontsize=9, color=INK, ha="left", va="bottom")
-    BT, TT2 = 0.42 / HF, 1.72 / HF
+    if any(not im[i] for i in reg):
+        cbB.ax.text(0.5, -3.6, "white: unmeasured vessel (inferred)", transform=cbB.ax.transAxes, fontsize=8, color=MUTED, ha="center", va="top")
+    TA = YM + H_ + 0.05 / HF
+    ntl = len({t_ for i in reg if im[i] for t_, *_ in recs_all.get(i, [])})
+    fig.text(XA, TA, f"Aggregated measurements ({ntl} tiles): junctions do not balance", fontsize=9, color=INK, ha="left", va="bottom")
+    fig.text(XB, TA, "Conservation-consistent reference field", fontsize=9, color=INK, ha="left", va="bottom")
+    TB = TA + 0.5 / HF
+    fig.text(0.04, TB, "Constructing a conservation-consistent reference field", fontsize=9.5, color=INK, ha="left", va="bottom", fontweight="bold")
+    fig.text(0.5, TB - 0.23 / HF, r"recordings $\{Q_{k,t}\}$  $\longrightarrow$  quality-weighted aggregation  $\longrightarrow$  $Q_k^{\mathrm{meas}}$"
+             r"  $\longrightarrow$  conservation  $\longrightarrow$  $Q_k^{\star}$", fontsize=9, color=INK, ha="center", va="center")
+    # a (calibration plot, top right) and c (withheld validation, bottom)
+    SB, STP = 6.8 / HF, 8.3 / HF                                         # block a
+    axC2 = fig.add_axes([0.6, SB, 0.38, STP - SB]); draw_relative(axC2)
+    fig.text(0.04, STP + 0.12 / HF, "Recording quality predicts junction errors", fontsize=9.5, color=INK, ha="left", va="bottom", fontweight="bold")
+    BT, TT2 = 0.42 / HF, 1.75 / HF
     axD2 = fig.add_axes([0.13, BT, 0.84, TT2 - BT]); draw_withholding(axD2)
-    fig.text(XA, TT2 + 0.1 / HF, "Predicting withheld vessel measurements (flux measurements removed, network kept)", fontsize=9, color=INK, ha="left", va="bottom")
+    fig.text(0.04, TT2 + 0.12 / HF, "Predicting withheld vessel fluxes", fontsize=9.5, color=INK, ha="left", va="bottom", fontweight="bold")
     # a: one real recording (EX_TILE, EX_EDGE), rotated so the vessel runs left → right along its flow: dense time-mean optical
     #    flow inside the lumen, every Kloosterman cross-section (kept solid, rejected dashed), and the definition of c_k
     from scipy.ndimage import map_coordinates
@@ -669,7 +670,7 @@ def main():
     Lx = float((clx[-1] - org) @ tdir); u_ = np.arange(-0.6 * Rx, Lx + 0.6 * Rx, 0.5); v_ = np.arange(-2.15 * Rx, 1.75 * Rx, 0.5)
     UU, VV = np.meshgrid(u_, v_); pr = org[0] + UU * tdir[0] + VV * ndir[0] + offx[0]; pc = org[1] + UU * tdir[1] + VV * ndir[1] + offx[1]
     rot = map_coordinates(imx, [pr, pc], order=1)
-    axS = fig.add_axes([0.02, 7.3 / HF, 0.52, 1.0 / HF]); axS.set_aspect("equal", anchor="SW")
+    axS = fig.add_axes([0.03, 7.12 / HF, 0.5, 1.18 / HF]); axS.set_aspect("equal", anchor="SW")
     axS.imshow(rot, cmap="gray", origin="lower", extent=[u_[0], u_[-1], v_[0], v_[-1]], vmin=np.percentile(rot, 1), vmax=np.percentile(rot, 99.5), alpha=0.75)
     axS.set_xlim(u_[0], u_[-1]); axS.set_ylim(v_[0], v_[-1]); axS.set_xticks([]); axS.set_yticks([])
     for s_ in axS.spines.values():
@@ -695,18 +696,13 @@ def main():
              path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="black")])
     log(f"panel a: tile {EX_TILE} {EX_EDGE}: kept {validx.sum()}/{len(validx)} (f {fx:.3f}), align {ax_:.3f}, c {cx:.3f}; {len(A_)} flow arrows")
     axS.apply_aspect(); pS = axS.get_position(); xt_ = pS.x0 + 0.01
-    fig.text(pS.x1, pS.y0 - 0.03 / HF, "cross-section ticks shaded by parabolic fit $R^2$ (0 → 1)", fontsize=8, color=MUTED, ha="right", va="top")
-    for k_, (lab_, val_, col_) in enumerate((("parabolic fit quality $p$", f"{np.mean(r2x):.2f}", BLUE), ("directional alignment", f"{ax_:.2f}", INK),
-                                             ("reliability score $c$", f"{cx:.2f}", INK))):
-        yy_ = pS.y0 - (0.33 + 0.19 * k_) / HF
-        fig.text(xt_, yy_, lab_, fontsize=9, color=col_, ha="left", va="center"); fig.text(xt_ + 0.25, yy_, val_, fontsize=9, color=INK, ha="left", va="center")
-    fig.text(xt_ + 0.32, pS.y0 - 0.71 / HF, "(larger $c$ = less reliable)", fontsize=8, color=MUTED, ha="left", va="center")
-    fig.text(xt_, pS.y0 - 0.92 / HF, r"$c_{k,t} = c_0 + c_p\,(1-p_{k,t}) + c_a\,(1-a_{k,t})$, coefficients fitted on simultaneous junctions (b)",
-             fontsize=8, color=MUTED, ha="left", va="center")
+    fig.text(xt_, pS.y0 - 0.03 / HF, "ticks: cross-sections, shaded by parabolic fit $R^2$", fontsize=8, color=MUTED, ha="left", va="top")
+    yy_ = pS.y0 - 0.33 / HF
+    fig.text(xt_, yy_, f"parabolicity $p$ = {np.mean(r2x):.2f}     alignment $a$ = {ax_:.2f}", fontsize=9, color=INK, ha="left", va="center")
+    fig.text(xt_, yy_ - 0.22 / HF, f"→  calibrated discrepancy scale  $c$ = {cx:.2f}", fontsize=9, color=INK, ha="left", va="center")
     log(f"panel a formula (caption): c = {c0f:.2f} + {cff:.2f}(1 − {pterm}) + {caf:.2f}(1 − a) = {cx:.2f}; p = {np.mean(r2x):.3f} (stored {mx.get('p', float('nan')):.3f})")
-    fig.text(0.02, STP + 0.1 / HF, "Recording quality from velocity profiles", fontsize=9, color=INK, ha="left", va="bottom")
-    for x_, y_, l_ in ((0.0, STP + 0.1 / HF, "a"), (0.555, STP + 0.1 / HF, "b"), (0.0, TA, "c"), (XB - 0.03, TA, "d"), (0.0, TT2 + 0.1 / HF, "e")):
-        fig.text(x_, y_ - 0.004, l_, **LET)
+    for y_, l_ in ((STP + 0.12 / HF, "a"), (TB, "b"), (TT2 + 0.12 / HF, "c")):
+        fig.text(0.0, y_ - 0.004, l_, **LET)
     plos_style.save(fig, OUT)
     log(f"wrote {OUT}.png/.pdf")
 
