@@ -1,4 +1,4 @@
-"""Calibration of the reliability scale c against known truth (input to Fig 6b).
+"""Calibration of the reliability scale c against known truth (input to SI fig6_S_reliability).
 
 Reads the Stokes junction ensemble (scripts/benchmark/junctions.py output: <results>/stokes_bench/ensemble/*.pkl — synthetic
 videos of 27 real junctions with exactly known, conserving flow, analysed by the unchanged production pipeline) and scores
@@ -21,16 +21,17 @@ BINS = (0.0, 0.2, 0.3, 0.45, 0.7, 1.0, 9.0)
 
 def main():
     m = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text()); c0 = m.get("c0", np.median(list(m["c_T"].values())))
+    term = m.get("profile_term", "f"); coef = m[f"c_{term}"]                       # profile term of the reliability model (p or f)
     rows = []
     for f in sorted(glob.glob(str(paths.RESULTS / "stokes_bench" / "ensemble" / "*.pkl"))):
         d = pickle.load(open(f, "rb"))
         for _, cs in d["cases"].items():
             for e in cs["edges"]:
                 al = e.get("align", np.nan); al = al if np.isfinite(al) else 1.0
-                rows.append((e["f"], al, e["Q_true"], e["Q_kl"], int(d["node"])))
+                rows.append((e.get(term, np.nan), al, e["Q_true"], e["Q_kl"], int(d["node"])))
     A = np.array(rows, float); f, al, Qt, Qm, node = A.T
     measured = np.isfinite(Qm) & (f > 0); ok = measured & (np.sign(Qm) == np.sign(Qt)) & (Qt != 0)
-    c = c0 + m["c_f"] * (1 - f) + m["c_a"] * (1 - al)
+    c = c0 + coef * (1 - f) + m["c_a"] * (1 - al)
     e = np.log(np.abs(Qm[ok]) / np.abs(Qt[ok])); common = float(np.median(e)); e = e - common; cc = c[ok]; nd = node[ok]
     rsd = lambda x: 1.4826 * float(np.median(np.abs(x - np.median(x))))
     rng = np.random.default_rng(0); juncs = np.unique(nd); bins = []

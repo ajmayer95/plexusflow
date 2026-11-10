@@ -1,8 +1,12 @@
 """Reliability scale of a Kloosterman-valid measurement, calibrated on same-tile junction balance.
 
-    c_e = c_T(tile) + c_f (1 − f_e) + c_a (1 − align_e),      σ_e = √((|Q_e| c_e)² + σ0²)
+    c_e = c0 + c_p (1 − p_e) + c_a (1 − align_e),      σ_e = √((|Q_e| c_e)² + σ0²)
 
-f      fraction of Kloosterman cross-sections kept (quality.f)
+p      parabolicity: mean over all Kloosterman cross-sections of clip(R², 0, 1), unfitted sections 0 (quality.p;
+       analyze.kloosterman.parabolicity).  Profile term since 2026-11-10 (PROFILE_TERM); before, f = fraction of
+       cross-sections kept (quality.f).  p and f rank recordings almost identically (Spearman 0.97 / 0.95) but p predicts
+       held-out same-tile junction imbalance better (5-fold tile CV ΔNLL 21S −21.9, 27S −24.0, same number of parameters);
+       f adds nothing once p is in (sandbox/parabolicity.py).  Old model files (no "profile_term") use f.
 align  speed-weighted |cos θ| between the time-mean OF vector and the centreline tangent within ±R_seg
        (quality.align; missing → 1)
 Fitted by maximum likelihood on junctions where every incident edge has a Kloosterman-valid measurement from the
@@ -11,6 +15,12 @@ same tile: net flux Σ s·Q ~ N(0, Σ Q² c² + σ0²).  c is an empirical relia
 from __future__ import annotations
 import numpy as np
 from scipy.optimize import minimize
+
+PROFILE_TERM = "p"
+
+
+def _term(model):
+    return model.get("profile_term", "f")
 
 
 def measurement_table(G):
@@ -26,7 +36,7 @@ def measurement_table(G):
                 continue
             Q = mq if m["flow_from"] == u else -mq
             a = q.get("align")
-            M[(int(m["tile_id"]), (u, v))] = dict(tile=int(m["tile_id"]), Q=float(Q), f=float(q["f"]),
+            M[(int(m["tile_id"]), (u, v))] = dict(tile=int(m["tile_id"]), Q=float(Q), f=float(q["f"]), p=float(q["p"]) if np.isfinite(q.get("p", np.nan)) else float(q["f"]),   # p missing (no cached inputs): f
                                                    align=float(a) if a is not None and np.isfinite(a) else np.nan,
                                                    R_kl_um=m.get("R_kl_um"))
     return M
@@ -54,12 +64,12 @@ def _align(m):
     return m["align"] if np.isfinite(m["align"]) else 1.0
 
 
-def _arrays(J, M, tiles):
+def _arrays(J, M, tiles, term=PROFILE_TERM):
     idx, dc, f, al, ti, net = [], [], [], [], [], []
     for k, (t, j) in enumerate(J):
         tot = 0.0
         for e, s in j:
-            m = M[(t, e)]; idx.append(k); dc.append(abs(m["Q"])); f.append(m["f"]); al.append(_align(m))
+            m = M[(t, e)]; idx.append(k); dc.append(abs(m["Q"])); f.append(m[term]); al.append(_align(m))
             ti.append(tiles.index(t)); tot += s * m["Q"]
         net.append(tot)
     return tuple(np.array(x) for x in (idx, dc, f, al, ti, net))
@@ -104,7 +114,7 @@ def _fit_theta(d, nT, tau=1.0, jitters=(0.0, 0.3, -0.3)):
     return best
 
 
-def fit_reliability(G, M, tau=1.0, tile_terms=False):
+def fit_reliability(G, M, tau=1.0, tile_terms=False, term=PROFILE_TERM):
     """ML fit of the reliability model on all same-tile junctions.  Returns (model dict, junction list).
 
     Default (2026-10-19): c = c0 + c_f (1 − f) + c_a (1 − align) — three numbers.  Against the earlier per-tile model
@@ -115,16 +125,16 @@ def fit_reliability(G, M, tau=1.0, tile_terms=False):
     tiles = sorted({t for t, _ in M}); J = []
     for t in tiles:
         J += [(t, j) for j in same_tile_junctions(G, t, {e for (tt, e) in M if tt == t})]
-    d = _arrays(J, M, tiles)
+    d = _arrays(J, M, tiles, term)
     if not tile_terms:
         d = d[:4] + (np.zeros_like(d[4]),) + d[5:]
     nT = len(tiles) if tile_terms else 1
     best = _fit_theta(d, nT, tau)
     th = best.x
     cT = {int(t): float(np.exp(th[i if tile_terms else 0])) for i, t in enumerate(tiles)}
-    model = dict(c_T=cT, c_f=float(np.exp(th[nT])), c_a=float(np.exp(th[nT + 1])), sigma0=float(np.exp(th[-1])), n_junctions=len(J),
+    model = dict(c_T=cT, profile_term=term, **{f"c_{term}": float(np.exp(th[nT]))}, c_a=float(np.exp(th[nT + 1])), sigma0=float(np.exp(th[-1])), n_junctions=len(J),
                  tile_terms=bool(tile_terms), converged=bool(best.success), nll=float(best.fun),
-                 formula=("c = c_T + c_f*(1-f) + c_a*(1-align)" if tile_terms else "c = c0 + c_f*(1-f) + c_a*(1-align)")
+                 formula=(f"c = c_T + c_{term}*(1-{term}) + c_a*(1-align)" if tile_terms else f"c = c0 + c_{term}*(1-{term}) + c_a*(1-align)")
                          + ";  sigma = sqrt((|Q| c)^2 + sigma0^2)")
     if tile_terms:
         model["tau_log_cT"] = tau
@@ -134,12 +144,19 @@ def fit_reliability(G, M, tau=1.0, tile_terms=False):
 
 
 def c_of(model, m):
-    """Reliability c of one measurement row (needs keys tile, f, align)."""
+    """Reliability c of one measurement row (needs keys tile, align and the model's profile term, p or f)."""
     base = model["c_T"].get(m["tile"], model.get("c0")) if "c0" in model else model["c_T"][m["tile"]]
-    return base + model["c_f"] * (1 - m["f"]) + model["c_a"] * (1 - _align(m))
+    t = _term(model)
+    return base + model[f"c_{t}"] * (1 - m[t]) + model["c_a"] * (1 - _align(m))
+
+
+def profile_coef(model):
+    """(name, coefficient) of the model's profile term: ("p", c_p) or ("f", c_f)."""
+    t = _term(model); return t, model[f"c_{t}"]
 
 
 def c_of_measurement(model, m):
     """Reliability c of a raw graph measurement dict (``measurements_piv`` entry with a ``quality`` record)."""
     q = m["quality"]
-    return c_of(model, dict(tile=int(m["tile_id"]), f=q["f"], align=q["align"] if np.isfinite(q["align"]) else np.nan))
+    pv = q.get("p", np.nan); pv = pv if pv is not None and np.isfinite(pv) else q["f"]          # p missing → f (as measurement_table)
+    return c_of(model, dict(tile=int(m["tile_id"]), f=q["f"], p=pv, align=q["align"] if np.isfinite(q["align"]) else np.nan))

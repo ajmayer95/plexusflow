@@ -1,7 +1,8 @@
 """Validation of the DC reconciliation weighting against independent repeat recordings (input to Fig 6f).
 
-Carved vessels measured in ≥ 2 tiles provide independent references: the projection uses one measurement per vessel
-(the winner, smallest c); every other tile's measurement of that vessel is held out.  Two tests, five weightings:
+Carved vessels measured in ≥ 2 tiles provide independent references.  With the production input (per_vessel="average": all
+recordings of a vessel averaged) one recording per repeat-measured vessel is held out per fold (dc.repeat_folds, 5 folds);
+with winner input, every non-winner recording is held out.  Two tests, five weightings:
   measured   the reconciled flow of a vessel vs its held-out repeat (does imposing conservation degrade the data?)
   imputed    hide EVERY measurement of a random 10 % of the repeat-measured vessels (5 disjoint folds), reconcile the
              rest, compare the network-imputed flow with the hidden measurements (does conservation add information?)
@@ -18,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import numpy as np
 import plexusflow.paths as P
 from plexusflow.reconcile.reliability import measurement_table, c_of
-from plexusflow.reconcile.dc import reconcile_dc
+from plexusflow.reconcile.dc import reconcile_dc, repeat_folds
 from plexusflow.reconcile.network import project, carved_domain, EPS_UNIMAGED
 
 KINDS = ("uniform", "quality", "measured_scale", "calibrated")
@@ -82,13 +83,18 @@ def main(n_fold=5, frac=0.10, seed=0):
             by_e.setdefault(e, []).append(m)
     rng = np.random.default_rng(seed); rows = {k: [] for k in ("raw",) + KINDS}
     # 1. measured vessels: reconciled vs held-out repeat
-    F = {"raw": D["Qm"], **fields(D, dom)}
-    for e, ms in by_e.items():
-        i = eix[e]
-        for m in ms:
-            if m["tile"] != D["tile"][i] and abs(m["Q"]) > 0:
+    def add(F, refs):
+        for i, m in refs:
+            if abs(m["Q"]) > 0:
                 for k, Q in F.items():
                     rows[k].append((i, abs(np.log(max(abs(Q[i]), 1e-12) / abs(m["Q"]))), float(np.sign(Q[i]) == np.sign(m["Q"])), c_of(model, m), int(m["tile"])))
+    if D.get("per_vessel", "winner") == "average":           # every recording is input: hold one out per repeat-measured vessel
+        for fi, (Mf, held) in enumerate(repeat_folds(M, n_fold, seed)):
+            Df = reconcile_dc(G, model, Mf, dom=dom, n_starts=0, n_shuffle=1)
+            add({"raw": Df["Qm"], **fields(Df, dom)}, [(eix[e], m) for e, m in held if e in eix])
+            log(f"measured, leave-one-recording-out fold {fi + 1}/{n_fold}: {len(held)} recordings held out")
+    else:                                                    # winner input: every other recording is independent
+        add({"raw": D["Qm"], **fields(D, dom)}, [(eix[e], m) for e, ms in by_e.items() for m in ms if m["tile"] != D["tile"][eix[e]]])
     measured = {k: summarise(v, rng) for k, v in rows.items()}; measured_paired = paired(rows, np.random.default_rng(seed + 101))
     log(f"measured: {measured['calibrated']['all']['n_vessels']} vessels with repeats; trusted err raw {measured['raw']['trusted']['err']:.3f}, "
         f"calibrated {measured['calibrated']['trusted']['err']:.3f}")

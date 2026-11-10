@@ -23,7 +23,7 @@ from scipy.optimize import minimize
 import plexusflow.paths as P
 from plexusflow.reconcile.network import carved_domain, emergent, metrics, passive
 from plexusflow.reconcile.reliability import measurement_table, c_of
-from plexusflow.reconcile.dc import reconcile_dc, ql_objective
+from plexusflow.reconcile.dc import reconcile_dc, ql_objective, repeat_folds
 
 TRUST = 0.5
 T0 = time.time()
@@ -40,9 +40,10 @@ def passive_basis(dom, K):
 
 
 def passive_fit(D, A, max_iter=200000):
-    y, im = D["Qm"], D["imaged"]; C = np.where(im, D["c"], 1.0); s0 = D["sigma0_floor"]; Q = D["Qp"]
-    w = np.sqrt(1 / (C[im] ** 2 * Q[im] ** 2 + s0 ** 2)); p0, *_ = np.linalg.lstsq(A[im] * w[:, None], y[im] * w, rcond=None)
-    m = float(np.median(1 / (C[im] ** 2 * Q[im] ** 2 + s0 ** 2))); L, grad, _ = ql_objective(y, C, im, s0, m)
+    y, im = D["Qm"], D["imaged"]; C = np.where(im, D["c"], 1.0); s0 = D.get("s0_vessel", D["sigma0_floor"]); Q = D["Qp"]   # per-vessel floor
+    s0i = np.broadcast_to(s0, y.shape)[im]                                     # per-vessel floor on the measured vessels
+    w = np.sqrt(1 / (C[im] ** 2 * Q[im] ** 2 + s0i ** 2)); p0, *_ = np.linalg.lstsq(A[im] * w[:, None], y[im] * w, rcond=None)
+    m = float(np.median(1 / (C[im] ** 2 * Q[im] ** 2 + s0i ** 2))); L, grad, _ = ql_objective(y, C, im, s0, m)
     f = lambda p: (L(A @ p), A.T @ grad(A @ p)); g0 = np.linalg.norm(f(p0)[1])
     r = minimize(f, p0, jac=True, method="L-BFGS-B", options=dict(maxiter=max_iter, maxfun=4 * max_iter, ftol=1e-16, gtol=1e-14, maxcor=50))
     return A @ r.x, dict(converged=bool(r.success), message=str(r.message), n_iter=int(r.nit), rel_proj_grad=float(np.linalg.norm(r.jac) / g0))
@@ -83,8 +84,15 @@ def main(n_fold=5, frac=0.10, seed=0):
     for (t, e), m in M.items():
         if e in eix:
             by_e.setdefault(e, []).append(m)
-    refs = [(eix[e], m) for e, ms in by_e.items() for m in ms if m["tile"] != D["tile"][eix[e]] and abs(m["Q"]) > 0]
-    measured = paired(rows_for(D["Qp"], Qpas, refs, model), rng)
+    if D.get("per_vessel", "winner") == "average":           # every recording is input: hold one out per repeat-measured vessel
+        mrows = []
+        for Mf, held in repeat_folds(M, n_fold, seed):
+            Df = reconcile_dc(G, model, Mf, dom=dom, n_starts=0, n_shuffle=1); Qpf, _ = passive_fit(Df, A)
+            mrows += rows_for(Df["Qp"], Qpf, [(eix[e], m) for e, m in held if e in eix and abs(m["Q"]) > 0], model)
+        measured = paired(mrows, rng)
+    else:
+        refs = [(eix[e], m) for e, ms in by_e.items() for m in ms if m["tile"] != D["tile"][eix[e]] and abs(m["Q"]) > 0]
+        measured = paired(rows_for(D["Qp"], Qpas, refs, model), rng)
     totals = {}
     for lab, Q in (("conservation_only", D["Qp"]), ("passive", Qpas)):
         fb = emergent(Q, dom); mt = metrics(D["Qm"], Q, passive(K, fb, dom), fb, dom, D["imaged"]); big = D["imaged"] & (np.abs(D["Qm"]) > 1e-3)

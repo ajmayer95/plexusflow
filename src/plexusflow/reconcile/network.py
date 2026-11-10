@@ -100,6 +100,31 @@ def venous_pressure_penalty(fb, dom, radius_px, length_px, sigma, sigma_P=2.0, m
     return out, dict(shift=float(shift), dP_before=float(dP0), dP_after=float(dP0 + kk * shift), sigma_V=sV, sigma_P=float(sigma_P))
 
 
+def contract_short_unimaged(dom, imaged, length, radius, k=2.0):
+    """Unimaged edges shorter than k radii lie inside a junction's lumen (vectorisation splits one crossing into two nearby
+    nodes).  Contracting them is exact for the reconstruction: such an edge's flow only links the balances of its two end nodes,
+    so eliminating it equals summing them (up to the ε ridge on unimaged edges).  Returns the mask of these edges and vessel /
+    junction counts of the contracted network (for reporting; the estimator is unchanged)."""
+    short = (~np.asarray(imaged, bool)) & (np.asarray(length) < k * np.asarray(radius))
+    B = dom["B"].tocsc(); nN = B.shape[0]; par = np.arange(nN)
+    def root(n):
+        while par[n] != n:
+            par[n] = par[par[n]]; n = par[n]
+        return n
+    for j in np.flatnonzero(short):
+        u, v = B[:, j].indices
+        ru, rv = root(u), root(v)
+        if ru != rv:
+            par[ru] = rv
+    roots = np.array([root(n) for n in range(nN)]); keep = ~short
+    deg = np.bincount(np.r_[roots[B[:, keep].tocoo().row]], minlength=nN)          # degree of each merged node, kept edges only
+    bnd = set(roots[dom["bnd"]])
+    return dict(short_unimaged=short, k_radii=float(k), n_short_unimaged=int(short.sum()), n_vessels=int(keep.sum()),
+                n_imaged=int(np.sum(keep & imaged)), n_unimaged=int(np.sum(keep & ~imaged)),
+                n_junctions=int(sum(1 for r in np.unique(roots) if deg[r] >= 3 and r not in bnd)),
+                n_merged_junctions=int(sum(1 for r, c in zip(*np.unique(roots, return_counts=True)) if c > 1)))
+
+
 def metrics(Qm, Qp, Qs, fb, dom, imaged):
     """Boundary totals, L/R split, |Q'| vs |Q_sim| correlation, loop share, movement and sign flips."""
     a, b = np.abs(Qp[imaged]), np.abs(Qs[imaged]); ok = (a > 1e-15) & (b > 1e-15)

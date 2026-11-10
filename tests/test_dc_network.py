@@ -114,3 +114,26 @@ def test_quadratic_min_is_bracketed():
     assert d[i - 1] <= x <= d[i + 1] and x < d[i]                                    # pulled toward the lower neighbour, not past it
     exact = (np.log10(d) - np.log10(4e-4)) ** 2                                      # exact parabola → recovered
     assert abs(quadratic_min(d, exact) / 4e-4 - 1) < 1e-6
+
+
+def test_contracting_short_unimaged_edges_is_exact_and_counted():
+    """An unimaged edge shorter than 2 radii is merged into a junction: the projection of every other edge is the same as on the
+    network with its two end nodes merged (up to the ε ridge), and the counts reflect the contraction."""
+    from plexusflow.reconcile.network import EPS_UNIMAGED, contract_short_unimaged
+    dom, r, length = grid_domain()
+    Q, _ = true_flow(dom, r, length)
+    y = Q * (1 + 0.2 * np.random.default_rng(1).standard_normal(len(Q)))
+    B = dom["B"].tocsc(); bnd = set(dom["bnd"])
+    cand = [j for j in range(B.shape[1]) if not (set(B[:, j].indices) & bnd)][:3:2]        # two non-adjacent interior edges
+    imaged = np.ones(len(Q), bool); imaged[cand] = False; length = length.copy(); length[cand] = 1.0 * r[cand]
+    con = contract_short_unimaged(dom, imaged, length, r)
+    assert con["n_short_unimaged"] == 2 and con["n_vessels"] == len(Q) - 2 and con["n_unimaged"] == 0 and con["n_merged_junctions"] == 2
+    full = project(y, np.where(imaged, 1.0, EPS_UNIMAGED), dom)
+    keep = ~con["short_unimaged"]; Bc = B.tolil()                                             # merge the end nodes, drop the edges
+    for j in cand:
+        u, v = B[:, j].indices
+        Bc[u, :] = Bc[u, :] + Bc[v, :]; Bc[v, :] = 0
+    Bc = Bc.tocsr()[:, keep]; alive = np.flatnonzero(np.abs(Bc).sum(1).A1 > 0)
+    domc = dict(dom, B=Bc[alive], bnd=np.searchsorted(alive, dom["bnd"]))
+    merged = project(y[keep], np.ones(keep.sum()), domc)
+    assert np.allclose(full[keep], merged, rtol=1e-4, atol=1e-8)
