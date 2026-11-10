@@ -1,4 +1,5 @@
-"""How well does conservation reconstruct vessels whose measurements are missing?  (input to Fig 6e)
+"""How well does conservation reconstruct vessels whose measurements are missing?  (Also scored: the passive r⁴/ℓ network
+with the same boundary flows — what geometry alone predicts for the withheld vessels, the null reference.)  (input to Fig 6e)
 
 For a fraction p of the carved vessels that have a usable recording, withhold EVERY recording of those vessels, reconcile the
 rest (production quasi-likelihood, reliability model fixed), and compare each withheld vessel's reconstructed flow with its
@@ -52,8 +53,9 @@ def main():
                 rep.append((abs(np.log(abs(a["Q"]) / abs(b["Q"]))), float(np.sign(a["Q"]) == np.sign(b["Q"])), a["tile"]))
     out["repeat"] = tile_boot(rep, np.random.default_rng(SEED + 1))
     log(f"  trusted repeat-recording disagreement: median {out['repeat']['err']:.3f}, same sign {out['repeat']['dir']:.1%} ({len(rep)} pairs)")
+    out["curve_passive"] = []
     for p in FRACS:
-        rows = []
+        rows = []; rows_pas = []                                            # reconstruction | passive network from radii (geometry only)
         for r in range(N_REP):
             hide = set(rng.choice(len(usable), int(round(p * len(usable))), replace=False)); hide = {usable[k] for k in hide}
             Df = reconcile_dc(G, model, {k: m for k, m in M.items() if k[1] not in hide}, dom=dom, n_starts=0, n_shuffle=1)
@@ -62,8 +64,11 @@ def main():
                 for m in by_e[e]:
                     if c_of(model, m) < TRUST and abs(m["Q"]) > 0:
                         rows.append((abs(np.log(max(abs(Df["Qp"][i]), 1e-12) / abs(m["Q"]))), float(np.sign(Df["Qp"][i]) == np.sign(m["Q"])), m["tile"]))
+                        rows_pas.append((abs(np.log(max(abs(Df["Qs"][i]), 1e-12) / abs(m["Q"]))), float(np.sign(Df["Qs"][i]) == np.sign(m["Q"])), m["tile"]))
             log(f"  p {p:.2f} draw {r + 1}/{N_REP}: {len(hide)} vessels withheld, inflow {Df['metrics']['total_in']:.2f} nL/s")
         s = tile_boot(rows, np.random.default_rng(SEED + 2)); s["frac"] = p; out["curve"].append(s)
+        sp = tile_boot(rows_pas, np.random.default_rng(SEED + 3)); sp["frac"] = p; out["curve_passive"].append(sp)
+        log(f"  p {p:.2f}: passive network (radii only) error median {sp['err']:.3f}, same sign {sp['dir']:.1%}")
         log(f"  p {p:.2f}: withheld-vessel error median {s['err']:.3f} [{s['err_ci'][0]:.3f}, {s['err_ci'][1]:.3f}], same sign {s['dir']:.1%} (n {s['n']})")
     P.RESULTS.mkdir(parents=True, exist_ok=True); (P.RESULTS / "dc_withholding.json").write_text(json.dumps(out, indent=1))
     log(f"wrote {P.RESULTS / 'dc_withholding.json'}")
