@@ -16,7 +16,7 @@ Schema 2 (data-v2, 2026-10-15):
     MANIFEST.json, plexusflow.yaml
     graph/graph_vessels_piv.gpickle, graph/export/{nodes,edges,measurements,tiles}.csv, paths.npz, traces.npz
     fuse/organ_fusion_close.tif | organ_fusion.tif, stitch/positions.json
-    results/{dc_reconciled_v2.pkl, ac_field_v7.pkl (schema 2: ac_field_v2.pkl), ac_estimate_v8.json (schema ≥ 3),
+    results/{dc_reconciled_v2.pkl, dc_weighting_validation.json (Fig 6f), ac_field_v7.pkl (schema 2: ac_field_v2.pkl), ac_estimate_v8.json (schema ≥ 3),
              reliability_model_v1.json, summary.json, *.csv}
 """
 from __future__ import annotations

@@ -23,7 +23,7 @@ import numpy as np
 import plexusflow.paths as paths
 from plexusflow.release import SCHEMA_VERSION
 
-RESULTS = ("reliability_model_v1.json", "dc_reconciled_v2.pkl", "ac_field_v7.pkl", "ac_estimate_v8.json")
+RESULTS = ("reliability_model_v1.json", "dc_reconciled_v2.pkl", "dc_weighting_validation.json", "dc_junction_calibration.json", "dc_withholding.json", "c_truth_calibration.json", "dc_passive_comparison.json", "dc_synthetic_benchmark.json", "dc_async_benchmark.json", "ac_field_v7.pkl", "ac_estimate_v8.json")
 RESULTS_OPTIONAL = ()
 # inputs of the paper figures (scripts/make_figure*.py), copied as-is from the stage (core tier)
 FIGURE_INPUTS = ("fuse/organ_fusion.tif", "fuse/maxmed.tif", "fuse/probs_logit.tif", "mask/mask.tif", "tiles/maxmed", "assets")
@@ -273,13 +273,14 @@ export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results
 export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
 bash scripts/reproduce_paper.sh
 ```
-`reproduce_paper.sh` re-derives `results/` and draws Figs 1–10 into `$PLEXUSFLOW_FIGURES` (about 4 minutes; `--figures` to skip
+`reproduce_paper.sh` re-derives `results/` and draws Figs 1–9 into `$PLEXUSFLOW_FIGURES` (about 4 minutes; `--figures` to skip
 the analysis); `python examples/quickstart.py` is a one-minute tour of the DC reconciliation.  For the read-only viewer,
 `pip install -e ".[gui]"` and `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"`.  This folder is never written to:
 outputs go to PLEXUSFLOW_RESULTS / PLEXUSFLOW_FIGURES.
 No Python?  `graph/export/` (CSV + npz, see `SCHEMA.md`) and the CSVs in `results/` contain everything.
-Reproducibility: re-running the scripts reproduces `results/` up to ~0.3 % across Python / numpy / scipy versions (the DC
-reweighting loop stops at its iteration cap, so last-digit numerical differences persist); the build environment is in `MANIFEST.json`.
+Reproducibility: re-running the scripts reproduces `results/` across Python / numpy / scipy versions up to solver tolerance
+(the DC reconciliation converges to a stationary point of an explicit objective); the build environment is in `MANIFEST.json`.
+`unstable` in `dc_reconciled_edges.csv` marks vessels whose reconciled flow depends on the solver start (direction, or > 10 %).
 Methods: `docs/dc_method.md`, `docs/synthetic_validation.md` in the code repository.  Checksums: `MANIFEST.json`.
 """)
     files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != "MANIFEST.json")

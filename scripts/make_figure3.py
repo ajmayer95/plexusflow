@@ -5,7 +5,7 @@ The representative vessel (edge 75489–75638) in its own tile (36), the tile of
      sample points), the centreline from the mapped graph and every 5th cross-section
   b  axial-speed profiles across five cross-sections and their Poiseuille fits v(ρ) = v_CL (1 − ρ²/R_s²)
   c  per-cross-section mean flux Q̄_s = (π/2) R_s² v_CL,s along the vessel (radius R_s on the right axis); the vessel's mean
-     flow is their median (Kloosterman et al. 2014)
+     flow is the mean of the shape-valid sections (Kloosterman et al. 2014 section fits; no flow-rate band since 2026-11-09)
   d  Q(t) over the recording (250 fps) and its harmonic model Q̂(t) = Q̄ + Σ_k Re(H_k e^{2πik f0 t}), k = 1..3
   e  every beat folded on the cardiac phase (grey) against the model, and the model's fundamental / 2nd / 3rd harmonic
 
@@ -25,7 +25,7 @@ import matplotlib.patheffects as pe
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src")); sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plexusflow.paths as _paths
-from plexusflow.analyze.kloosterman import kloosterman_scalar
+from plexusflow.analyze.kloosterman import kloosterman_scalar, PRODUCTION_KW
 from plexusflow.analyze.centerline import _centerline_geometry
 from plexusflow.analyze.constants import PX_SIZE_UM, FRAME_DT_S
 from plexusflow.reconcile.harmonics import phasors, FS
@@ -34,8 +34,7 @@ import plos_style
 EDGE, TILE = (75489, 75638), 36
 INK, MEAS, MODEL, VCOL = "#1a1a1a", "#2ca02c", "#1f4e8c", "#d62728"
 HCOL = ["#1f4e8c", "#d95f02", "#7570b3"]
-KW = dict(dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="median_band", median_lo=0.5, median_hi=1.5, R_slice_lo=0.5,
-          R_slice_hi=2.0, min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0)
+KW = PRODUCTION_KW
 UMS = PX_SIZE_UM / FRAME_DT_S
 HALO = [pe.withStroke(linewidth=1.6, foreground="black")]
 
@@ -96,7 +95,6 @@ def main():
     x0, x1 = axA.get_xlim(); y0, y1 = axA.get_ylim(); L = 20 / PX_SIZE_UM; xe = x0 + 0.95 * (x1 - x0); ya = y0 + 0.07 * (y1 - y0)
     axA.plot([xe - L, xe], [ya, ya], color="white", lw=2, solid_capstyle="butt", path_effects=HALO)
     axA.annotate("20 µm", (xe, ya), xytext=(0, 2), textcoords="offset points", ha="right", va="bottom", color="white", fontsize=8, path_effects=HALO)
-    letter(axA, "a", -0.04)
 
     # b: profiles + Poiseuille fits
     axB = fig.add_subplot(gT[1]); rho = np.asarray(res["rho"], float) * PX_SIZE_UM; prof = np.asarray(res["per_slice_profiles"], float) * UMS
@@ -113,16 +111,14 @@ def main():
     axB.set_yticks([0, step]); axB.set_yticklabels(["0", f"{step:.0f}"]); axB.spines[["top", "right"]].set_visible(False)
     axB.plot([], [], "o", ms=2.5, color=INK, label="Optical flow"); axB.plot([], [], color="#2b70b4", lw=1.0, label="Parabolic fit")
     axB.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, borderaxespad=0.2, handlelength=1.2, columnspacing=0.8)
-    letter(axB, "b", -0.3)
 
     # c: per-section mean flux + radius
     axC = fig.add_subplot(gT[2])
     axC.plot(arc[valid], Qs[valid], "o-", ms=2.0, lw=0.6, color=INK, zorder=3, label="Cross-sections")
-    axC.axhline(Qbar, color=VCOL, lw=1.0, ls="--", zorder=2, label=f"Median {Qbar:.2f} nL/s")
+    axC.axhline(Qbar, color=VCOL, lw=1.0, ls="--", zorder=2, label=f"Vessel mean {Qbar:.2f} nL/s")
     axC.set_ylim(0, np.nanmax(Qs[valid]) * 1.3); axC.set_xlabel("Distance along vessel (µm)", labelpad=1)
     axC.set_ylabel("Mean flux (nL/s)", labelpad=1); axC.spines[["top", "right"]].set_visible(False)
     axC.legend(loc="lower center", frameon=False, borderaxespad=0.2, handlelength=1.5, labelspacing=0.2)
-    letter(axC, "c", -0.3)
 
     # d: Q(t) + harmonic model
     axD = fig.add_subplot(gB[0])
@@ -132,7 +128,6 @@ def main():
     axD.set_xlim(0, t[-1]); axD.set_xlabel("Time (s)", labelpad=1); axD.set_ylabel("Flux (nL/s)", labelpad=1)
     axD.spines[["top", "right"]].set_visible(False)
     axD.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, borderaxespad=0.2, handlelength=1.5)
-    letter(axD, "d", -0.1)
     # inset: the per-frame fit — one parabola of FIXED (segmented) radius whose amplitude v_CL(t) follows the waveform.
     # Reconstructed from stored quantities only: v_CL(t)/<v_CL> = Q(t)/Q̄ (no raw points shown).
     R_seg = float(G.edges[EDGE].get("radius") or np.nan) * PX_SIZE_UM
@@ -165,7 +160,6 @@ def main():
     pp = np.linspace(0, 1, 300); axE.plot(pp, model(pp / f0), color=MODEL, lw=1.3)
     axE.set_xlim(0, 1); axE.tick_params(labelbottom=False); axE.set_ylabel("Flux (nL/s)", labelpad=1); axE.spines[["top", "right"]].set_visible(False)
     axE.text(0.3, 0.97, f"mean ± s.d., {nb} beats", transform=axE.transAxes, ha="left", va="top", fontsize=8, color="0.25")
-    letter(axE, "e", -0.3, 1.05)
     axK = fig.add_subplot(gE[1], sharex=axE)
     for k, nm in zip((1, 2, 3), ("Fundamental", "2nd", "3rd")):
         axK.plot(pp, model(pp / f0, (k,)), color=HCOL[k - 1], lw=1.0, label=nm)
@@ -173,6 +167,15 @@ def main():
     axK.spines[["top", "right"]].set_visible(False)
     axK.legend(loc="lower center", bbox_to_anchor=(0.5, 0.97), ncol=3, frameon=False, borderaxespad=0.1, handlelength=1.0, columnspacing=0.6)
     axK.set_xticks([0, 0.5, 1])
+    # panel letters on a grid: a/b/c share the top row's y, d/e the bottom row's; a and d share x; each sits just left of
+    # its panel's y-axis label (the outer edge of the axes' tight bounding box)
+    fig.canvas.draw(); rr = fig.canvas.get_renderer(); inv = fig.transFigure.inverted()
+    edge = lambda ax_: inv.transform(ax_.get_tightbbox(rr))           # [[x0, y0], [x1, y1]] in figure fraction
+    tops = {k: max(edge(ax_)[1, 1] for ax_ in row) for k, row in (("top", (axA, axB, axC)), ("bot", (axD, axE)))}
+    x_left = min(edge(axA)[0, 0], edge(axD)[0, 0]) - 0.005
+    for ax_, l_, row in ((axA, "a", "top"), (axB, "b", "top"), (axC, "c", "top"), (axD, "d", "bot"), (axE, "e", "bot")):
+        x_ = x_left if l_ in "ad" else edge(ax_)[0, 0] - 0.005
+        fig.text(x_, min(tops[row] + 0.004, 0.993), l_, fontsize=12, fontweight="bold", va="top" if tops[row] + 0.004 > 0.95 else "bottom", ha="left")
     plos_style.save(fig, _paths.FIGURES / "fig3" / "fig3")
 
 

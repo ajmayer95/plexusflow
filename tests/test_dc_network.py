@@ -79,3 +79,61 @@ def test_venous_pressure_penalty():
     assert abs(info["dP_after"]) < 1e-3 * abs(info["dP_before"])               # tight penalty equalises the pressures
     assert np.isclose(adj[dom["out"]].sum(), fb[dom["out"]].sum())              # total outflow unchanged
     assert np.array_equal(adj[dom["inj"]], fb[dom["inj"]])                     # arterial boundary untouched
+
+
+def test_quasi_likelihood_objective_gradient_and_stationary_solution():
+    """plexusflow.reconcile.dc: the closed-form quasi-likelihood has the IRLS correction (q − y)/V(q) as its gradient, the
+    projected-Newton solve decreases it monotonically to a conservative stationary point, and conservative data are a fixed point."""
+    from plexusflow.reconcile.dc import ql_objective, ql_solve
+    dom, r, length = grid_domain()
+    Q, _ = true_flow(dom, r, length)
+    rng = np.random.default_rng(3); c = rng.uniform(0.1, 0.6, Q.size); imaged = rng.random(Q.size) < 0.85
+    y = np.where(imaged, Q * (1 + c * rng.standard_normal(Q.size)), 0.0); s0 = 0.01 * np.median(np.abs(y[imaged]))
+    L, grad, hess = ql_objective(y, c, imaged, s0, 1.0)
+    x = Q + 0.05 * rng.standard_normal(Q.size); h = 1e-6
+    fd = np.array([(L(x + h * e) - L(x - h * e)) / (2 * h) for e in np.eye(Q.size)])
+    assert np.allclose(fd, grad(x), rtol=1e-5, atol=1e-8)                    # closed form ↔ (q − y)/V(q)
+    Q0 = project(y, np.where(imaged, 1.0, 1e-6), dom)
+    Qs, info = ql_solve(Q0, y, c, imaged, s0, 1.0, dom)
+    assert info["converged"] and info["objective"] <= L(Q0)
+    assert np.max(np.abs((dom["B"] @ Qs)[interior(dom)])) < 1e-10             # exactly conservative
+    G, _ = hess(Qs); step = project(Qs - grad(Qs) / G, G, dom) - Qs
+    assert np.linalg.norm(step) < 1e-6 * np.linalg.norm(Qs)                  # stationary: no projected-Newton step left
+    Qc = project(Q, np.ones_like(Q), dom)                                     # conservative, fully imaged data → unchanged
+    Qf, _ = ql_solve(Qc, Q, c, np.ones(Q.size, bool), s0, 1.0, dom)
+    assert np.allclose(Qf, Q, atol=1e-9)
+
+
+def test_quadratic_min_is_bracketed():
+    """plexusmech.ac.profile.quadratic_min: the refined minimum stays between the grid neighbours of the grid minimum, even
+    when the three lowest points are one-sided (27S 2026-11-03: one-sided points extrapolated 5.3e-4 → 6.1e-4)."""
+    from plexusmech.ac.profile import quadratic_min
+    d = np.geomspace(2.5e-4, 8e-4, 21); i = int(np.argmin(np.abs(d - 5.32e-4)))
+    prof = np.full(d.size, 100.0); prof[i - 2:i + 2] = (10.4, 4.4, 0.0, 13.4)        # lowest three = i-2, i-1, i (one-sided)
+    x = quadratic_min(d, prof)
+    assert d[i - 1] <= x <= d[i + 1] and x < d[i]                                    # pulled toward the lower neighbour, not past it
+    exact = (np.log10(d) - np.log10(4e-4)) ** 2                                      # exact parabola → recovered
+    assert abs(quadratic_min(d, exact) / 4e-4 - 1) < 1e-6
+
+
+def test_contracting_short_unimaged_edges_is_exact_and_counted():
+    """An unimaged edge shorter than 2 radii is merged into a junction: the projection of every other edge is the same as on the
+    network with its two end nodes merged (up to the ε ridge), and the counts reflect the contraction."""
+    from plexusflow.reconcile.network import EPS_UNIMAGED, contract_short_unimaged
+    dom, r, length = grid_domain()
+    Q, _ = true_flow(dom, r, length)
+    y = Q * (1 + 0.2 * np.random.default_rng(1).standard_normal(len(Q)))
+    B = dom["B"].tocsc(); bnd = set(dom["bnd"])
+    cand = [j for j in range(B.shape[1]) if not (set(B[:, j].indices) & bnd)][:3:2]        # two non-adjacent interior edges
+    imaged = np.ones(len(Q), bool); imaged[cand] = False; length = length.copy(); length[cand] = 1.0 * r[cand]
+    con = contract_short_unimaged(dom, imaged, length, r)
+    assert con["n_short_unimaged"] == 2 and con["n_vessels"] == len(Q) - 2 and con["n_unimaged"] == 0 and con["n_merged_junctions"] == 2
+    full = project(y, np.where(imaged, 1.0, EPS_UNIMAGED), dom)
+    keep = ~con["short_unimaged"]; Bc = B.tolil()                                             # merge the end nodes, drop the edges
+    for j in cand:
+        u, v = B[:, j].indices
+        Bc[u, :] = Bc[u, :] + Bc[v, :]; Bc[v, :] = 0
+    Bc = Bc.tocsr()[:, keep]; alive = np.flatnonzero(np.abs(Bc).sum(1).A1 > 0)
+    domc = dict(dom, B=Bc[alive], bnd=np.searchsorted(alive, dom["bnd"]))
+    merged = project(y[keep], np.ones(keep.sum()), domc)
+    assert np.allclose(full[keep], merged, rtol=1e-4, atol=1e-8)

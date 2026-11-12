@@ -1,0 +1,237 @@
+% Methods text: calibration of measurement discrepancies + aggregation of asynchronous recordings (21S).
+% Draft 2026-11-10; numbers from results/reliability_model_v1.json and results/dc_reconciled_v2.pkl (PlexusFlow21S).
+% Checked against src/plexusflow/analyze/kloosterman.py (parabolicity), src/plexusflow/reconcile/reliability.py
+% (c model, fit) and src/plexusflow/reconcile/dc.py (vessel_input, reconcile_dc).
+
+\subsection*{Calibration of measurement discrepancies}
+
+For each vessel recording we characterised measurement quality by two properties of the time-averaged velocity field:
+its agreement with a parabolic flow profile and its alignment with the vessel axis. Let $k$ index vessels and $t$ the
+image tiles (recordings) in which vessel $k$ was measured. Flux was estimated from cross-sections sampled densely along
+the vessel centreline; at each cross-section $i$ a parabolic profile was fitted to the axial velocity. We defined the
+mean parabolicity
+
+\begin{equation}
+p_{k,t}
+=
+\frac{1}{N_{k,t}}
+\sum_{i=1}^{N_{k,t}}
+\operatorname{clip}\!\left(R_{k,t,i}^2,0,1\right),
+\label{eq:parabolicity}
+\end{equation}
+
+where $N_{k,t}$ is the number of cross-sections, $R_{k,t,i}^2$ is the coefficient of determination of the parabolic fit
+at cross-section $i$, and cross-sections without a valid fit (too few velocity samples, implausible fitted radius, or no
+central velocity maximum) contribute zero. Unlike the acceptance criterion used to estimate flux, which retains only
+cross-sections with $R^2 \geq 0.5$, this continuous descriptor summarises profile quality along the whole vessel.
+(A recording in which fewer than two accepted cross-sections agreed in flow direction gave no flux and the vessel was
+treated as unmeasured in that tile.) We
+also computed the directional alignment $a_{k,t}$, the speed-weighted mean of $|\cos\vartheta|$, where $\vartheta$ is the
+angle between the time-averaged velocity vector and the local centreline tangent, over pixels within one vessel radius
+of the centreline.
+
+We combined these descriptors into a dimensionless fractional measurement-discrepancy scale,
+
+\begin{equation}
+c_{k,t}
+=
+c_0
++ c_p(1-p_{k,t})
++ c_a(1-a_{k,t}),
+\label{eq:measurement_uncertainty}
+\end{equation}
+
+where $c_0$ is the baseline discrepancy scale and $c_p$ and $c_a$ describe its dependence on profile quality and flow
+alignment. Smaller $c_{k,t}$ indicates a more reliable recording. Under the working error model, $c_{k,t}$ specifies the
+modelled fractional standard deviation of measurement discrepancies, apart from an additive floor: a recording with $c_{k,t}=0.3$ is assigned a discrepancy standard deviation of about $30\%$ of its flux. This is a modelled
+scale, not a bound on the error.
+
+We calibrated the coefficients using conservation at junctions whose incident vessels were all measured
+simultaneously, within a single image tile $t$. For such a junction $j$, the measured net flux is
+
+\begin{equation}
+r_j
+=
+\sum_{k\in\mathcal E_j}s_{jk}\,y_{k,t},
+\end{equation}
+
+where $y_{k,t}$ is the measured mean flux and $s_{jk}=\pm1$ specifies its orientation relative to the junction. For fully
+resolved junctions, conservation requires the underlying mean fluxes to balance. The observed imbalance therefore provides
+a measure of the combined discrepancies of the incident flux estimates, without requiring the individual true fluxes to
+be known. We modelled the junction imbalances as zero-mean Gaussian
+with variance
+
+\begin{equation}
+V_j(\boldsymbol\theta)
+=
+\sum_{k\in\mathcal E_j}
+c_{k,t}^{\,2}\,y_{k,t}^{\,2}
++\sigma_0^2,
+\label{eq:junction_error_variance}
+\end{equation}
+
+where $\sigma_0$ is an absolute junction-discrepancy floor and $\boldsymbol\theta=(c_0,c_p,c_a,\sigma_0)$. This
+formulation assumes that the vessel-level discrepancies are approximately uncorrelated, with variances proportional to
+squared flux; the measured fluxes stand in for the unknown underlying fluxes when evaluating the variance. The
+parameters were estimated by minimising the Gaussian composite negative log-likelihood,
+
+\begin{equation}
+\hat{\boldsymbol\theta}
+=
+\arg\min_{\boldsymbol\theta}
+\frac12\sum_j
+\left[
+\log V_j(\boldsymbol\theta)
++\frac{r_j^2}{V_j(\boldsymbol\theta)}
+\right],
+\label{eq:uncertainty_calibration_likelihood}
+\end{equation}
+
+with all four parameters constrained to be positive (optimised on a log scale). The likelihood is a composite one:
+neighbouring junctions can share a vessel measurement, so their imbalances are not all independent. Fitted to all
+$4{,}411$ single-tile junctions, the model gives $\hat c_0=0.054$, $\hat c_p=0.42$, $\hat c_a=1.45$ and $\hat\sigma_0=1.3\times10^{-3}$\,nL\,s$^{-1}$.
+
+These full-data coefficients are used in all subsequent analyses. Calibration was evaluated separately on held-out
+tiles: the tiles were divided into five folds, the model was refitted on the junctions of four folds, and the
+standardised imbalances $z_j=r_j/\sqrt{V_j}$ of the fifth were computed with these fold-specific coefficients. A calibrated
+model gives a root-mean-square $z_j$ near unity at every level of measurement quality. We summarise the quality of a
+junction by its effective fractional discrepancy,
+
+\begin{equation}
+c_{j,\mathrm{eff}}
+=
+\left(
+\frac{\sum_{k\in\mathcal E_j}c_{k,t}^{\,2}\,y_{k,t}^{\,2}}
+{\sum_{k\in\mathcal E_j}y_{k,t}^{\,2}}
+\right)^{1/2},
+\end{equation}
+
+the predicted imbalance standard deviation as a fraction of the root-sum-square measured flux (ignoring $\sigma_0$), and
+compare the quality-dependent model with a constant fractional-discrepancy model in which $c_{k,t}$ does not depend on
+$p_{k,t}$ or $a_{k,t}$ (Fig.~\ref{fig:dc_reconciliation}a).
+
+Calibration from junction conservation cannot identify a common multiplicative bias affecting all incident flux
+measurements, such as a shared attenuation of measured velocities by depth averaging: scaling every incident flux by the
+same factor leaves the balance unchanged. It likewise assumes approximately uncorrelated errors between the vessels of a
+junction, and it does not account for physiological differences between tiles acquired at different times.
+
+\subsection*{Aggregation of asynchronous measurements and conservative reconstruction}
+
+Vessels in tile overlaps generally had several mean-flux measurements acquired at different times ($4{,}208$ of the
+$7{,}120$ measured vessels in the 21-somite embryo). Rather than selecting a single recording, we formed a
+quality-weighted mean for each vessel,
+
+\begin{equation}
+Q_k^{\mathrm{meas}}
+=
+\sum_t \alpha_{k,t}\,y_{k,t},
+\qquad
+\alpha_{k,t}=\frac{c_{k,t}^{-2}}{\sum_{t'}c_{k,t'}^{-2}},
+\label{eq:measurement_aggregation}
+\end{equation}
+
+with all $y_{k,t}$ signed along a common orientation of vessel $k$. The quality-dependent component of the vessel-level
+discrepancy scale is the weighted root-mean-square of the recording scales,
+
+\begin{equation}
+c_k^2
+=
+\sum_t \alpha_{k,t}\,c_{k,t}^2 .
+\label{eq:aggregated_uncertainty}
+\end{equation}
+
+Because the recordings were acquired asynchronously, they cannot be treated as independent observations of a fixed
+physiological state. We therefore retained a representative recording-level discrepancy scale rather than reducing $c_k$
+according to the standard error of a weighted mean. We also computed the weighted between-recording spread,
+
+\begin{equation}
+s_{k,\mathrm{between}}^2
+=
+\sum_t \alpha_{k,t}\left(y_{k,t}-Q_k^{\mathrm{meas}}\right)^2,
+\label{eq:between_recording}
+\end{equation}
+
+which was set to zero when only one recording was available. This term captures disagreement arising from measurement
+variability, physiological change, or both; it is not an independently calibrated error variance, and adding it to the
+quality-dependent term is a conservative modelling choice rather than a decomposition into independent sources.
+Including it prevents strongly disagreeing recordings from producing an aggregated flux that is assigned excessive
+weight, particularly when opposing measurements average to nearly zero.
+
+The aggregated measurements are the inputs to the conservation-constrained reconstruction, with discrepancy scales
+
+\begin{equation}
+\sigma_k^2(Q'_k)
+=
+c_k^2\,(Q'_k)^2
++s_{k,\mathrm{between}}^2
++s_0^2,
+\label{eq:reconstruction_uncertainty}
+\end{equation}
+
+where $Q'_k$ is the reconstructed reference flux and $s_0$ is a numerical floor, fixed at $1\%$ of the median absolute
+measured flux ($2.2\times10^{-4}$\,nL\,s$^{-1}$ for the 21-somite embryo) and distinct from the fitted
+junction-discrepancy floor $\sigma_0$ of Eq.~(\ref{eq:junction_error_variance}). Results were insensitive to its value:
+with $s_0$ multiplied by $0.1$, by $5.8$ (equal to $\hat\sigma_0$) or by $10$, the total boundary inflow changed by at
+most $0.4\%$ and the median per-vessel change of $Q'_k$ was at most $1\%$; the larger changes, including all changes of
+direction, were confined to near-zero vessels. The scales $\sigma_k$ determine how strongly each aggregated measurement constrains
+the reconstruction; they are not posterior uncertainties of the reconstructed fluxes. We therefore interpret the
+reconstructed field as a conservation-consistent reference summarising asynchronous measurements, not as an
+instantaneous flow field.
+
+The reconstruction network was the vessel graph after removal of two kinds of annotated region, both drawn from the
+videos rather than from the reconstructed field. Open regions, beside the dorsal aortae, are where blood enters the plexus
+and where vessels are too dense and fast for reliable flux estimates; the vertices at which the remaining network meets
+them, together with the two vitelline veins, form the boundary $\mathcal B$, through which flow may enter or leave.
+Topology-uncertain regions are areas in which vessels exist but the graph does not represent them reliably (the bright
+marginal band, sheet-like flow, and plexus too dense to trace). Each connected topology-uncertain region was replaced by a
+mass-conserving compartment: the vertices on its boundary may exchange flow with one another, but the net exchange of the
+region is zero, and its internal routing is not resolved. A topology-uncertain region contiguous with an open region was
+treated as part of that open region. In the 21-somite embryo the reconstruction network has $8{,}969$ segments,
+$38$ inflow vertices and three topology-uncertain regions ($575$ segments).
+
+The reconstructed field was obtained by quasi-likelihood estimation under exact conservation. For each measured vessel
+we defined the quasi-likelihood contribution through its derivative,
+
+\begin{equation}
+\frac{\partial \ell_k(q;Q_k^{\mathrm{meas}})}{\partial q}
+=
+\frac{q-Q_k^{\mathrm{meas}}}{c_k^2\,q^2+s_{k,\mathrm{between}}^2+s_0^2},
+\qquad
+\ell_k(Q_k^{\mathrm{meas}};Q_k^{\mathrm{meas}})=0,
+\label{eq:quasi_likelihood}
+\end{equation}
+
+which integrates in closed form (a logarithm and an arctangent of $q$). Unlike weighted least squares with weights
+fixed in advance, the variance is evaluated at the reconstructed flux rather than at the noisy measurement
+\citep{Wedderburn1974}, so a vessel that happens to read low is not given spurious confidence. The reference field is
+
+\begin{equation}
+\mathbf Q'
+=
+\arg\min_{\mathbf q}
+\;\frac1m\sum_{k\in\mathcal M}\ell_k(q_k;Q_k^{\mathrm{meas}})
++\frac{\varepsilon}{2}\sum_{k\notin\mathcal M}q_k^2
+\quad\text{subject to}\quad
+B_{\mathrm{int}}\,\mathbf q=\mathbf 0,
+\label{eq:reconstruction}
+\end{equation}
+
+where $\mathcal M$ is the set of measured vessels, $B_{\mathrm{int}}$ is the signed incidence matrix restricted to
+interior vertices, with one additional row per closed topology-uncertain region (the sum of the rows of its cut vertices),
+$m$ is the median of
+$1/\sigma_k^2$ at the starting point, and $\varepsilon=10^{-6}$ is a weak ridge on unmeasured vessels. The ridge fixes
+circulations that conservation alone cannot determine (loops consisting only of unmeasured vessels); dividing by $m$
+makes $\varepsilon$ relative to a typical measurement weight. Unmeasured vessels are therefore determined by
+conservation, and the boundary fluxes $\mathbf f=B\mathbf Q'$ are outputs, not inputs.
+
+Because the discrepancy variance depends on the reconstructed flux, the quasi-likelihood is generally nonconvex and may
+admit multiple local minima. The starting point is therefore part of the estimator. We started from the uniform-weight conservative projection of the
+measured fluxes and minimised Eq.~(\ref{eq:reconstruction}) by projected Newton iterations: each step is a weighted
+conservative projection using a positive diagonal model of the Hessian, followed by Armijo backtracking, so the
+objective decreases monotonically and the iteration stops at a constrained stationary point. To assess dependence on
+the start, we repeated the solve from four perturbed starts (measured fluxes multiplied by $1+0.3\,\xi$,
+$\xi\sim\mathcal N(0,1)$, fixed seeds). The median relative spread of $Q'_k$ across starts was $1.2\%$ for measured vessels (90th
+percentile $19\%$) and $0.8\%$ for vessels with $c_k<0.5$. For $3.3\%$ of measured vessels, mostly low-flux ones, the
+spread exceeded the reconstructed flux, so their direction is not determined by the data; together with unmeasured
+vessels such cases carry $0.7\%$ of the summed absolute flux. Vessels whose direction, or whose magnitude by more than
+$10\%$, changed between any two starts ($28\%$ of measured vessels) are flagged in the released data.

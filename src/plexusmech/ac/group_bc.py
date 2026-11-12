@@ -1,5 +1,9 @@
 """Joint (D, η) estimate with the boundary forcing corrected per group, profiled by the same likelihood.
 
+Superseded for the paper by plexusmech.ac.profile.fit_profile (scripts/mech/ac_estimate.py), which re-uses ``groups``
+from here, adds the latent tile gauge and waveform-based weights, and profiles on its own D grid (2.5e-4–8e-4, 21
+points, η = 0).  ``estimate`` and its wider (D, η) grid remain for the boundary-forcing sensitivity analyses.
+
 Groups: left carve nodes, right carve nodes, left veins, right veins (split at the DA midline).  Each keeps its measured local-ratio pattern f0 and gets an
 amplitude correction per harmonic and ONE timing shift shared by the harmonics (coherent: the boundary pulse keeps
 its measured shape φ2 − 2φ1):
@@ -29,7 +33,9 @@ def groups(C):
         if len(dom["out"]) != 2:
             raise ValueError("domain lacks 'side_out' for its V nodes; rebuild it with plexusflow.reconcile.carved_domain")
         v_side = np.array(["L", "R"])
-    return np.r_[np.where(dom["side"] == "L", 0, 1), np.where(np.asarray(v_side) == "L", 2, 3)]
+    # topology-region interface nodes (dom['topo_cut'], after the V nodes in dom['bnd']): group 4 = fixed forcing, never corrected
+    return np.r_[np.where(dom["side"] == "L", 0, 1), np.where(np.asarray(v_side) == "L", 2, 3),
+                 np.full(len(dom.get("topo_cut", [])), 4)].astype(int)
 
 
 def estimate(C, c, d_grid=D_GRID, eta_grid=ETA_GRID, progress=print):
@@ -42,7 +48,7 @@ def estimate(C, c, d_grid=D_GRID, eta_grid=ETA_GRID, progress=print):
 
     def nll_all(x, B1, B2):
         a1, a2, b = x[:4], x[4:8], x[8:]
-        q1 = B1 @ np.exp(a1 + 1j * b); q2 = B2 @ np.exp(a2 + 2j * b)
+        q1 = B1[:, :4] @ np.exp(a1 + 1j * b) + B1[:, 4]; q2 = B2[:, :4] @ np.exp(a2 + 2j * b) + B2[:, 4]
         d1 = np.angle(np.exp(1j * (phd[1] - np.angle(q1 * sgnQs)))); d2 = np.angle(np.exp(1j * (phd[2] - np.angle(q2 * sgnQs))))
         r = np.log10(np.maximum(np.abs(q1) / np.maximum(np.abs(Qs), 1e-30), 1e-12) / pid)
         return nll_vm(d1, w) + nll_vm(d2, w) + nll_t(r, c)

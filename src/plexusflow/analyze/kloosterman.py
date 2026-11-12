@@ -1,7 +1,7 @@
 """Kloosterman/Poelma per-cross-section scalar Q.
 
 Fits a Poiseuille parabola per slice along the vessel centerline,
-filters outlier slices with a robust median-band (or IQR) rule, then
+drops slices whose flow direction disagrees with the median (optionally a median-band or IQR rule), then
 averages the survivors into a characteristic (Q_char, V_CL_char,
 R_char).  Uses the joint (v0, R) free fit per slice — with a default
 override to compute Q from ``R_prior`` (mask R) rather than the
@@ -23,6 +23,20 @@ import numpy as np
 from .centerline import _centerline_geometry
 
 
+# The settings the batch uses (analyze/profile.py, mean-flow field already per frame, 60 ρ bins over ±2R) — for code that
+# re-runs the estimator on the cached batch inputs (figures, scripts/kl_reaggregate.py).
+PRODUCTION_KW = dict(dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="sign", R_slice_lo=0.5, R_slice_hi=2.0,
+                     min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0)
+
+
+def parabolicity(per_slice_r2):
+    """Mean parabolic fit quality of a recording, p = mean over ALL cross-sections of clip(R², 0, 1); a section that never
+    reached a fit (too few points, radius at its bound, peak below the profile mean) counts 0.  Continuous counterpart of
+    the kept fraction f (rank correlation 0.95–0.97); it is the profile term of the reliability model since 2026-11-10."""
+    r2 = np.asarray(per_slice_r2, float)
+    return float(np.mean(np.where(np.isfinite(r2), np.clip(r2, 0.0, 1.0), 0.0))) if r2.size else 0.0
+
+
 def kloosterman_scalar(
     flow_avg,
     cl,
@@ -31,7 +45,7 @@ def kloosterman_scalar(
     slice_window: int = 2,
     n_bins: int = 17,
     fit_fraction: float = 0.85,
-    outlier_mode: str = "median_band",       # "iqr" | "median_band"
+    outlier_mode: str = "sign",              # "sign" | "median_band" | "iqr"
     iqr_k: float = 1.5,
     median_lo: float = 0.3,
     median_hi: float = 2.5,
@@ -78,7 +92,7 @@ def kloosterman_scalar(
     slice_window : int — averaging window along arc (default 2 = 5 pts)
     n_bins : int — number of ρ bins over ``[-R_prior, R_prior]``
     fit_fraction : float — fit only ``|ρ| <= fit_fraction × R_prior``
-    outlier_mode : "median_band" (Kloosterman) or "iqr"
+    outlier_mode : "sign" (same direction as the median; production), "median_band" (Kloosterman) or "iqr"
     median_lo, median_hi : accepted band as fractions of the |Q| median
     R_slice_lo, R_slice_hi : allowed fit-R range as fractions of R_prior
     use_r_prior_area : if True, compute ``Q_slice = ½ V_CL π R_prior²``;
@@ -202,7 +216,7 @@ def kloosterman_scalar(
         # so cropped / asymmetric sections are handled.  ``fit_region`` is only
         # a generous safety cap now; arc-direction problems (flows merging or
         # abruptly changing direction near a junction) are left to the
-        # downstream median-flow-rate band to reject.
+        # downstream shape (R²) and sign gates to reject.
         if fit_center_offset and np.isfinite(p).any():
             # centre the geometric cap on the profile peak (within the offset bound)
             _pk = float(np.clip(rho[int(np.nanargmax(np.abs(p)))],
@@ -309,7 +323,14 @@ def kloosterman_scalar(
         )
 
     Q_med = float(np.nanmedian(per_slice_Q))
-    if outlier_mode == "median_band":
+    if outlier_mode == "sign":
+        # Production since 2026-11-09: no flow-rate band — every shape-valid section whose flow direction agrees with
+        # the median is averaged (the 0.5–1.5× band cut good sections and slightly worsened repeat agreement).
+        valid_mask = q_finite & (np.sign(per_slice_Q) == np.sign(Q_med))
+        for i in range(N):
+            if per_slice_reason[i] == "ok" and q_finite[i] and np.sign(per_slice_Q[i]) != np.sign(Q_med):
+                per_slice_reason[i] = "sign_flip"
+    elif outlier_mode == "median_band":
         lo_thr = median_lo * abs(Q_med)
         hi_thr = median_hi * abs(Q_med)
         valid_mask = (q_finite
@@ -347,7 +368,21 @@ def kloosterman_scalar(
                 per_slice_reason[i] = f"Q_hi({per_slice_Q[i]:.4f}>{hi_thr:.4f})"; continue
 
     if valid_mask.sum() < min_valid_slices:
-        valid_mask = q_finite
+        # Fewer than min_valid_slices sections survive the outlier rule (e.g. two fits of opposite direction): no flux.
+        # Before 2026-11-11 this fell back to averaging ALL finite sections — contradictory signs included (102 of 14 396
+        # 21S recordings, 74 % grossly off their repeats).
+        for i in range(N):
+            if per_slice_reason[i] == "ok" and not valid_mask[i]:
+                per_slice_reason[i] = "outlier_rejected"
+        return dict(
+            Q_char=float("nan"), V_CL_char=float("nan"), R_char=float("nan"),
+            Q_char_valid_frac=0.0, n_slices=int(N), n_valid=int(valid_mask.sum()),
+            per_slice_Q=per_slice_Q, per_slice_R=per_slice_R,
+            per_slice_v_CL=per_slice_v_CL, per_slice_arc=arc,
+            per_slice_reason=per_slice_reason, valid_mask=valid_mask,
+            per_slice_r2=per_slice_r2, per_slice_profiles=profiles, rho=rho,
+            reason="too_few_consistent_slices",
+        )
 
     Q_char    = float(np.nanmean(per_slice_Q[valid_mask]))
     V_CL_char = float(np.nanmean(per_slice_v_CL[valid_mask]))

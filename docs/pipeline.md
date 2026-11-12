@@ -1,4 +1,4 @@
-# plexusflow pipeline (folder → graph)
+# plexusflow pipeline (raw videos → measured graph → reconstruction → viewer)
 
 End-to-end walkthrough. Every stage reads/writes files under a single
 per-embryo folder (a "stage root"), so `plexusflow <cmd> <STAGE_ROOT>`
@@ -61,19 +61,50 @@ Verify:
 
 ## Run the pipeline
 
-    plexusflow stitch    PlexusFlow21S              # napari GUI
-    plexusflow fuse      PlexusFlow21S              # batch — all three
-    plexusflow mask      PlexusFlow21S              # napari GUI
-    plexusflow vectorize PlexusFlow21S              # batch
-    plexusflow edit      PlexusFlow21S              # napari GUI
+The same commands work for any embryo: everything stage-specific lives in the stage folder (`plexusflow.yaml`, the graph
+and its tags).  Steps marked GUI are interactive; the rest are batch.
 
-Each command has --help and accepts overrides. Common ones:
+| # | step | command | writes |
+|---|---|---|---|
+| 1 | bootstrap | `plexusflow init STAGE` (then set `external_raw_video_dir`, `raw_fps` in `plexusflow.yaml`) | folder scaffold, yaml |
+| 2 | tile projections | `plexusflow preprocess STAGE --which maxmed,bandpass` | `tiles/<projection>/` |
+| 3 | vessel probabilities | ilastik on `tiles/maxmed/` (outside plexusflow) | `tiles/probs/` |
+| 4 | stitch (GUI) | `plexusflow stitch STAGE` | `stitch/positions.json` |
+| 5 | fuse | `plexusflow fuse STAGE` | `fuse/*.tif` |
+| 6 | mask (GUI) | `plexusflow mask STAGE` (or `mve`: mask + vectorise + preview) | `mask/mask.tif` |
+| 7 | vectorise | `plexusflow vectorize STAGE` | `graph/graph.gpickle` |
+| 8 | edit graph (GUI) | `plexusflow edit STAGE` | `graph/graph.gpickle` |
+| 9 | condense | `plexusflow condense STAGE` | `graph/graph_vessels.gpickle` |
+| 10 | measure flow | `plexusflow analyze STAGE` (hours; `--tiles`, `--out` for a local copy) | `graph/graph_vessels_piv.gpickle`, `batch_kl_inputs/` |
+| 11 | annotate (GUI) | `plexusflow workbench STAGE`: Edit tab → mark the dorsal-aorta anchors *source* and the vein anchors *sink*; View tab → region tools, *Tag class* → tag **open boundary** regions (beside the aortae) and **topology uncertain** regions (graph does not represent the vessels); Save | tags on `graph_vessels_piv.gpickle` |
+| 12 | stage settings | add `ac_ref_tile` (a clearly beating tile near the aortae) and, if needed, `ac_f0_band`, `ac_veins`, `ac_gauge_block`, `f0_min_hz`/`f0_max_hz`, `of_dt` to `plexusflow.yaml` | |
+| 13 | reconstruct | `bash scripts/run_stage.sh STAGE` (`--no-ac`, `--no-validate`) | `results/` |
+| 14 | view | `plexusflow view STAGE` (read-only) | |
 
-    plexusflow stitch    PlexusFlow21S --tile-source maxmed
-    plexusflow fuse      PlexusFlow21S --which probs --fusion linear
-    plexusflow mask      PlexusFlow21S --prob-source intensity --video foo.tif
-    plexusflow vectorize PlexusFlow21S --no-for-editor
-    plexusflow edit      PlexusFlow21S --from-mask
+Step 13 runs `dc_reconcile.py` (reliability model fitted on this stage's junctions + mean-flow reconstruction), the
+validations (`dc_validate_weighting.py`, `dc_junction_calibration.py`, `dc_withholding_curve.py`), `ac_field.py`
+(tile-synchronised pulsatile field) and `mech/ac_estimate.py` (distensibility fit).  Set `PLEXUSFLOW_RESULTS` to write
+results elsewhere.  The read-only viewer shows the measured graph and, when `results/` holds them, the reconstructed mean
+flow and pulsatile field.  Region tags can be revised in the workbench at any time; rerun step 13 afterwards
+(`scripts/dc_topology_sensitivity.py` compares the field with and without the topology regions).
+
+**Editing an analysed graph.**  After changing the graph (step 8) on a stage that is already measured: `plexusflow condense
+STAGE`, `plexusflow carry-measurements STAGE` (copies measurements of unchanged vessels), `plexusflow analyze STAGE
+--skip-analyzed` (measures only edited or new vessels).
+
+**Changing the flux estimator's section rule.**  `python3 scripts/kl_reaggregate.py` re-estimates every recording from
+`batch_kl_inputs/` without re-running optical flow (backs up the graph first); then rerun step 13.
+
+**Reproducing the paper.**  `bash scripts/reproduce_paper.sh` runs step 13 for the 21S release plus the benchmark and
+figure scripts (README).
+
+Each command has `--help`.  Common overrides:
+
+    plexusflow stitch    STAGE --tile-source maxmed
+    plexusflow fuse      STAGE --which probs --fusion linear
+    plexusflow mask      STAGE --prob-source intensity --video foo.tif
+    plexusflow vectorize STAGE --no-for-editor
+    plexusflow edit      STAGE --from-mask
 
 ## Prerequisites
 

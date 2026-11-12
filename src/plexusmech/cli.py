@@ -1,6 +1,9 @@
 """plexusmech command-line interface (model side; reads plexusflow stage folders).
 
-    plexusmech simulate <STAGE_ROOT>   # intact two-pass transmission-line simulation (LOCKED 2026-09-30 recipe)
+    plexusmech simulate <STAGE_ROOT>   # LEGACY intact two-pass transmission-line simulation (2026-09-30 recipe)
+
+The paper's pulsatile model is not this command: it is the distributed RC network of plexusmech.ac (driven by the
+measured boundary forcing and fitted by profile likelihood) — scripts/mech/ac_estimate.py and scripts/make_figure9.py.
 """
 from __future__ import annotations
 
@@ -25,7 +28,7 @@ def simulate(stage_root: Path = typer.Argument(...),
               out: Path = typer.Option(None,
                     help='Output .gpickle (default: same as src, sim fields added in place)'),
               D: float = typer.Option(3.5e-4,
-                    help='Areal distensibility (1/Pa). Default 3.5e-4.'),
+                    help='Areal distensibility (1/Pa). Default 3.5e-4 (the 2026-09 recipe; the paper fit is ≈5e-4).'),
               eta: float = typer.Option(0.0,
                     help='Constant-loss-tangent wall η. D_eff = D · (1 − iη).'),
               da_dc: float = typer.Option(1.593,
@@ -35,7 +38,11 @@ def simulate(stage_root: Path = typer.Argument(...),
               da_h1_phase_deg: float = typer.Option(139.6,
                     help='DA H1 phase (degrees) — cardiac pulse phase reference.'),
               ) -> None:
-    """Run the intact two-pass sim (LOCKED 2026-09-30 recipe).
+    """LEGACY: intact two-pass transmission-line sim on the pre-2026-10 normalised graph (2026-09-30 recipe).
+
+    Kept to reproduce the September simulations; the paper's model and fitted D (≈5e-4 /Pa) come from plexusmech.ac
+    (scripts/mech/ac_estimate.py), not from this command.
+
 
     Pass 1: sink_pressure_bc=0 at V (network+DA determine drainage DC).
     Pass 2: V injection = ratio × Pass-1 V DC with cross-tile v_ratios

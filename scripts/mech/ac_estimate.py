@@ -7,7 +7,7 @@ ratio with L/R group corrections; veins pinned to the stub waveforms (--veins me
 vein node its own stub, 27S); latent tile gauge; waveform-based weights; η = 0 (pass --eta 0 0.2 0.4 … to estimate it).
 The stub waveforms are gauge-corrected with the fitted tile corrections, so the fit is run twice (--gauge-passes).
 Writes results/ac_estimate_v8.json (D, η, profile, fitted boundary forcing per node, tile gauge corrections — the input of
-make_figure10.py --bc-json) and figures/ac/ac_estimate_v8.png.
+make_figure9.py --bc-json) and figures/ac/ac_estimate_v8.png.
 """
 import sys
 from pathlib import Path
@@ -27,8 +27,8 @@ def log(m):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--veins", choices=("mean", "own", "local"), default="mean",
-                    help="vein forcing: one shared stub waveform (21S), each node its own stub (27S), or the local ratio")
+    ap.add_argument("--veins", choices=("mean", "own", "local"), default=None,
+                    help="vein forcing: one shared stub waveform (21S), each node its own stub (27S), or the local ratio (default: plexusflow.yaml ac_veins, else mean)")
     ap.add_argument("--fit-veins", action="store_true", help="free the L/R vein group corrections (default: pinned)")
     ap.add_argument("--eta", type=float, nargs="+", default=[0.0], help="η grid (default 0: purely elastic wall)")
     ap.add_argument("--weights", choices=("waveform", "c"), default="waveform")
@@ -36,17 +36,29 @@ def main():
     ap.add_argument("--d-range", type=float, nargs=3, default=[2.5e-4, 8.0e-4, 21], metavar=("MIN", "MAX", "N"))
     ap.add_argument("--gauge-passes", type=int, default=2)
     ap.add_argument("--n-jobs", type=int, default=8)
+    ap.add_argument("--h1-only", action="store_true", help="sensitivity: leave the H2 phase term out of the likelihood (H1 phase + pulsatility only)")
     ap.add_argument("--out", default="ac_estimate_v8", help="results/<out>.json (default ac_estimate_v8, the paper fit)")
     ap.add_argument("--field", default="ac_field_v7", help="results/<field>.pkl (default ac_field_v7 = scripts/ac_field.py defaults)")
     ap.add_argument("--gauge-block", default=None, help="tiles sharing one extra gauge offset with a flat prior, e.g. 15,18,19,20,29,30,31,32,33,34")
+    ap.add_argument("--topo", default="flux", choices=("sealed", "flux", "supernode"),
+                    help="pulsatile closure of topology-uncertain regions (plexusmech.ac.model.build_context); sensitivity, none primary")
+    ap.add_argument("--supernode-scale", type=float, default=1.0, help="supernode compliance × this (region volume uncertain)")
     a = ap.parse_args()
+    from plexusflow.config import StageConfig
+    _cfg = StageConfig.load(paths.STAGE)                     # per-stage defaults (plexusflow.yaml)
+    if a.veins is None:
+        a.veins = _cfg.ac_veins
+    if a.gauge_block is None and _cfg.ac_gauge_block:
+        a.gauge_block = ",".join(str(int(t)) for t in _cfg.ac_gauge_block)
     G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
     A = pickle.loads((paths.RESULTS / f"{a.field}.pkl").read_bytes())
     if "var_phi" not in A:
         sys.exit("results/ac_field_v2.pkl predates the per-beat uncertainties — rerun scripts/ac_field.py")
     model = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text()); model["c_T"] = {int(k): v for k, v in model["c_T"].items()}
     dom = carved_domain(G); sup = supported(A); Am = dict(A, elig=sup)
-    C0 = build_context(D, Am, dom); c = ac_reliability(G, Am, model)
+    C0 = build_context(D, Am, dom, topo=a.topo, supernode_scale=a.supernode_scale); c = ac_reliability(G, Am, model)
+    log(f"  topology regions: {len(dom['regions'])} ({sum(not r['leaky'] for r in dom['regions'])} sealed-in-DC), pulsatile closure '{a.topo}'"
+        + (f" × {a.supernode_scale:g}" if a.topo == 'supernode' else ''))
     log(f"{paths.STAGE.name}: {sup.sum()} measurement-supported of {A['elig'].sum()} AC-eligible vessels; veins '{a.veins}'"
         f"{' (fitted)' if a.fit_veins else ' (pinned)'}; η {a.eta}; weights '{a.weights}'")
     d_grid = np.logspace(np.log10(a.d_range[0]), np.log10(a.d_range[1]), int(a.d_range[2])); gauge_rad = None
@@ -59,7 +71,7 @@ def main():
                 + ", ".join(f"H{k} {abs(info['mean'][k]):.3f}∠{np.degrees(np.angle(info['mean'][k])):+.0f}°" for k in (1, 2)))
         R = fit_profile(C, c, A, d_grid=d_grid, eta_grid=a.eta, weights=a.weights, gauge=not a.no_gauge, pin_veins=not a.fit_veins,
                         n_jobs=a.n_jobs, progress=lambda m: log("  " + m),
-                        gauge_block=[int(t) for t in a.gauge_block.split(",")] if a.gauge_block else None)
+                        gauge_block=[int(t) for t in a.gauge_block.split(",")] if a.gauge_block else None, harmonics=(1,) if a.h1_only else (1, 2))
         gauge_rad = {t: np.radians(v) for t, v in R["delta_deg"].items()}
         prof = np.nanmin(R["S"], axis=0) - np.nanmin(R["S"])
         log(f"  pass {p + 1}: best D {R['D']:.3e} (parabola {quadratic_min(d_grid, prof):.3e}), η {R['eta']:.2f}, NLL {R['nll']:.1f}"
@@ -73,7 +85,8 @@ def main():
     log("  largest tile gauge corrections: " + ", ".join(f"{t}: {v:+.0f}° [SD {A['gauge_sd_deg'].get(t, np.nan):.0f}°]" for t, v in big))
     f = fitted_forcing(C, R["x"]); bnd = np.asarray(dom["bnd"])
     out = dict(stage=paths.STAGE.name, D=R["D"], D_parabola=quadratic_min(d_grid, prof), eta=R["eta"], nll=R["nll"],
-               forcing=f"carve: local ratio + L/R group corrections; veins: {a.veins}{' (fitted)' if a.fit_veins else ' (pinned)'}; "
+               topo=a.topo, supernode_scale=a.supernode_scale,
+               forcing=f"carve: local ratio + L/R group corrections; topology regions: {a.topo}; veins: {a.veins}{' (fitted)' if a.fit_veins else ' (pinned)'}; "
                        f"weights {a.weights}; tile gauge {'latent' if not a.no_gauge else 'off'}",
                settings=vars(a), D_grid=d_grid.tolist(), eta_grid=list(a.eta), S=R["S"].tolist(),
                nodes=[int(dom["nodes"][b]) for b in bnd], f1=[[float(z.real), float(z.imag)] for z in f[1]],

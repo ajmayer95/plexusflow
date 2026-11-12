@@ -17,8 +17,22 @@ import scipy.sparse.linalg as spla
 MU, PX_M, NL = 3.5e-3, 1.7e-6, 1e-12      # Pa·s, m per pixel, m³ per nL
 
 
-def build_context(dc, field, dom):
-    """Arrays for the harmonic solves: topology, geometry (consensus radii), DC field, eligible Ĥ, boundary forcing F."""
+TOPO_MODES = ("sealed", "flux", "supernode")
+
+
+def build_context(dc, field, dom, topo="flux", supernode_scale=1.0):
+    """Arrays for the harmonic solves: topology, geometry (consensus radii), DC field, eligible Ĥ, boundary forcing F.
+
+    Topology-uncertain regions (dom['regions'], conserving black boxes in the DC reconstruction) need a pulsatile
+    closure — the DC black box says nothing about how they transmit pressure.  Sensitivity options (none is primary):
+      'sealed'     no oscillatory exchange at the interfaces (diagnostic baseline; unphysical)
+      'flux'       interfaces driven like the carve boundary: f_n^(k) = f_DC,n · r_n^(k), r the local measured ratio —
+                   fixed inputs (boundary group 4, never corrected by the fit)
+      'supernode'  each region a perfectly conducting compliant compartment: its interfaces tied by a near-zero
+                   resistance, lumped compliance D_eff · V_region · supernode_scale (V from the region's traced vessels)
+    Leaky regions (fed through an open region) are already inflow boundary nodes and are driven by the local ratio."""
+    if topo not in TOPO_MODES:
+        raise ValueError(f"topo must be one of {TOPO_MODES}, not {topo!r}")
     nodes = dom["nodes"]; ix = {n: i for i, n in enumerate(nodes)}; sub = dom["edges"]
     tail = np.array([ix[u] for u, v in sub]); head = np.array([ix[v] for u, v in sub]); nE = len(sub); nN = len(nodes)
     Qp, fb, elig = dc["Qp"], dc["fb"], field["elig"]
@@ -48,7 +62,12 @@ def build_context(dc, field, dom):
             v = fb[n_] * local_r(n_, k); F[(k, "P=0")][n_] = v; F[(k, "flux")][n_] = v
         for n_ in dom["out"]:
             F[(k, "flux")][n_] = fb[n_] * local_r(n_, k)
-    return dict(f0=field["f_ref"], nN=nN, nE=nE, dom=dom, Qp=Qp, Qs_dc=dc["Qs"],
+        if topo == "flux":
+            for n_ in dom.get("topo_cut", []):
+                v = fb[n_] * local_r(n_, k); F[(k, "P=0")][n_] = v; F[(k, "flux")][n_] = v
+    sup = [(np.array([ix[n] for n in r["cut"]]), r["volume_px3"] * PX_M ** 3 * supernode_scale)
+           for r in dom.get("regions", []) if not r["leaky"] and r["cut"]] if topo == "supernode" else []
+    return dict(topo=topo, supernode_scale=supernode_scale, super=sup, f0=field["f_ref"], nN=nN, nE=nE, dom=dom, Qp=Qp, Qs_dc=dc["Qs"],
                 H={1: np.where(elig, H[1], np.nan), 2: np.where(elig, H[2], np.nan)},
                 elig=elig, F=F, tail=tail, head=head, r_m=dc["radius"] * PX_M, l_m=dc["length"] * PX_M)
 
@@ -61,6 +80,14 @@ def _admittances(C, k, D, eta):
     Yt = Gc * np.where(small, 1 - ks / 6, xi / np.sinh(np.where(small, 1, xi)))
     t, h, nN = C["tail"], C["head"], C["nN"]
     Y = sp.csr_matrix((np.r_[Ys, Ys, -Yt, -Yt], (np.r_[t, h, t, h], np.r_[t, h, h, t])), shape=(nN, nN)).tocsc()
+    if C.get("super"):                                   # topology regions as conducting compliant compartments
+        gbig = 1e3 * float(np.max(Gc)); rows, cols, vals = [], [], []
+        for cut, V in C["super"]:
+            rep = cut[0]
+            for n in cut[1:]:
+                rows += [rep, n, rep, n]; cols += [rep, n, n, rep]; vals += [gbig, gbig, -gbig, -gbig]
+            rows.append(rep); cols.append(rep); vals.append(1j * om * D * (1 - 1j * eta) * V)
+        Y = (Y + sp.csr_matrix((np.array(vals, complex), (rows, cols)), shape=(nN, nN))).tocsc()
     return Ys, Yt, Y
 
 
@@ -132,11 +159,11 @@ def vein_forcing(C, field, mode="mean", gauge_rad=None):
 
 def group_response(C, k, D, eta, gid, el):
     """Vessel-mean H_k (rows: eligible edges) driven by the context's flux forcing restricted to each boundary group
-    (columns g = 0..3).  Equals response(C, k, D, eta, bnd)[el][:, gid == g] @ f[bnd][gid == g], with 4 right-hand sides
+    (columns g = 0..3; column 4 = the fixed, never-corrected forcing at topology-region interfaces).  Equals response(C, k, D, eta, bnd)[el][:, gid == g] @ f[bnd][gid == g], with 4 right-hand sides
     instead of one per boundary node."""
     Ys, Yt, Y = _admittances(C, k, D, eta); t, h, nN = C["tail"], C["head"], C["nN"]; bnd = np.asarray(C["dom"]["bnd"])
-    f = C["F"][(k, "flux")][bnd]; RHS = np.zeros((nN, 4), complex)
-    for g in range(4):
+    f = C["F"][(k, "flux")][bnd]; RHS = np.zeros((nN, 5), complex)
+    for g in range(5):                                   # column 4: fixed forcing (topology-region interfaces, flux closure)
         RHS[bnd[gid == g], g] = f[gid == g] * NL
     P = spla.splu(Y).solve(RHS)
     return (0.5 * (Ys + Yt)[:, None] * (P[t] - P[h]) / NL)[el]

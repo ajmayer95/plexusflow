@@ -179,6 +179,9 @@ def _profile_qc(bin_centers, profile_v, R_edt_mean_um, px_um, dt_s,
 # so callers pass one ``pt`` dict rather than re-importing everywhere.
 # ---------------------------------------------------------------------
 
+from .kloosterman import parabolicity
+
+
 def _import_pertile():
     """Return the analysis pipeline bundle.
 
@@ -415,7 +418,7 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
     # off the junction node).  Replaces the EDT junction-bulge trim, which
     # over-trimmed short/junction-adjacent/boundary vessels to stubs and dropped
     # ~16% of them below the arc/aspect QC gates (tile-12 measurement).  The
-    # downstream Kloosterman median-band, per-slice R gates, neighbour rejection
+    # downstream Kloosterman shape / sign gates, per-slice R gates, neighbour rejection
     # and curvature guard reject contaminated END SLICES without discarding the
     # whole vessel — so we keep coverage AND match fresh-OF exactly.  (compute
     # resamples internally too; the pre-smooth is dropped to mirror the viewer.)
@@ -587,6 +590,7 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
     _fin = np.isfinite(_psq)
     out["quality"] = dict(
         kl_ok=bool(np.isfinite(Q_kl)),
+        p=parabolicity(u.get("R2_kloosterman_per_slice", [])) if np.isfinite(Q_kl) else 0.0,
         n_slices=int(_psq.size), n_kept=int(Q_kl_n_valid), f=float(Q_kl_valid_frac) if np.isfinite(Q_kl) else 0.0,
         slice_cv=(float(np.nanstd(np.abs(_psq[_fin])) / max(np.nanmean(np.abs(_psq[_fin])), 1e-12))
                   if _fin.sum() >= 2 else float("nan")),
