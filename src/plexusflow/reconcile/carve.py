@@ -1,10 +1,13 @@
-"""Carve: the porous (radial_uncertain) region and the reduced network that reconciliation runs on.
+"""Carve: the open-boundary region and the reduced network that reconciliation runs on.
+
+Region classes and tag keys: ``reconcile.regions`` (open = ``open_region``, legacy ``radial_uncertain``; topology-uncertain
+regions are handled in ``network.carved_domain``, not here).
 
 Ported from ``scripts/run_sim_carved_outlets.py`` (2026-09-30); moved here from ``plexusflow.inference`` in the
 2026-10 package split, since the carved domain is part of the measurement reconstruction.
 
 Terminology (see the ``carve_algorithm`` note for the full recipe):
-  * ``radial_uncertain`` edge tag → the porous region.
+  * open-region edge tag (``open_region``, legacy ``radial_uncertain``) → the porous / open region.
   * ``U`` = every node touching any tagged edge.
   * outlets = subset of ``U`` with at least one non-tagged edge going to a NON-porous, non-anchor node — where
     blood enters/leaves the carved network.
@@ -31,8 +34,9 @@ def find_porous_and_outlets(G: nx.Graph):
       * components : list[set[int]] — connected components of the
         porous subgraph, sorted largest first.
     """
+    from .regions import is_open
     tagged = [(u, v) for u, v, d in G.edges(data=True)
-              if d.get('radial_uncertain')]
+              if is_open(d)]
     U: Set[int] = set()
     for u, v in tagged:
         U.add(u); U.add(v)
@@ -46,7 +50,7 @@ def find_porous_and_outlets(G: nx.Graph):
         for m in G.neighbors(n):
             if m in U or m in A_anchors or m in V_anchors:
                 continue
-            if G.edges[n, m].get('radial_uncertain'):
+            if is_open(G.edges[n, m]):
                 continue
             outlets.append(n)
             break
@@ -77,8 +81,9 @@ def build_carved_graph(G: nx.Graph,
     """
     Gc = G.copy()
     # Drop tagged edges
+    from .regions import is_open
     for u, v, d in list(Gc.edges(data=True)):
-        if d.get('radial_uncertain'):
+        if is_open(d):
             Gc.remove_edge(u, v)
     # Drop A anchors
     for a in A_a:

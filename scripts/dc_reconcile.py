@@ -1,9 +1,13 @@
-"""DC reconciliation (final method, 2026-10-07) from the measured graph.
+"""Mean-flow (DC) reconstruction of one stage from its measured graph (final method, frozen 2026-11-12).
 
-1. Reliability scale c = c0 + c_p(1 − p) + c_a(1 − align) (p = parabolicity; f before 2026-11-10), ML-fitted on same-tile junction balance (--tile-terms: per-tile c_T).
-2. Per edge the Kloosterman-valid measurement with the smallest c; carved network; quasi-likelihood reconciliation under
-   B_I Q = 0 (variance c²Q′² + σ0², projected Newton from the uniform projection; plexusflow.reconcile.dc); emergent
-   boundary f = B Q'; passive comparison (--radius: consensus or calibrated anatomical radii) + radius shuffle.
+1. Reliability scale c = c0 + c_p(1 − p) + c_a(1 − align) (p = parabolicity), ML-fitted on same-tile junction balance of
+   this stage (--tile-terms: per-tile c_T).
+2. Per vessel the 1/c²-weighted average of its Kloosterman-valid recordings (between-recording spread kept as a variance
+   floor); carved network; quasi-likelihood reconciliation under interior conservation (variance c²Q′² + σ0² evaluated at
+   the reconciled flow, projected Newton from the uniform projection; plexusflow.reconcile.dc); emergent boundary
+   f = B Q'; passive comparison (--radius: consensus or calibrated anatomical radii) + radius shuffle.
+Graph regions (plexusflow.reconcile.regions): open-boundary regions are carved with free inflow boundaries; topology-uncertain
+regions are carved as mass-conserving black boxes (--no-topology ignores them, reproducing the open-region-only carve).
 See plexusflow.reconcile.  Writes results/reliability_model_v1.json and results/dc_reconciled_v2.pkl.
 """
 import sys
@@ -22,6 +26,7 @@ def main():
     ap.add_argument("--radius", default="consensus", choices=("consensus", "anatomical"),
                     help="radius for the passive model and the AC model: consensus √(R_graph·R_kl) or the calibrated "
                          "segmentation radius (scripts/anatomical_radius.py)")
+    ap.add_argument("--no-topology", action="store_true", help="ignore topology-uncertain region tags (open-region carve only)")
     a = ap.parse_args()
     G = paths.load_graph()
     M = measurement_table(G)
@@ -30,10 +35,14 @@ def main():
     print(f"[1] reliability fit: {model['n_junctions']} junctions, {len(cT)} tiles:  c_{model['profile_term']} {model['c_' + model['profile_term']]:.2f}  c_a {model['c_a']:.2f}  "
           f"σ0 {model['sigma0']:.4f}  " + (f"c0 {model['c0']:.3f}" if 'c0' in model else
           f"c_T median {np.median(cT):.2f} [IQR {np.percentile(cT, 25):.2f}–{np.percentile(cT, 75):.2f}]"))
-    D = reconcile_dc(G, model, M, radius=a.radius)
+    D = reconcile_dc(G, model, M, radius=a.radius, topology=not a.no_topology)
     dom, met, C, im = D.pop("dom"), D["metrics"], D["c"], D["imaged"]
     print(f"[2] carved network: {len(D['edges'])} edges, boundary {len(dom['inj'])} carve + {len(dom['out'])} V;  measured {im.sum()} "
           f"({im.mean():.0%}): trusted {np.sum(im & (C < 0.5))}, weak {np.sum(im & (C >= 0.5) & (C < 0.8))}, untrusted {np.sum(im & (C >= 0.8))}")
+    TR = D["topology_regions"]
+    print(f"    topology-uncertain regions: {len(TR)} ({D['n_topology_edges']} edges removed{', IGNORED (--no-topology)' if a.no_topology else ''})"
+          + "".join(f"\n      region {k}: {r['n_edges']} edges, {len(r['cut'])} cut nodes{' LEAKY' if r['leaky'] else ''}, "
+                    f"net exchange {r['net']:+.1e}, throughput {r['throughput']:.2f} nL/s" for k, r in enumerate(TR)))
     cc = met["contracted"]
     print(f"    contracted network (unimaged edges < {cc['k_radii']:g} radii merged into junctions: {cc['n_short_unimaged']}): {cc['n_vessels']} vessels, "
           f"{cc['n_imaged']} imaged ({cc['n_imaged'] / cc['n_vessels']:.0%}), {cc['n_unimaged']} unimaged; {cc['n_junctions']} interior junctions "

@@ -239,7 +239,7 @@ PROPERTY_DEFS = [
     ('waveform_av',   'Waveform A↔V (+art / −ven)', False,
         {('measured', 'Q'), ('sim', 'Q')}),
 ]
-# Reconciliation outputs (results/dc_reconciled_v2.pkl + ac_field_v2.pkl, see `_load_reconciliation`):
+# Reconciliation outputs (results/dc_reconciled_v2.pkl + ac_field_v7.pkl, see `_load_reconciliation`):
 # relative DC uncertainty from the IRLS ensemble, and the bootstrap SD of the winner tile's time gauge.
 PROPERTY_DEFS += [
     ('rec_dc_sd',     'DC uncertainty (ensemble SD / |Q\u2032|)', False, {('reconciled', 'Q')}),

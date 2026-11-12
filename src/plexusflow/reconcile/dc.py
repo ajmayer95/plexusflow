@@ -1,4 +1,8 @@
-"""Full DC reconciliation on the carved network.
+"""Full DC reconciliation on the carved network (final method, frozen 2026-11-12).
+
+0. Network: network.carved_domain — open-boundary regions removed with free inflow boundaries, topology-uncertain regions
+   removed as mass-conserving black boxes (one conservation row per region; reconcile.regions).  Both are graph tags set
+   in the workbench viewer; a stage without tags reconstructs on the whole network minus the DA anchors.
 
 1. Per edge the 1/c²-weighted average of its Kloosterman-valid recordings with weighted-RMS reliability (vessel_input;
    before 2026-11-10 the single recording with the smallest c), Q signed u→v.  Kloosterman-failed / unmeasured edges are unimaged.
@@ -122,9 +126,9 @@ def ql_solve(Q, y, C, imaged, s0, m, dom, tol=1e-10, max_iter=500):
     return Q, dict(objective=f, n_iter=it, converged=converged, n_concave=int(np.sum(imaged & (h < 0))), m=m)
 
 
-def reconcile_dc(G, model, M, dom=None, tol=1e-10, max_iter=500, n_shuffle=10, seed=0, n_starts=4, start_noise=0.3, stable_rtol=0.10,
+def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, n_shuffle=10, seed=0, n_starts=4, start_noise=0.3, stable_rtol=0.10,
                  radius="consensus", per_vessel=PER_VESSEL):
-    dom = dom or carved_domain(G)
+    dom = dom or carved_domain(G, topology=topology)
     recs = {}
     for (t, e), m in M.items():
         recs.setdefault(e, []).append((m, c_of(model, m)))
@@ -147,6 +151,10 @@ def reconcile_dc(G, model, M, dom=None, tol=1e-10, max_iter=500, n_shuffle=10, s
         if n_starts else np.zeros(me, bool)
     n_it, converged = info["n_iter"], info["converged"]
     fb = emergent(Qp, dom)
+    f_all = dom["B"] @ Qp; nix = {n: k for k, n in enumerate(dom["nodes"])}
+    topo_regions = [dict(n_edges=r["n_edges"], cut=r["cut"], leaky=r["leaky"],
+                         net=float(sum(f_all[nix[n]] for n in r["cut"])), throughput=float(0.5 * sum(abs(f_all[nix[n]]) for n in r["cut"])))
+                    for r in dom.get("regions", [])]
     rg = np.array([G.edges[e]["radius"] for e in sub], float)
     def _median_rkl(e):
         r = [m["R_kl_um"] / PX_UM for m in G.edges[e].get("measurements_piv") or [] if m.get("R_kl_um") and np.isfinite(m["R_kl_um"])]
@@ -170,4 +178,5 @@ def reconcile_dc(G, model, M, dom=None, tol=1e-10, max_iter=500, n_shuffle=10, s
                 n_iter=n_it, sigma0_floor=s0, dom=dom, estimator="quasi-likelihood, projected Newton (2026-11-03)",
                 objective=info["objective"], objective_m=m, n_concave=info["n_concave"],
                 converged=converged, Qp_sd=Qp_sd, unstable=unstable, n_starts=n_starts, short_unimaged=short_unimaged,
-                radius_model=radius if isinstance(radius, str) else "given", radius_consensus=r_cons, per_vessel=per_vessel, n_rec=n_rec)
+                radius_model=radius if isinstance(radius, str) else "given", radius_consensus=r_cons, per_vessel=per_vessel, n_rec=n_rec,
+                topology_regions=topo_regions, n_topology_edges=int(sum(r["n_edges"] for r in dom.get("regions", []))))

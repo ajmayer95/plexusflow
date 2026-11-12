@@ -302,7 +302,7 @@ class EditMixin:
 
 
     def _toggle_radial_uncertain_on_selected(self):
-        """Flip the ``radial_uncertain`` flag on ``self._selected_edge``."""
+        """Toggle the selected region tag class on ``self._selected_edge``."""
         if not self._require_workbench('tagging'):
             return
         if self._selected_edge is None:
@@ -313,16 +313,15 @@ class EditMixin:
         u, v = self._selected_edge
         if not self.G.has_edge(u, v):
             return
+        from ..reconcile.regions import region_class, set_region, LABELS
+        cls = getattr(self, '_tag_class', 'topology')
         d = self.G.edges[u, v]
-        was = bool(d.get('radial_uncertain'))
-        if was:
-            d.pop('radial_uncertain', None)
-        else:
-            d['radial_uncertain'] = True
+        was = region_class(d) == cls
+        set_region(d, None if was else cls)
         self._radial_tags_dirty = True
-        action = "cleared" if was else "flagged"
+        action = "cleared" if was else "tagged"
         self._info_box.setPlainText(
-            f"Edge ({u}, {v}) {action} as radial-uncertain.")
+            f"Edge ({u}, {v}) {action}: {LABELS[cls]}.")
         self._refresh_edges()
         self._refresh_radial_status()
 
@@ -331,11 +330,11 @@ class EditMixin:
         """Update the status label with the count of tagged edges."""
         if not hasattr(self, '_radial_status_lbl'):
             return
-        n = sum(1 for _, _, dd in self.G.edges(data=True)
-                if dd.get('radial_uncertain'))
+        from ..reconcile.regions import counts
+        c = counts(self.G)
         dirty = " (unsaved)" if self._radial_tags_dirty else ""
         self._radial_status_lbl.setText(
-            f"Tagged: {n} vessel(s){dirty}")
+            f"Tagged: {c['topology']} topology-uncertain, {c['open']} open-boundary{dirty}")
 
 
     def _on_click_to_tag_toggle(self, checked: bool):
@@ -343,8 +342,8 @@ class EditMixin:
         self._click_to_tag_mode = bool(checked)
         if checked:
             self._info_box.setPlainText(
-                "Click-to-tag mode ON. Every click on a vessel toggles its "
-                "radial_uncertain flag. Uncheck to return to normal.")
+                "Click-to-tag mode ON. Every click on a vessel toggles the "
+                "selected tag class. Uncheck to return to normal.")
         else:
             self._info_box.setPlainText(
                 "Click-to-tag mode OFF.")
@@ -352,7 +351,7 @@ class EditMixin:
 
     def _tag_nearest_edge(self, x_graph: float, y_graph: float,
                             max_px: float = 20.0):
-        """Toggle radial_uncertain on the edge nearest ``(x, y)`` in
+        """Toggle the selected tag class on the edge nearest ``(x, y)`` in
         graph coordinates.  Used by click-to-tag mode + rectangle tag."""
         import numpy as np
         if self._edge_midpoints is None or len(self._edge_midpoints) == 0:
@@ -364,12 +363,10 @@ class EditMixin:
         if dist > max_px:
             return
         u, v = self.edge_list[i]
+        from ..reconcile.regions import region_class, set_region
+        cls = getattr(self, '_tag_class', 'topology')
         d = self.G.edges[u, v]
-        was = bool(d.get('radial_uncertain'))
-        if was:
-            d.pop('radial_uncertain', None)
-        else:
-            d['radial_uncertain'] = True
+        set_region(d, None if region_class(d) == cls else cls)
         self._radial_tags_dirty = True
         self._refresh_edges()
         self._refresh_radial_status()
@@ -388,7 +385,7 @@ class EditMixin:
             return lyr
         lyr = self.viewer.add_shapes(
             [], name='RegionTag',
-            edge_color=RADIAL_UNCERTAIN_COLOR,
+            edge_color=__import__('plexusflow.reconcile.regions', fromlist=['COLORS']).COLORS.get(getattr(self, '_tag_class', 'topology'), RADIAL_UNCERTAIN_COLOR),
             face_color='transparent', edge_width=2.0, opacity=0.9,
         )
         self._region_tag_layer = lyr
@@ -505,7 +502,7 @@ class EditMixin:
         self._info_box.setPlainText(
             f"{shape_label} {action}: draw regions on the canvas — each "
             f"is applied when the shape closes.  Every edge whose midpoint "
-            f"is inside gets ``radial_uncertain`` "
+            f"is inside gets the selected tag class "
             f"{'set' if action == 'tag' else 'cleared'}.  Press Stop when done.")
 
 
@@ -521,16 +518,18 @@ class EditMixin:
         disp = np.column_stack([H - self._edge_midpoints[:, 1],
                                  self._edge_midpoints[:, 0]])
         inside = Path(np.asarray(poly_rc)).contains_points(disp)
+        from ..reconcile.regions import region_class, set_region
+        cls = getattr(self, '_tag_class', 'topology')
         n = 0
         for i in np.flatnonzero(inside):
             u, v = self.edge_list[i]
             d = self.G.edges[u, v]
-            was = bool(d.get('radial_uncertain'))
-            if action == 'tag' and not was:
-                d['radial_uncertain'] = True
+            cur = region_class(d)
+            if action == 'tag' and cur != cls:
+                set_region(d, cls)
                 n += 1
-            elif action == 'untag' and was:
-                d.pop('radial_uncertain', None)
+            elif action == 'untag' and cur == cls:
+                set_region(d, None)
                 n += 1
         return n
 
@@ -546,11 +545,11 @@ class EditMixin:
                 self._dump_graph(f)
             self._radial_tags_dirty = False
             self._refresh_radial_status()
-            n = sum(1 for _, _, dd in self.G.edges(data=True)
-                    if dd.get('radial_uncertain'))
+            from ..reconcile.regions import counts
+            _c = counts(self.G); n = f"{_c['topology']} topology-uncertain + {_c['open']} open-boundary"
             QMessageBox.information(
                 self.viewer.window._qt_window,
-                "Radial-uncertainty tags saved",
+                "Region tags saved",
                 f"Wrote {n} tagged vessel(s) to:\n{self.graph_path}",
             )
         except Exception as exc:

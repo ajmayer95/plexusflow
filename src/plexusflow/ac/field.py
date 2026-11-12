@@ -288,7 +288,8 @@ def junction_residuals(field, dom, seed=0):
     Returns (n_junctions, {k: {'aligned', 'unaligned', 'random'}}) for k = 1, 2: the tile-aligned field, the same
     phasors with the tile gauge undone, and a random-phase null with the aligned magnitudes."""
     el, Hf, nE = field["elig"], field["H"], len(field["edges"])
-    B = dom["B"].tocsr(); absB = abs(B); interior = np.setdiff1d(np.arange(B.shape[0]), dom["bnd"])
+    B = dom["B"][:dom.get("n_real", dom["B"].shape[0])].tocsr(); absB = abs(B)          # node rows only (no region rows)
+    interior = np.setdiff1d(np.arange(B.shape[0]), [b for b in dom["bnd"] if b < B.shape[0]])
     n_bad = np.asarray(absB @ (~el).astype(float)).ravel(); deg = np.asarray(absB.sum(axis=1)).ravel()
     nodes_ok = interior[(n_bad[interior] == 0) & (deg[interior] >= 3)]; rng = np.random.default_rng(seed)
     r = lambda H: float(np.median(np.abs((B @ H)[nodes_ok]) / np.maximum((absB @ np.abs(H))[nodes_ok], 1e-30)))

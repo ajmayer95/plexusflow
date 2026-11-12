@@ -1809,7 +1809,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
             if self._inspect_nearest_boundary_node(col, row):
                 return
             # Click-to-tag: bypass the info-inspect flow and toggle the
-            # nearest edge's radial_uncertain flag directly.  Same
+            # selected region tag class on the nearest edge.  Same
             # hit-testing radius as the normal inspect click.
             if getattr(self, '_click_to_tag_mode', False):
                 self._tag_nearest_edge(col, row)
@@ -1881,7 +1881,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
         self._src_radio_rec.setChecked(self.current_source == 'reconciled')
         self._src_radio_rec.setEnabled(self._reconciliation_available())
         self._src_radio_rec.setToolTip(
-            "Conservative DC flow Q\u2032 and tile-aligned harmonics (results/dc_reconciled_v2.pkl, ac_field_v2.pkl)."
+            "Conservative DC flow Q\u2032 and tile-aligned harmonics (results/dc_reconciled_v2.pkl, ac_field_v7.pkl)."
             if self._reconciliation_available() else
             "No reconciliation found: run scripts/dc_reconcile.py and scripts/ac_field.py for this stage.")
         self._src_radio_sim = QRadioButton("Sim (intact)")
@@ -1970,32 +1970,56 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
         self._log_chk.toggled.connect(self._on_log_toggle)
         fld_lay.addWidget(self._log_chk)
 
-        # ── Radial-uncertainty tagging ──────────────────────────────
-        # Small panel in the View tab so the user can visually mark
-        # vessels whose radius they don't trust, without touching the
-        # solver.  The flag persists as ``edge['radial_uncertain']=True``
-        # on the graph — downstream analysis can filter on it.
+        # ── Region tagging (reconcile.regions) ─────────────────────
+        # Two classes, both removed from the reconstruction network:
+        #   Open boundary       — blood enters / leaves here (zones beside the
+        #                         DA); cut nodes are free inflow boundaries.
+        #   Topology uncertain  — graph does not represent the vessels
+        #                         (marginal band, sheet flow); each region is a
+        #                         mass-conserving black box.
+        # Tags persist as edge['open_region'] / edge['topology_uncertain']
+        # (legacy 'radial_uncertain' is read as open).  Save writes the graph.
         _ru_row = QWidget()
         _ru_lay = QVBoxLayout(_ru_row)
         _ru_lay.setContentsMargins(0, 4, 0, 0)
         self._radial_uncertain_chk = QCheckBox(
-            "Highlight uncertain vessels (orange)")
+            "Highlight tagged regions (orange = open, cyan = topology)")
         self._radial_uncertain_chk.setChecked(self._show_radial_uncertain)
         self._radial_uncertain_chk.setToolTip(
-            "When on, edges flagged ``radial_uncertain=True`` render in "
-            "orange regardless of the current colormap.  Toggle 'u' on a "
-            "selected edge to add/remove the flag; press Save to persist.")
+            "When on, tagged edges render in their class colour regardless "
+            "of the current colormap (orange = open boundary, cyan = "
+            "topology uncertain).  'u' toggles the selected class on the "
+            "selected edge; press Save to persist.")
         self._radial_uncertain_chk.toggled.connect(
             self._on_radial_uncertain_toggle)
         _ru_lay.addWidget(self._radial_uncertain_chk)
+
+        # Tag class used by every tagging action below.
+        from ..reconcile.regions import OPEN, TOPOLOGY, LABELS
+        _cls_row = QWidget(); _cls_lay = QHBoxLayout(_cls_row); _cls_lay.setContentsMargins(0, 0, 0, 0)
+        _cls_lay.addWidget(QLabel("Tag class:"))
+        self._tag_class_combo = QComboBox()
+        self._tag_class_combo.addItem(LABELS[TOPOLOGY], userData=TOPOLOGY)
+        self._tag_class_combo.addItem(LABELS[OPEN], userData=OPEN)
+        self._tag_class_combo.setToolTip(
+            "Topology uncertain: the graph here does not represent the vessels "
+            "(unresolvable marginal band, sheet flow); the region is removed and "
+            "treated as a mass-conserving black box.\n"
+            "Open boundary: blood enters / leaves the network here (zones beside "
+            "the dorsal aortae); cut nodes become free inflow boundaries.")
+        self._tag_class_combo.currentIndexChanged.connect(
+            lambda _i: setattr(self, '_tag_class', self._tag_class_combo.currentData()))
+        self._tag_class = TOPOLOGY
+        _cls_lay.addWidget(self._tag_class_combo)
+        _ru_lay.addWidget(_cls_row)
 
         # Click-to-tag mode: while ON, every click on a vessel toggles
         # its tag instead of showing info.  Much faster for bulk tagging.
         self._click_to_tag_chk = QCheckBox("Click-to-tag mode")
         self._click_to_tag_chk.setChecked(False)
         self._click_to_tag_chk.setToolTip(
-            "When on, clicking a vessel directly toggles its "
-            "``radial_uncertain`` flag instead of opening the info box.  "
+            "When on, clicking a vessel directly toggles the selected tag "
+            "class on it instead of opening the info box.  "
             "Turn off to return to normal inspect-on-click behaviour.")
         self._click_to_tag_chk.toggled.connect(
             self._on_click_to_tag_toggle)
@@ -2007,22 +2031,23 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
         _btn_lay.setContentsMargins(0, 0, 0, 0)
         self._radial_toggle_btn = QPushButton("Toggle on selected  (u)")
         self._radial_toggle_btn.setToolTip(
-            "Flip the ``radial_uncertain`` flag on the currently selected "
-            "edge.  Same as pressing 'u' in the napari canvas.")
+            "Toggle the selected tag class on the currently selected edge.  "
+            "Same as pressing 'u' in the napari canvas.")
         self._radial_toggle_btn.clicked.connect(
             self._toggle_radial_uncertain_on_selected)
         _btn_lay.addWidget(self._radial_toggle_btn)
         self._radial_save_btn = QPushButton("Save tags")
         self._radial_save_btn.setToolTip(
-            "Write the current radial_uncertain flags back to the graph "
-            "file on disk.  No solver rerun.")
+            "Write the current region tags back to the graph file on disk "
+            "(the stage graph the pipeline reads — back it up first).  No "
+            "solver rerun.")
         self._radial_save_btn.clicked.connect(self._save_radial_uncertain_tags)
         _btn_lay.addWidget(self._radial_save_btn)
         _ru_lay.addWidget(_btn_row)
 
         # Region-based tag/untag: pick a shape (Rectangle or Lasso), then
         # press Tag or Untag — every edge midpoint inside the drawn region
-        # gets ``radial_uncertain`` flipped in that direction.  ONE scratch
+        # gets the selected tag class set / cleared.  ONE scratch
         # Shapes layer is reused across sessions so we never hit the
         # napari layer-lifecycle race that made the old "Rectangle tag…"
         # button stop working after ~two uses.
@@ -2043,14 +2068,14 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
         self._region_tag_btn = QPushButton("Tag")
         self._region_tag_btn.setToolTip(
             "Draw the selected region on the canvas — every edge whose "
-            "midpoint falls inside gets ``radial_uncertain=True`` on release.")
+            "midpoint falls inside gets the selected tag class on release.")
         self._region_tag_btn.clicked.connect(
             lambda: self._start_region_action("tag"))
         _rg_lay.addWidget(self._region_tag_btn)
         self._region_untag_btn = QPushButton("Untag")
         self._region_untag_btn.setToolTip(
-            "Draw a region — every edge midpoint inside gets its "
-            "``radial_uncertain`` flag CLEARED on release.")
+            "Draw a region — every edge midpoint inside that carries the "
+            "selected tag class has it CLEARED on release.")
         self._region_untag_btn.clicked.connect(
             lambda: self._start_region_action("untag"))
         _rg_lay.addWidget(self._region_untag_btn)
@@ -2696,13 +2721,14 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
 
         # Gate the carved-recipe radio: only enabled if the graph has
         # tagged edges to define a porous zone.
+        from ..reconcile.regions import is_open as _is_open
         _n_tagged = sum(1 for _, _, d in self.G.edges(data=True)
-                        if d.get('radial_uncertain'))
+                        if _is_open(d))
         if _n_tagged == 0:
             self._sim_recipe_carved_radio.setEnabled(False)
             self._sim_recipe_carved_radio.setToolTip(
-                "No edges tagged `radial_uncertain` — tag uncertain "
-                "edges in the Uncertain tab first.")
+                "No open-boundary regions tagged — tag them with the "
+                "region tools (class: Open boundary) first.")
 
         def _on_recipe_toggle(_checked=None):
             is_carved = self._sim_recipe_carved_radio.isChecked()
@@ -3079,9 +3105,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
         # over the field-driven colormap.  Only applies when the user
         # has the highlight toggle on.
         if getattr(self, '_show_radial_uncertain', False):
+            from ..reconcile.regions import region_class, COLORS as _RCOL
             for i, (u, v) in enumerate(self.edge_list):
-                if self.G.edges[u, v].get('radial_uncertain'):
-                    colors[i] = RADIAL_UNCERTAIN_COLOR
+                _c = region_class(self.G.edges[u, v])
+                if _c:
+                    colors[i] = _RCOL[_c]
 
         # Flow-direction mismatch highlight override (also runs LAST; wins
         # over the radial-uncertain colour when both apply to an edge).
@@ -4107,7 +4135,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
         import pickle as _pk
         try:
             D = _pk.loads((res / 'dc_reconciled_v2.pkl').read_bytes())
-            A = _pk.loads((res / 'ac_field_v2.pkl').read_bytes()) if (res / 'ac_field_v2.pkl').exists() else None
+            af = next((res / f for f in ('ac_field_v7.pkl', 'ac_field_v2.pkl') if (res / f).exists()), None)   # current field, else the older one
+            A = _pk.loads(af.read_bytes()) if af is not None else None
         except Exception as exc:
             print(f"  reconciliation: could not read {res}: {exc}")
             return {}

@@ -156,10 +156,11 @@ class SimulateMixin:
     def _carved_sim_status_text(self):
         """One-line status describing the carve on the current graph."""
         try:
+            from ..reconcile.regions import is_open
             tagged = sum(1 for _, _, d in self.G.edges(data=True)
-                          if d.get('radial_uncertain'))
+                          if is_open(d))
             if tagged == 0:
-                return ("No `radial_uncertain` tags on the graph — nothing "
+                return ("No open-boundary region tags on the graph — nothing "
                         "to carve.  Tag some vessels via the View tab first.")
             from plexusmech.viewer.carved_sim_backend import find_porous_and_outlets
             U, outlets, outlet_comp, A_a, V_a, comps = find_porous_and_outlets(
