@@ -12,17 +12,16 @@ in two or more tiles and applies it coherently, Ĥ_n → e^{−inψ_t} Ĥ_n.
   b  one overlapping tile pair of the core (most shared coherent vessels), split at a seam (dotted) through the overlap: each side
      shows its own tile's vessels coloured by H1 phase (cyclic).  As recorded the colours jump at the seam (arbitrary clock of each
      tile); after one phase offset per tile, φ_aligned = φ_obs − ψ_t, they run continuously.  No spatial gradient is imposed.
-  c  organ scale: circular kernel smoothing (σ 150 µm, ρ-weighted phasors) of the shown tiles' vessel phases, isochrones every 20°.
-     Tiles fall into stitching components (linked by ≥ 1 shared vessel coherent in both): the main one (with the reference
-     tile) is zeroed at the simultaneous DA/V reference; the second (dashed) is stitched separately and its single offset β to
-     the main one is inferred from arterial-inlet symmetry (inlet vessels of both components carry the same H1 phase; tile
-     bootstrap SD); isolated tiles and tiles with bootstrap SD > 30° are open dots; stars = V, triangles = DA reference
+  c  organ scale: the AC field itself (results/ac_field_v7, as used by the D fit and Fig 9) — one aligned H1 phasor per
+     phase-determined vessel (winner tile clock bootstrap SD ≤ 30°), circular kernel smoothing (σ 150 µm, ρ-weighted), isochrones;
+     zero = the simultaneous DA/V reference in tile 14; areas covered only by tiles with an undetermined clock are hatched;
+     stars = V, triangles = DA reference
   d  validation on vessels imaged in two tiles: same-vessel phase difference after alignment, H1 (used to estimate ψ_t) and
      H2 (corrected with 2ψ_t, not fitted), median |Δφ|
-  Phases: synchronisation anchored on the dorsal aorta (= results/ac_field_v3); zero = tile-14 physiological boundary
+  Phases: the canonical synchronisation (plexusflow.ac.field.CANONICAL_SYNC, results/ac_field_v7); zero = tile-14 physiological boundary
   (2 DA + 2 V stubs, one recording); flow-direction frame (sgn Q′); measurements against the reconciled flow not used.
   (supplement fig7_supp_heldout: held-out overlap prediction)
-Reads the graph and results/dc_reconciled_v2.pkl (recomputes the AC field); writes figures/fig8/fig8.* (phase sync) and, in the same folder, the
+Reads the graph, results/dc_reconciled_v2.pkl and results/ac_field_v7.pkl (scripts/ac_field.py); writes figures/fig8/fig8.* (phase sync) and, in the same folder, the
 supplementary pulsatile-regime figure fig8_S_regime.* (main-text Fig 8 until 2026-11-12) and the other fig8_S_* figures.
 """
 from __future__ import annotations
@@ -76,22 +75,24 @@ def tile_polygons(stage):
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(); ap.add_argument("--f0-band", type=float, default=0.21, help="heart-rate band (fraction of the reference tile's); canonical 0.21 (tiles 7-9 included)")
-    ap.add_argument("--tag", default="", help="output name suffix, e.g. _band21"); args = ap.parse_args(); BAND = args.f0_band
+    ap = argparse.ArgumentParser(); ap.add_argument("--field", default="ac_field_v7", help="results/<field>.pkl written by scripts/ac_field.py (canonical ac_field_v7)")
+    ap.add_argument("--tag", default="", help="output name suffix, e.g. _band21"); args = ap.parse_args()
     sys.path.insert(0, str(Path(__file__).resolve().parent)); import plos_style; plos_style.apply()
     G = _paths.load_graph(); dc = pickle.loads((_paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
-    log("rebuilding the AC field (per-tile phasors and synchronisation pairs)")
-    # synchronisation anchored on the dorsal aorta (same vessel in tiles 14 / 21 / 28 must agree; ρ ≥ 0.5 measurements, ×100),
-    # as results/ac_field_v3 (scripts/ac_field.py --sync-da --sync-da-min-rho 0.5 --sync-da-weight 100)
     from plexusflow.reconcile import carved_domain as _cd
     _dom0 = _cd(G); _carved = set(_dom0["edges"])
     da_edges = [e if G.has_edge(*e) else e[::-1] for n in _dom0["DA"] for e in G.edges(n)]
     da_edges = [e for e in da_edges if e not in _carved and e[::-1] not in _carved]
-    # canonical sync (frozen 2026-10-23) = results/ac_field_v7: von Mises synchronization with fitted precision curves κ(ρaρb) for
-    # repeat-vessel and plexus seam-continuity pairs, repeat pairs required to agree on mean-flow direction, DA anchor
-    # (scripts/ac_field.py --sync-da --sync-da-min-rho 0.5 --sync-da-weight 100 --sync-weight kappa --cont-lambda 1 --sign-check)
-    from plexusflow.ac.field import CANONICAL_SYNC
-    F = build_ac_field(G, dc, sync_extra_edges=da_edges, f0_band=BAND, **CANONICAL_SYNC)
+    # the AC field exactly as the D fit and Fig 9 use it (scripts/ac_field.py → results/<field>.pkl, canonical synchronisation)
+    _fp = _paths.RESULTS / f"{args.field}.pkl"
+    if not _fp.exists():
+        sys.exit(f"{_fp} not found: run scripts/ac_field.py first")
+    F = pickle.loads(_fp.read_bytes())
+    if "_meas" not in F or "_links" not in F:
+        sys.exit(f"{_fp} lacks the per-recording tables (written before 2026-11-12): rerun scripts/ac_field.py")
+    if [tuple(e) for e in F["edges"]] != [tuple(e) for e in dc["edges"]]:
+        sys.exit(f"{_fp} was built from a different reconstruction than results/dc_reconciled_v2.pkl: rerun scripts/ac_field.py")
+    BAND = F["f0_band"]; log(f"AC field {args.field}: reference tile {F['ref_tile']}, f0 band ±{BAND:g}")
     meas, psi, pairs, sd = F["_meas"], F["psi"], F["_pairs"], F["gauge_sd_deg"]
     pairs = [(e, a, b) for e, a, b in pairs if e not in set(da_edges)]          # validation on carved vessels only
     tf0, ref, f_ref, band = G.graph["tile_f0_piv"], F["ref_tile"], F["f_ref"], set(F["band"])
@@ -606,8 +607,10 @@ def main():
     for e_, a_, b_ in pairs:
         _H.add_edge(a_, b_)
     comps = sorted(_nx.connected_components(_H), key=len, reverse=True); main_c = next(c for c in comps if ref in c)
-    side_comps = [c for c in comps if c is not main_c and len(c) >= 3]
-    block_t = set().union(*side_comps) if side_comps else set(); masked = set(tl_) - main_c - block_t
+    # (2026-11-12) no separate components, offsets or hidden tiles: the synchronisation already links every band tile through
+    # same-vessel, seam-continuity and aorta-anchor pairs, so the map shows the field as the D fit and Fig 9 use it
+    side_comps = []
+    block_t = set(); masked = set()
     core = [t for t in tl_ if t not in masked]
     log(f"  (c) stitching components: main {len(main_c)} tiles, side {[sorted(c) for c in side_comps]}, isolated {sorted(masked)}")
     # β per side component from arterial-inlet symmetry: inlet vessels (≤ 1 hop of a carve inlet) of the side component should carry
@@ -661,7 +664,7 @@ def main():
     from scipy.ndimage import gaussian_filter
     # internally synchronized group whose common offset is only weakly constrained by cross-group overlaps (sandbox/group_beta_profile.py:
     # β̂ = 0 vs canonical, vessel-bootstrap SD 48°): shown at the maximum-likelihood offset inside a dashed outline, not blanked
-    WEAKGRP = {16, 17, 18, 31} & set(band)
+    WEAKGRP = set()                                  # (2026-11-12) no exception: shown only if its clock is determined, as in the field
     # its common offset set by plexus seam continuity (sandbox/group_beta_continuity.py: pairs of different detected plexus vessels within
     # 150 µm across the group / left-block seam: −132° ± 3°, R 0.83; same statistic on a solved seam: +2°); agrees with the D-fit gauge
     # (−136°) and the cross-links via tiles 19 / 32 (−114 … −129°).  Applied as a display offset only; the synchronization is unchanged.
@@ -685,10 +688,20 @@ def main():
             V.append((pts(e), (dl + 30) % 360 - 30, y["rho"], t))
             dr = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(np.sign(F["Qp"][i_]) * y["H"][0])))   # as recorded (no ψ_t)
             Vraw.append((V[-1][0], (dr + 30) % 360 - 30, y["rho"], t))
+    # organ map (panel c): the field itself — one aligned, rescaled phasor per phase-determined vessel (F["H"], winner tile gauge
+    # SD ≤ SD_MAX), in the vessel's flow direction; V / Vraw above (every detected recording) are only for the seam example (b)
+    VF = []
+    for i_, e in enumerate(Ef):
+        t = int(F["tile"][i_])
+        if not okf[i_] or t not in shown_t or e in ezone_e:
+            continue
+        dl = np.degrees(np.angle(np.exp(1j * phi_b) * np.conj(np.sign(F["Qp"][i_]) * F["H"][0][i_])))
+        VF.append((pts(e), (dl + 30) % 360 - 30, max(float(F["rho"][i_]), 0.0), t))
+    log(f"  (c) map from the field: {len(VF)} phase-determined vessels (of {int(F['elig'].sum())} eligible)")
     tdel = {t: (v + 30) % 360 - 30 for t, v in tdel.items()}
-    dmax = max(v for t, v in tdel.items() if t in shown_t); vtop = 20 * np.ceil(np.percentile([v[1] for v in V], 98) / 20)
+    dmax = max(v for t, v in tdel.items() if t in shown_t); vtop = 20 * np.ceil(np.percentile([v[1] for v in VF], 98) / 20)
     cmp = plt.cm.plasma; nph = mcolors.Normalize(0, max(160, vtop)); LEV = np.arange(0, vtop + 1, 20)   # colour to the 98th pct of vessel phases
-    log(f"  (c) phase colour scale 0–{max(160, vtop):.0f}° (98th pct of vessel phases {np.percentile([v[1] for v in V], 98):.0f}°, max {max(v[1] for v in V):.0f}°)")
+    log(f"  (c) phase colour scale 0–{max(160, vtop):.0f}° (98th pct of vessel phases {np.percentile([v[1] for v in VF], 98):.0f}°, max {max(v[1] for v in VF):.0f}°)")
 
     def smooth_field(vs, sigma_um, step_px, box):
         """Circular kernel smoothing of vessel delays on a grid: Z = G_σ * Σ w e^{iδ}; masked where the kernel weight is small."""
@@ -755,7 +768,7 @@ def main():
     # ---- c: organ-scale smoothed delay field with isochrones; the second stitching component dashed, offset β from inlet symmetry
     axC = fig.add_subplot(GC); organ(axC); axC.set_anchor("C")
     big = ((XL[0], XL[1]), (YL[1], YL[0]))
-    fo, fb, ext = smooth_field(V, 150.0, 6.0, big)
+    fo, fb, ext = smooth_field(VF, 150.0, 6.0, big)
     gx = np.linspace(big[0][0], big[0][1], fo.shape[1]); gy = np.linspace(big[1][0], big[1][1], fo.shape[0])
     # one exclusive partition of the organ: excluded (transient, Fig 7) · clock undetermined (covered ONLY by tiles whose offset SD >
     # SD_MAX) · reconstructed (field) · no measurable data (organ image only).  The field is masked to the reconstructed part.
@@ -816,7 +829,8 @@ def main():
         t_.set_path_effects([matplotlib.patheffects.withStroke(linewidth=2.2, foreground="white")]); t_.set_color("0.15")
     plt.rcParams["hatch.linewidth"] = 0.3; plt.rcParams["hatch.color"] = "0.5"
     fbf = np.where(np.ma.getmaskarray(fo), 0.0, np.ma.filled(fb, 0))     # outline only where the phase field is shown
-    axC.contour(gx, gy, fbf, levels=[0.5], colors="0.35", linewidths=1.5, linestyles="--", zorder=4)
+    if fbf.max() > 0.5:
+        axC.contour(gx, gy, fbf, levels=[0.5], colors="0.35", linewidths=1.5, linestyles="--", zorder=4)
     _ysb, _xsb = np.nonzero(fbf > 0.5)
     if len(_xsb):
         _ymc = np.median(gy[_ysb]); _row = _xsb[np.abs(gy[_ysb] - _ymc) < 30]
@@ -856,8 +870,8 @@ def main():
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch as _Pt
     axC.legend(handles=[_Pt(fc="white", ec="0.55", hatch="///", lw=0.5, label="Earlier recordings excluded"),
-                        _Pt(fc="0.82", ec="none", label="No reliable fundamental phase"),
-                        _Pt(fc="none", ec="0.35", ls="--", lw=1.3, label="Separate phase component")],
+                        _Pt(fc="0.82", ec="none", label="No reliable fundamental phase")]
+                       + ([_Pt(fc="none", ec="0.35", ls="--", lw=1.3, label="Separate phase component")] if block_t else []),
                loc="upper center", bbox_to_anchor=(0.5, -0.135), fontsize=8, frameon=False, handlelength=1.6, borderaxespad=0, labelspacing=0.25,
                ncol=1, columnspacing=1.0)
     # inset: the coherent-overlap tile graph (retained tiles; edge = ≥ 1 shared vessel with ρ ≥ 0.1 in both recordings), nodes at the
@@ -875,11 +889,23 @@ def main():
     comps_ = sorted(_nx.connected_components(Tg), key=len, reverse=True)
     log(f"  (c) coherent-overlap graph on retained tiles: components {[sorted(c_) for c_ in comps_]}")
     cmain_ = next(c_ for c_ in comps_ if ref in c_); cother_ = [c_ for c_ in comps_ if c_ is not cmain_]
+    # panel a draws every link the synchronisation uses: coherent same-vessel overlaps (Tg) plus the plexus seam-continuity links
+    # that join tiles without a shared coherent vessel (dashed); the SI block figure keeps the overlap-only graph (Tg, cother_)
+    _L = F["_links"]; seam_ = {}
+    for a_, b_, w_, k_ in zip(_L["a"], _L["b"], _L["w"], _L["kind"]):
+        if k_ == "seam" and a_ in stitch and b_ in stitch and a_ != b_ and not Tg.has_edge(a_, b_):
+            seam_[tuple(sorted((a_, b_)))] = seam_.get(tuple(sorted((a_, b_))), 0.0) + w_
+    TgA = Tg.copy(); TgA.add_edges_from(seam_)
+    cotherA_ = [c_ for c_ in _nx.connected_components(TgA) if ref not in c_ and len(c_) > 1]
+    log(f"  (a) synchronisation graph: {Tg.number_of_edges()} overlap links + {len(seam_)} seam-only links; components besides the "
+        f"reference one: {[sorted(c_) for c_ in cotherA_]}")
     GCOL = {"main": "#2b5c8a", "side": "#E69F00"}
     # ---- b (Fig 8): the overlap network that turns pairwise clock differences into one clock per tile (nodes at tile centres)
     _pa = figS.axes[0].get_position() if False else None
     axN = figS.add_subplot(GNET); axN.set_aspect("equal"); axN.set_xticks([]); axN.set_yticks([]); [sp_.set_visible(False) for sp_ in axN.spines.values()]
 
+    for a_, b_ in seam_:
+        axN.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="0.65", lw=0.45, ls=(0, (2, 1.5)), zorder=1)
     for a_, b_ in Tg.edges():
         hl_ = {a_, b_} == {ta, tb}
         axN.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="black" if hl_ else "0.65", lw=2.2 if hl_ else 0.45, zorder=2 if hl_ else 1)
@@ -892,15 +918,15 @@ def main():
                      ha="left" if _dx > 0 else "right")
         else:
             axN.plot(*cen[t_], "o", ms=3.4, mfc="0.45", mec="0.3", mew=0.5, zorder=3)
-    if cother_:
+    if cotherA_:
         from scipy.spatial import ConvexHull as _CH
-        _sb = np.array([cen[t_] for t_ in max(cother_, key=len)]); _h = _CH(_sb); _v = _sb[_h.vertices]; _c = _v.mean(0); _v = _c + 1.25 * (_v - _c)
+        _sb = np.array([cen[t_] for t_ in max(cotherA_, key=len)]); _h = _CH(_sb); _v = _sb[_h.vertices]; _c = _v.mean(0); _v = _c + 1.25 * (_v - _c)
         axN.add_patch(Polygon(_v, closed=True, fc="none", ec="0.2", lw=0.7, ls="--", zorder=2))
     allN_ = np.array([cen[t_] for t_ in Tg.nodes()]); pN_ = 160
     axN.set_xlim(allN_[:, 0].min() - pN_, allN_[:, 0].max() + pN_); axN.set_ylim(allN_[:, 1].max() + pN_, allN_[:, 1].min() - pN_)
 
     axN.text(0.0, 1.0, "Tile-phase synchronisation", transform=axN.transAxes, ha="left", va="bottom", fontsize=9)
-    if cother_:
+    if cotherA_:
         axN.text(_v[:, 0].min() - 40, _v[:, 1].mean(), "separate\ncomponent", ha="right", va="center", fontsize=8, color="0.25", linespacing=0.9)
     from matplotlib.lines import Line2D as _L2n
     # connector from the highlighted edge to the before/after maps
@@ -1038,7 +1064,7 @@ def main():
     axS.imshow(fo, cmap=cmp, norm=nph, extent=ext, origin="upper", alpha=0.35, zorder=1, interpolation="bilinear")
     for d_, col_, ls_, lab_ in ((0.0, "black", "-", f"β = {bsym[0]:+.0f}° (used)"), (est_prox[0] - bsym[0], "#2b5c8a", "--", f"β = {est_prox[0]:+.0f}° (nearby vessels)"),
                                 (1.96 * est_weak[1], "#D55E00", ":", f"β ± {1.96 * est_weak[1]:.0f}° (weak-link 95 %)"), (-1.96 * est_weak[1], "#D55E00", ":", None)):
-        Valt = [(p_, ((dl_ - d_ + 30) % 360) - 30 if t_ in block_t else dl_, w_, t_) for p_, dl_, w_, t_ in V]
+        Valt = [(p_, ((dl_ - d_ + 30) % 360) - 30 if t_ in block_t else dl_, w_, t_) for p_, dl_, w_, t_ in VF]
         fa_, _, _ = smooth_field(Valt, 150.0, 6.0, big)
         axS.contour(gx, gy, fa_, levels=LEV[1:6], colors=[col_], linewidths=0.8 if d_ == 0 else 0.7, linestyles=ls_, zorder=3)
         if lab_:

@@ -156,7 +156,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
     # vessels linking the two halves of the 21S yolk sac and put the second half ~65° off the earlier tile_normalize
     # gauge (its "median 5°" check hid the 90th percentile).  Using all pairs, weighted, agrees with tile_normalize (2–5°).
     tiles = sorted(band); ti = {t: i for i, t in enumerate(tiles)}; nT = len(tiles); xset = set(sync_extra_edges or []) - set(eix)
-    pa, pb, pw, pz, pv, pairs = [], [], [], [], [], []
+    pa, pb, pw, pz, pv, pairs, kind = [], [], [], [], [], [], []
     for vi, (e, d) in enumerate(meas.items()):
         ok = [t for t, x in d.items() if t in ti and abs(x["H"][0]) > 0 and np.isfinite(x["rho"])]
         for i in range(len(ok)):
@@ -169,7 +169,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
                 if sign_check and np.sign(d[a]["a0"]) != np.sign(d[b]["a0"]):
                     continue
                 pa.append(ti[a]); pb.append(ti[b]); pw.append(_w(d[a], d[b]) * (sync_extra_weight if e in xset else 1.0))
-                pz.append(ua * np.conj(ub)); pv.append(vi)
+                pz.append(ua * np.conj(ub)); pv.append(vi); kind.append("anchor" if e in xset else "vessel")
                 if d[a]["rho"] >= RHO_SYNC and d[b]["rho"] >= RHO_SYNC:
                     pairs.append((e, a, b))
     n_stitch = 0
@@ -190,7 +190,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
                                 continue
                             ua = s1 * xa["H"][0] / abs(xa["H"][0]); ub = s2 * xb["H"][0] / abs(xb["H"][0])
                             pa.append(ti[a]); pb.append(ti[b]); pw.append(stitch_lambda * max(xa["rho"], 0.0) * max(xb["rho"], 0.0))
-                            pz.append(ua * np.conj(ub)); pv.append(vi0 + n_stitch); n_stitch += 1
+                            pz.append(ua * np.conj(ub)); pv.append(vi0 + n_stitch); n_stitch += 1; kind.append("stitch")
     # seam continuity (cont_lambda > 0): pairs of DIFFERENT carved plexus vessels (radius ≤ cont_radius_pct percentile), fundamental
     # detected in both recordings (F-test p < P_DETECT), recorded in different tiles, midpoints within cont_radius_um; compared in the
     # reconciled flow-direction frame; weight cont_lambda·ρaρb.  Cross-validated on 84 solved tile pairs (median error 4°, 90th 11°).
@@ -220,6 +220,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
                 w_ = ra[5] * rb[5]; ea.append(ti[ra[0]]); eb.append(ti[rb[0]])
                 ew.append(cont_lambda * (KAPPA_SEAM[0] * w_ / (w_ + KAPPA_SEAM[1]) if sync_weight == "kappa" else w_)); ez.append(ra[4] * np.conj(rb[4])); ev.append(vi0 + n_cont); n_cont += 1
             pa = np.r_[np.asarray(pa), ea]; pb = np.r_[np.asarray(pb), eb]; pw = np.r_[np.asarray(pw), ew]; pz = np.r_[np.asarray(pz), ez]; pv = np.r_[np.asarray(pv), ev]
+            kind = list(kind) + ["seam"] * len(ea)
     pa, pb, pw, pz, pv = map(np.asarray, (pa, pb, pw, pz, pv))
     pa, pb, pv = pa.astype(int), pb.astype(int), pv.astype(int)
     psi_vec = _sync(pa, pb, pw, pz, nT, ti[ref_tile])
@@ -259,7 +260,8 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
         sc_w[i] = x["scatter"]; rho_w[i] = x["rho"]; a0_w[i] = x["a0"]; vphi_w[:, i] = x["var_phi"]; vpi_w[i] = x["var_logpi"]
     return dict(edges=sub, H=Hf, elig=elig, tile=win_t, psi=psi, scatter=sc_w, rho=rho_w, a0=a0_w, var_phi=vphi_w,
                 var_logpi=vpi_w, f_ref=f_ref, band=sorted(band), ref_tile=ref_tile, Qp=Qp, gauge_sd_deg=gauge_sd_deg,
-                _meas=meas, _pairs=pairs, _sync_diag=diag, n_stitch=n_stitch, stitch_lambda=stitch_lambda, sync_weight=sync_weight, n_cont=n_cont, cont_lambda=cont_lambda)
+                _meas=meas, _pairs=pairs, _sync_diag=diag,
+                _links=dict(a=[tiles[i] for i in pa], b=[tiles[i] for i in pb], w=np.asarray(pw, float), kind=list(kind)), n_stitch=n_stitch, stitch_lambda=stitch_lambda, sync_weight=sync_weight, n_cont=n_cont, cont_lambda=cont_lambda)
 
 
 def supported(field, ratio_max=5.0):

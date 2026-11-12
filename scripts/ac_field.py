@@ -66,8 +66,9 @@ def main():
     for k in (1, 2):
         print(f"  H{k} junction residual ({n_j} junctions): aligned {res[k]['aligned']:.3f}  "
               f"unaligned {res[k]['unaligned']:.3f}  random phase {res[k]['random']:.3f}")
-    out = {k: v for k, v in A.items() if not k.startswith("_")}
-    (paths.RESULTS / f"{args.out}.pkl").write_bytes(pickle.dumps(out, protocol=4)); print(f"wrote {paths.RESULTS / (args.out + '.pkl')}")
+    # the complete field, including the per-recording phasors (_meas), synchronisation pairs (_pairs) and diagnostics
+    # (_sync_diag), so Fig 8 draws exactly the field the D fit and Fig 9 use instead of rebuilding it
+    (paths.RESULTS / f"{args.out}.pkl").write_bytes(pickle.dumps(A, protocol=4)); print(f"wrote {paths.RESULTS / (args.out + '.pkl')}")
 
 
 if __name__ == "__main__":
