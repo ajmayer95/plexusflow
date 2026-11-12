@@ -104,19 +104,17 @@ def main():
     resolved = np.abs(Qp) > 2 * D['sigma']                     # direction determined: |Q'| > 2σ_e (Fig 6 noise model)
     print(f"[fig7] direction resolved for {resolved.sum()} of {len(Qp)} vessels (|Q'| > 2σ)")
     print(f"[fig7] resolved vessels carry {100 * np.abs(Qp[resolved]).sum() / np.abs(Qp).sum():.0f}% of Σ|Q'|; length-weighted {100 * (np.abs(Qp) * D['length'])[resolved].sum() / (np.abs(Qp) * D['length']).sum():.0f}%; passive Σ|Q_sim| on them {100 * np.abs(Qs[resolved]).sum() / np.abs(Qs).sum():.0f}%")
-    # posterior divide of the peripheral (rim) vein: rim = largest connected set of vessels within 70 px of the organ outline;
+    # posterior divide of the peripheral (rim) vein: rim = vessels within 70 px of the organ outline (all pieces: topology-
+    # uncertain regions on the margin cut the rim vein into several);
     # each rim vessel's flow is expressed as angular motion about the organ centroid; the divide is the angle θc on the
     # posterior arc maximising min(flux leaving θc on each side) over ±30° windows, i.e. flow away from θc on BOTH sides
     from scipy import ndimage as ndi
-    import networkx as nx
     org_ = tifffile.imread(str(STAGE / 'fuse' / 'organ_fusion.tif')); org_ = org_.mean(-1) if org_.ndim == 3 else org_
     organ = ndi.binary_fill_holes(ndi.binary_closing(org_ > 0, iterations=10)); dist_ = ndi.distance_transform_edt(organ)
     cyo, cxo = ndi.center_of_mass(organ)
     mids = np.array([sg_[len(sg_) // 2] for sg_ in segs])
     near = np.array([dist_[int(np.clip(y_, 0, Hm - 1)), int(np.clip(x_, 0, Wm - 1))] < 70 for x_, y_ in mids])
-    Hr = nx.Graph(); [Hr.add_edge(*edges[k], k=k) for k in np.flatnonzero(near)]
-    comp_ = max(nx.connected_components(Hr), key=len)
-    rim = near & np.array([edges[k][0] in comp_ and edges[k][1] in comp_ for k in range(len(edges))])
+    rim = near.copy()
     rim &= r >= np.percentile(r[rim], 50)                                   # the rim vein proper: larger half of rim vessels
     th_ = np.degrees(np.arctan2(mids[:, 1] - cyo, mids[:, 0] - cxo))         # 90° = posterior midline (image y down)
     len_ok = np.array([len(sg_) >= 8 for sg_ in segs])
@@ -132,6 +130,8 @@ def main():
         grid = np.arange(60, 176); score = [min(w[(th_ > c) & (th_ < c + 30)].sum(), -w[(th_ < c) & (th_ > c - 30)].sum()) for c in grid]   # both sides must flow away
         c = float(grid[int(np.argmax(score))])
         kl = np.flatnonzero(rim & (th_ <= c) & (dth < 0)); kr = np.flatnonzero(rim & (th_ > c) & (dth > 0))
+        if not (len(kl) and len(kr)):                                          # no rim vessel flows away on one side: no divide
+            return None, None, dth
         kl, kr = kl[np.argmax(th_[kl])], kr[np.argmin(th_[kr])]                 # the two rim vessels flowing apart
         return 0.5 * (th_[kl] + th_[kr]), 0.5 * (mids[kl] + mids[kr]), dth
     from matplotlib.patches import FancyArrowPatch
@@ -144,6 +144,9 @@ def main():
                                      shrinkA=0, shrinkB=0, path_effects=[pe.withStroke(linewidth=1.6, foreground='white')]))
     def mark_divide(ax, Q, name, ok, min_gap=0):
         c, xy_, dth = rim_divide(Q)
+        if c is None:
+            print(f"[fig7] posterior rim divide ({name}): not resolved (no rim vessel flowing away on one side) — no marker")
+            return None
         for side, tgt in ((-1, c - 12), (1, c + 12)):                      # one flank arrow each side: flow leaving the divide
             cand = np.flatnonzero(rim & ok & (dth == side) & ((th_ - c) * side > 4) & (len_ok))
             if len(cand):
@@ -229,7 +232,7 @@ def main():
                handlelength=1.4, columnspacing=1.2)
     # a handful of direction arrows on the strongest direction-resolved vessels, spread over the organ
     picked = []; bxy = np.array([nxy[nodes[i_]] for i_ in np.r_[dom['inj'], dom['out']]])
-    far = lambda c, gap: all(np.linalg.norm(mids[c] - mids[q]) >= gap for q in picked) and np.linalg.norm(mids[c] - div_a) >= 400
+    far = lambda c, gap: all(np.linalg.norm(mids[c] - mids[q]) >= gap for q in picked) and (div_a is None or np.linalg.norm(mids[c] - div_a) >= 400)
     for c in np.argsort(-np.abs(Qp) * (resolved & imaged)):
         if len(picked) >= 14 or not resolved[c]:
             break

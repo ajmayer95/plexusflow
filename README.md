@@ -17,7 +17,7 @@ analysis drivers and the scripts that produce every figure of the paper.
 |---|---|
 | `src/plexusflow/` | reconstruction: tile preprocessing and stitching, mosaic fusion, mask → graph (`mve`, `vectorize`), per-vessel optical-flow flux (`analyze`), mean-flow reliability model and conservative reconciliation (`reconcile`), tile-synchronised harmonic field (`ac`), known-truth Stokes benchmark (`synthetic`), data-release loader (`release`), napari viewer (`viewer`) |
 | `src/plexusmech/` | modelling: two-port RC / transmission-line network (`ac.model`, `tl`), composite likelihood and profiled fit of wall distensibility (`ac.profile`) |
-| `scripts/` | analysis drivers (`dc_reconcile.py`, `ac_field.py`, `mech/ac_estimate.py`), figure scripts (`make_figure*.py`, see [FIGURES.md](FIGURES.md)), benchmark drivers (`benchmark/`), `reproduce_paper.sh` |
+| `scripts/` | analysis drivers (`dc_reconcile.py`, `ac_field.py`, `mech/ac_estimate.py`; `run_stage.sh` runs them for any stage), figure scripts (`make_figure*.py`, see [FIGURES.md](FIGURES.md)), benchmark drivers (`benchmark/`), `reproduce_paper.sh` |
 | `docs/` | methods notes: [pipeline](docs/pipeline.md), [mean-flow method](docs/dc_method.md), [synthetic validation](docs/synthetic_validation.md) |
 | `tests/` | unit and regression tests (`pytest`) |
 
@@ -83,11 +83,14 @@ plexusflow fuse        STAGE        # feather-blended mosaic
 plexusflow mve         STAGE        # mask → vectorise → edit (napari, needs [gui,vectorize])
 plexusflow condense    STAGE        # one edge per vessel
 plexusflow analyze     STAGE        # optical flow → Q(t) → harmonics per vessel and tile
-plexusflow info        STAGE        # which artefacts exist
+plexusflow workbench   STAGE        # mark aorta/vein anchors and tag open / topology-uncertain regions
+bash scripts/run_stage.sh STAGE     # reliability model, mean-flow reconstruction, validation, pulsatile field, D fit
 plexusflow view        STAGE        # read-only viewer (measured and reconciled flow, video overlay)
+plexusflow info        STAGE        # which artefacts exist
 ```
 
-then the analysis drivers above. See [docs/pipeline.md](docs/pipeline.md) for the coordinate frames and outputs of each step.
+See [docs/pipeline.md](docs/pipeline.md) for every step, the per-stage settings in `plexusflow.yaml`, and the coordinate
+frames and outputs.
 
 ## Tests
 

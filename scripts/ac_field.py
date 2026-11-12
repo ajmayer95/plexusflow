@@ -37,7 +37,13 @@ def main():
     args = ap.parse_args()
     from plexusflow.config import StageConfig
     cfg = StageConfig.load(paths.STAGE)                      # per-stage defaults (plexusflow.yaml)
-    ref = args.ref_tile if args.ref_tile is not None else (cfg.ac_ref_tile or REF_TILE)
+    ref = args.ref_tile if args.ref_tile is not None else cfg.ac_ref_tile
+    if ref is None:
+        if paths.STAGE.name.startswith("PlexusFlow21S"):
+            ref = REF_TILE                                   # the paper's 21S reference tile
+        else:
+            sys.exit(f"{paths.STAGE.name}: no reference tile. Set ac_ref_tile in plexusflow.yaml (a clearly beating tile near the "
+                     f"aortae; its heart rate centres the f0 band and fixes the phase gauge) or pass --ref-tile.")
     if args.f0_band is None:
         args.f0_band = cfg.ac_f0_band if cfg.ac_f0_band is not None else CANONICAL_F0_BAND
     print(f"reference tile {ref}, f0 band ±{args.f0_band:g}")
