@@ -36,6 +36,7 @@ def main():
     ap.add_argument("--d-range", type=float, nargs=3, default=[2.5e-4, 8.0e-4, 21], metavar=("MIN", "MAX", "N"))
     ap.add_argument("--gauge-passes", type=int, default=2)
     ap.add_argument("--n-jobs", type=int, default=8)
+    ap.add_argument("--h1-only", action="store_true", help="sensitivity: leave the H2 phase term out of the likelihood (H1 phase + pulsatility only)")
     ap.add_argument("--out", default="ac_estimate_v8", help="results/<out>.json (default ac_estimate_v8, the paper fit)")
     ap.add_argument("--field", default="ac_field_v7", help="results/<field>.pkl (default ac_field_v7 = scripts/ac_field.py defaults)")
     ap.add_argument("--gauge-block", default=None, help="tiles sharing one extra gauge offset with a flat prior, e.g. 15,18,19,20,29,30,31,32,33,34")
@@ -70,7 +71,7 @@ def main():
                 + ", ".join(f"H{k} {abs(info['mean'][k]):.3f}∠{np.degrees(np.angle(info['mean'][k])):+.0f}°" for k in (1, 2)))
         R = fit_profile(C, c, A, d_grid=d_grid, eta_grid=a.eta, weights=a.weights, gauge=not a.no_gauge, pin_veins=not a.fit_veins,
                         n_jobs=a.n_jobs, progress=lambda m: log("  " + m),
-                        gauge_block=[int(t) for t in a.gauge_block.split(",")] if a.gauge_block else None)
+                        gauge_block=[int(t) for t in a.gauge_block.split(",")] if a.gauge_block else None, harmonics=(1,) if a.h1_only else (1, 2))
         gauge_rad = {t: np.radians(v) for t, v in R["delta_deg"].items()}
         prof = np.nanmin(R["S"], axis=0) - np.nanmin(R["S"])
         log(f"  pass {p + 1}: best D {R['D']:.3e} (parabola {quadratic_min(d_grid, prof):.3e}), η {R['eta']:.2f}, NLL {R['nll']:.1f}"

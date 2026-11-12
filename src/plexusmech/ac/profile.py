@@ -31,7 +31,8 @@ D_GRID = np.logspace(np.log10(2.5e-4), np.log10(8.0e-4), 21)
 _DG = np.linspace(-np.pi, np.pi, 720, endpoint=False)
 
 
-def _chain(C, c, tile, gauge_sd_deg, ref_tile, var_phi, var_logpi, d_list, eta, weights, gauge, pin_veins, gauge_block=None, beta_fixed=None):
+def _chain(C, c, tile, gauge_sd_deg, ref_tile, var_phi, var_logpi, d_list, eta, weights, gauge, pin_veins, gauge_block=None, beta_fixed=None,
+           harmonics=(1, 2)):
     el = C["elig"]; c = c[el]; gid = groups(C)
     Qp, Qs = C["Qp"][el], C["Qs_dc"][el]; sgnQs = np.sign(Qs)
     phd = {k: np.angle(C["H"][k][el] * np.sign(Qp)) for k in (1, 2)}; pid = np.abs(C["H"][1][el]) / np.abs(Qp)
@@ -47,14 +48,18 @@ def _chain(C, c, tile, gauge_sd_deg, ref_tile, var_phi, var_logpi, d_list, eta, 
     w = 1 / c ** 2
 
     def phase_terms(d1, d2):
-        """NLLs and per-vessel concentrations of the two phase terms."""
+        """NLLs and per-vessel concentrations of the phase terms (harmonics=(1,): H2 phase left out, zero concentration)."""
         if weights == "waveform":
             (n1, k1), (n2, k2) = nll_vm_var(d1, vb[0], c), nll_vm_var(d2, vb[1], c)
+            if 2 not in harmonics:
+                return n1, k1, np.zeros_like(k1)
             return n1 + n2, k1, k2
         out = []
         for d in (d1, d2):
             f = lambda lk: np.sum(-np.exp(lk) * w * np.cos(d) + np.log(2 * np.pi * i0e(np.exp(lk) * w)) + np.exp(lk) * w)
             r = minimize_scalar(f, bounds=(-8, 6), method="bounded"); out.append((r.fun, np.exp(r.x) * w))
+        if 2 not in harmonics:
+            return out[0][0], out[0][1], np.zeros_like(out[0][1])
         return out[0][0] + out[1][0], out[0][1], out[1][1]
 
     def model_phases(x, B1, B2):
@@ -108,7 +113,7 @@ def _chain(C, c, tile, gauge_sd_deg, ref_tile, var_phi, var_logpi, d_list, eta, 
 
 
 def fit_profile(C, c, field, d_grid=D_GRID, eta_grid=(0.0,), weights="waveform", gauge=True, pin_veins=True, n_jobs=1,
-                progress=print, gauge_block=None):
+                progress=print, gauge_block=None, harmonics=(1, 2)):
     """C: model.build_context on the measurement-supported field (vein forcing already set, e.g. model.vein_forcing);
     c: DC reliability of each edge's AC winner (model.ac_reliability); field: the AC field (tile, gauge_sd_deg, ref_tile,
     var_phi, var_logpi).  Returns dict(S [nη × nD], D_grid, eta_grid, D, eta, i_min, j_min, x, delta_deg {tile: deg},
@@ -122,7 +127,7 @@ def fit_profile(C, c, field, d_grid=D_GRID, eta_grid=(0.0,), weights="waveform",
         progress(f"[ac.profile] {len(d_grid)} D × {len(eta_grid)} η, weights '{weights}', gauge {'on' if gauge else 'off'}, "
                  f"veins {'pinned' if pin_veins else 'fitted'}; {len(jobs)} chains on {n_jobs} workers")
     args = (field["tile"], field["gauge_sd_deg"], int(field["ref_tile"]), field.get("var_phi"), field.get("var_logpi"))
-    res = Parallel(n_jobs=n_jobs)(delayed(_chain)(C, c, *args, d_grid[s], eta_grid[i], weights, gauge, pin_veins, gauge_block) for i, s in jobs)
+    res = Parallel(n_jobs=n_jobs)(delayed(_chain)(C, c, *args, d_grid[s], eta_grid[i], weights, gauge, pin_veins, gauge_block, harmonics=tuple(harmonics)) for i, s in jobs)
     S = np.full((len(eta_grid), len(d_grid)), np.nan); X, DL, BT = {}, {}, {}
     for (i, s), (Sv, Xs, DLs, tiles, BTs) in zip(jobs, res):
         S[i, s] = Sv
