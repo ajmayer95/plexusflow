@@ -45,6 +45,7 @@ EX_TILE, EX_EDGE = 24, (64960, 65010)             # Fig 6a example recording: lo
 REGION_HALF = 160                                 # Fig 6c/d: view = vessels within ± this many graph px (≈ 270 µm) of PATCH; every vessel entering the view is drawn
 PATCH, PATCH_HOPS = 59219, 2                      # Fig 6c/d: 9 vessels each recorded in ≥ 2 of tiles 22/26/27; Q′ within every vessel's recordings
 import os as _os
+EX_PATCH = int(_os.environ.get("FIG6_EX_PATCH", 19781))         # Fig 6c worked example: 9 vessels, Q′ above and below the means
 PATCH = int(_os.environ.get("FIG6_PATCH", PATCH)); PATCH_HOPS = int(_os.environ.get("FIG6_PATCH_HOPS", PATCH_HOPS))
 HIGH, LOW = (28304, 28329), (35992, 36030)
 PX_UM = 1.7
@@ -428,7 +429,7 @@ def main():
             o = np.argsort(qq); qq, z2 = qq[o], z2[o]; cs = np.r_[0, np.cumsum(z2)]; st = max(k // 6, 20)
             a_ = np.arange(0, len(qq) - k + 1, st); return np.array([np.median(qq[i:i + k]) for i in a_]), np.sqrt((cs[a_ + k] - cs[a_]) / k)
         xs0, _ = roll(q, np.ones_like(q)); grid = np.geomspace(xs0[0], xs0[-1], 40); rng_ = np.random.default_rng(SEED_FIG)   # bands on the curve's own range
-        for lab, colr, ls_, name in (("z_constant", GREY, (0, (3, 2)), "constant fractional discrepancy"), ("z_calibrated", BLUE, "-", "quality-dependent")):
+        for lab, colr, ls_, name in (("z_constant", GREY, (0, (3, 2)), "Constant uncertainty"), ("z_calibrated", BLUE, "-", "Quality-dependent uncertainty")):
             z2 = np.array(PJ[lab]) ** 2; xs, ys = roll(q, z2)
             B = []
             for _ in range(n_boot):
@@ -439,10 +440,10 @@ def main():
         axE.axhline(1, color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1, label="expected = 1")
         axE.set_xscale("log"); axE.set_xticks([0.2, 0.3, 0.5, 0.8]); axE.set_xticklabels(["0.2", "0.3", "0.5", "0.8"]); axE.minorticks_off()
         axE.set_xlim(grid[0] * 0.93, grid[-1] * 1.07); axE.set_ylim(0.25, 1.65); axE.tick_params(labelsize=8)
-        axE.set_xlabel("Junction measurement-quality score $c_{j,\\mathrm{eff}}$", fontsize=9, labelpad=2)
+        axE.set_xlabel("Effective fractional discrepancy $c_{j,\\mathrm{eff}}$", fontsize=9, labelpad=2)
         axE.set_ylabel("RMS standardized\njunction imbalance", fontsize=9, labelpad=2)
-        axE.text(0.0, -0.2, "more reliable", transform=axE.transAxes, fontsize=8, color=MUTED, ha="left", va="top")
-        axE.text(1.0, -0.2, "less reliable", transform=axE.transAxes, fontsize=8, color=MUTED, ha="right", va="top")
+        axE.text(0.0, -0.2, "smaller discrepancy", transform=axE.transAxes, fontsize=8, color=MUTED, ha="left", va="top")
+        axE.text(1.0, -0.2, "larger discrepancy", transform=axE.transAxes, fontsize=8, color=MUTED, ha="right", va="top")
         axE.spines[["top", "right"]].set_visible(False); axE.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
 
     def draw_relative(axR):
@@ -479,8 +480,8 @@ def main():
         """withheld-vessel validation as median fold error exp(median |ln(predicted / recorded)|) vs fraction withheld"""
         WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); cv = WH["curve"]; rp_ = WH["repeat"]
         x = np.array([100 * c_["frac"] for c_ in cv]); y = np.exp([c_["err"] for c_ in cv]); ci_ = np.exp(np.array([c_["err_ci"] for c_ in cv]))
-        axW2.axhspan(*np.exp(rp_["err_ci"]), color=GREY, alpha=0.18, lw=0, zorder=1)
-        axW2.axhline(np.exp(rp_["err"]), color=GREY, lw=1.0, ls=(0, (3, 2)), zorder=2, label="Repeat-recording disagreement")
+        axW2.axhspan(*np.exp(rp_["err_ci"]), color=GREY, alpha=0.09, lw=0, zorder=1)
+        axW2.axhline(np.exp(rp_["err"]), color="0.65", lw=0.8, ls=(0, (3, 2)), zorder=2, label="Repeat-recording disagreement")
         axW2.fill_between(x, ci_[:, 0], ci_[:, 1], color=BLUE, alpha=0.18, lw=0, zorder=2)
         axW2.plot(x, y, color=BLUE, lw=1.3, marker="D", ms=4.5, zorder=3, label="Reconstruction")
         axW2.set_xlim(0, 78); axW2.set_ylim(1, 2.25); axW2.set_xticks([0, 25, 50, 75]); axW2.set_yticks([1, 1.25, 1.5, 1.75, 2, 2.25])
@@ -743,33 +744,95 @@ def main():
     axD2 = fig.add_axes([0.615, 3.85 / HF, 0.37, 1.95 / HF]); draw_withheld_fold(axD2)
     # c: worked example — the nine-vessel patch at the tile 22/26/27 overlap: every recording (tile colour), the 1/c²-weighted
     #    aggregate (diamond) and the full-network reconciled flux Q′ (bar), signed along each vessel's reconstructed flow direction
-    axP = fig.add_axes([0.02, 0.35 / HF, 0.33, 2.45 / HF]); axQ = fig.add_axes([0.47, 0.5 / HF, 0.51, 2.3 / HF])
-    pts_ = np.vstack([toimg(np.asarray(G.edges[E[i]]["path"], float)) for i in pidx]); cx_, cy_ = pts_.mean(0); hh = 0.62 * np.ptp(pts_, axis=0).max()
+    _saved = (pidx, recs, ptiles, TCOL, order, num)                   # the worked example has its own patch (EX_PATCH): a mixed one
+    pn_c = nx.single_source_shortest_path_length(Hn, EX_PATCH, cutoff=PATCH_HOPS)
+    pidx = sorted({eidx[e] if e in eidx else eidx[e[::-1]] for e in Hn.subgraph(pn_c).edges()}); recs = {i: [] for i in pidx}
+    for (tt, e), m in M.items():
+        if e in eidx and eidx[e] in recs:
+            recs[eidx[e]].append((int(m["tile"]), abs(m["Q"]), c_of(mod, m), np.sign(m["Q"])))
+    ptiles = sorted({r[0] for i in pidx for r in recs[i]}); _pal = iter(["#d95f02", "#e7298a", "#66a61e", "#a6761d"])
+    TCOL = {t_: _saved[3][t_] if t_ in _saved[3] else next(_pal) for t_ in ptiles}
+    _mid = {i: np.asarray(G.edges[E[i]]["path"], float)[len(G.edges[E[i]]["path"]) // 2] for i in pidx}
+    order = sorted(pidx, key=lambda i: (-_mid[i][1], _mid[i][0])); num = {i: k + 1 for k, i in enumerate(order)}
+    axP = fig.add_axes([0.025, 0.66 / HF, 0.265, 2.0 / HF]); axQ = fig.add_axes([0.375, 0.5 / HF, 0.605, 2.3 / HF])
+    pts_ = np.vstack([toimg(np.asarray(G.edges[E[i]]["path"], float)) for i in pidx]); hh = 0.72 * np.ptp(pts_, axis=0).max(); cx_, cy_ = (pts_.min(0) + pts_.max(0)) / 2 + [0.2 * hh, -0.2 * hh]   # patch lower-left: room for the locator
     cropP = mos[int(cy_ - hh):int(cy_ + hh), int(cx_ - hh):int(cx_ + hh)]
     axP.imshow(mos, cmap="gray", vmin=np.percentile(cropP, 1), vmax=np.percentile(cropP, 99.5), alpha=0.55)
     axP.set_xlim(cx_ - hh, cx_ + hh); axP.set_ylim(cy_ + hh, cy_ - hh); axP.set_aspect("equal"); axP.set_xticks([]); axP.set_yticks([])
+    inview = lambda q: np.any((np.abs(q[:, 0] - cx_) < hh) & (np.abs(q[:, 1] - cy_) < hh))
+    def parrow(q, fwd, col, hl, ec="none"):                                          # arrowhead only, on the path at mid-length, along its tangent
+        if len(q) >= 5:                                                    # smooth the pixel-stepped trace before taking the tangent
+            k_ = np.ones(5) / 5; q = np.column_stack([np.convolve(np.pad(q[:, d], 2, mode="edge"), k_, "valid") for d in (0, 1)])
+        cl_ = np.r_[0, np.cumsum(np.linalg.norm(np.diff(q, axis=0), axis=1))]; L = cl_[-1]
+        hl = min(hl, L / 1.6)                                              # short vessel: smaller head rather than none
+        if hl < 2:
+            return
+        at_ = lambda l: np.array([np.interp(l, cl_, q[:, 0]), np.interp(l, cl_, q[:, 1])])
+        m_ = at_(L / 2); w_ = min(0.6 * hl, L / 4); d_ = at_(L / 2 + w_) - at_(L / 2 - w_)
+        if np.linalg.norm(d_) == 0 or not np.all(np.abs(m_ - [cx_, cy_]) < hh - hl):
+            return                                                         # degenerate, or the head would leave the view
+        d_ = (d_ if fwd else -d_) / np.linalg.norm(d_); n_ = np.array([-d_[1], d_[0]])
+        tip_ = m_ + 0.5 * hl * d_; base_ = m_ - 0.5 * hl * d_
+        axP.add_patch(matplotlib.patches.Polygon([tip_, base_ + 0.42 * hl * n_, base_ - 0.42 * hl * n_], closed=True, fc=col, ec=ec, lw=0.5, zorder=6))
+    fps_ = {}
+    for t_ in ptiles:                                                     # recording footprints: the patch sits in their overlap
+        tg = geom.tiles[int(t_)]; Hv, Wv = tg.video_shape if tg.video_shape else tifffile.imread(str(ST / "tiles" / "maxmed" / f"vid{t_}_maxmed.tif")).shape[:2]
+        fp = np.array([[0, 0, 1], [0, Wv, 1], [Hv, Wv, 1], [Hv, 0, 1], [0, 0, 1]], float) @ tg.A_full.T
+        fp = fp[:, :2] / geom.downsample - [geom.y0, geom.x0]
+        axP.plot(fp[:, 1], fp[:, 0], color="white", lw=0.6, ls=(0, (3, 3)), alpha=0.6, zorder=2); fps_[t_] = fp
+    CCMAP = matplotlib.colors.LinearSegmentedColormap.from_list("cdisc", plt.cm.plasma(np.linspace(0.0, 0.82, 64)))
+    CNORM = matplotlib.colors.LogNorm(0.15, 1.2)                          # vessel colour: c_eff, network 5–95 % range
+    pset = set(pidx)
+    for i, e in enumerate(E):                                             # rest of the reconstructed network in view: skeleton + flow
+        if i in pset:
+            continue
+        q = toimg(np.asarray(G.edges[e]["path"], float))
+        if inview(q):
+            axP.plot(q[:, 0], q[:, 1], color="0.45", lw=0.9, solid_capstyle="round", zorder=3)
+            parrow(q, Qp[i] >= 0, "0.4", 0.045 * hh)
     for i in pidx:
-        q = toimg(np.asarray(G.edges[E[i]]["path"], float)); axP.plot(q[:, 0], q[:, 1], color=NEUT, lw=2.2, solid_capstyle="round", zorder=3)
-        mq = q[len(q) // 2]; axP.text(*mq, str(num[i]), fontsize=8, fontweight="bold", color=INK, ha="center", va="center", zorder=5,
-                                       bbox=dict(boxstyle="circle,pad=0.15", fc="white", ec=INK, lw=0.6))
+        q = toimg(np.asarray(G.edges[E[i]]["path"], float)); axP.plot(q[:, 0], q[:, 1], color=CCMAP(CNORM(D["c"][i])), lw=2.6, solid_capstyle="round", zorder=4)
+        parrow(q, Qp[i] >= 0, "white", 0.065 * hh, ec=INK)
+        k_ = len(q) // 2; d_ = q[min(k_ + 2, len(q) - 1)] - q[max(k_ - 2, 0)]; d_ = d_ / max(np.linalg.norm(d_), 1e-9)
+        cands = [q[k_] + 11 * np.array([-d_[1], d_[0]]), q[k_] - 11 * np.array([-d_[1], d_[0]])]
+        mq = max(cands, key=lambda c: np.min(np.linalg.norm(pts_ - c, axis=1)))
+        axP.text(*mq, str(num[i]), fontsize=7, fontweight="bold", color=INK, ha="center", va="center", zorder=7,
+                 bbox=dict(boxstyle="circle,pad=0.1", fc="white", ec=INK, lw=0.5))
+    axPI = axP.inset_axes([0.64, 0.64, 0.36, 0.36]); axPI.set_zorder(10)
+    _fa = np.vstack(list(fps_.values()))[:, ::-1]; icx_, icy_ = (_fa.min(0) + _fa.max(0)) / 2; ip_ = 0.5 * np.ptp(_fa, axis=0).max() * 1.04   # all footprints                # locator: the three recording footprints and this view
+    axPI.imshow(mos, cmap="gray", vmin=np.percentile(cropP, 1), vmax=np.percentile(cropP, 99.5) * 1.2)
+    axPI.set_xlim(icx_ - ip_, icx_ + ip_); axPI.set_ylim(icy_ + ip_, icy_ - ip_); axPI.set_xticks([]); axPI.set_yticks([])
+    for t_, fp in fps_.items():
+        axPI.add_patch(matplotlib.patches.Polygon(fp[:, ::-1], closed=True, fc="white", ec="none", alpha=0.1, zorder=2))
+        axPI.plot(fp[:, 1], fp[:, 0], color="white", lw=0.6, alpha=0.7, zorder=3)
+    axPI.add_patch(matplotlib.patches.Rectangle((cx_ - hh, cy_ - hh), 2 * hh, 2 * hh, fill=False, ec=INK, lw=1.2, zorder=4))
+    for sp_ in axPI.spines.values():
+        sp_.set_color("white"); sp_.set_linewidth(1.5)
+    axCB = fig.add_axes([0.05, 0.42 / HF, 0.215, 0.07 / HF])
+    cb_ = fig.colorbar(matplotlib.cm.ScalarMappable(norm=CNORM, cmap=CCMAP), cax=axCB, orientation="horizontal")
+    cb_.set_ticks([0.2, 0.3, 0.5, 0.8]); cb_.set_ticklabels(["0.2", "0.3", "0.5", "0.8"]); cb_.minorticks_off(); axCB.tick_params(labelsize=8, length=2, pad=1)
+    cb_.outline.set_linewidth(0.5); axCB.set_xlabel("Calibrated fractional discrepancy, $c_k$", fontsize=8, labelpad=1)
+    log("panel c vessel c_eff: " + ", ".join(f"{num[i]}: {D['c'][i]:.2f}" for i in order))
     L_ = 50 / PX_UM; xb_, yb_ = cx_ + hh - 8 - L_, cy_ + hh - 8
     axP.plot([xb_, xb_ + L_], [yb_, yb_], color=INK, lw=2, solid_capstyle="butt", zorder=6); axP.text(xb_ + L_ / 2, yb_ - 4, "50 µm", fontsize=8, ha="center", va="bottom")
     for k_, i in enumerate(order):
         o_ = np.sign(Qp[i]) or 1.0; yrow = len(order) - k_
         for (t_, q_, c_, s_) in sorted(recs[i]):
-            axQ.scatter(o_ * s_ * q_, yrow, s=26, facecolor="white", edgecolor=TCOL[t_], linewidth=1.3, zorder=3)
+            axQ.scatter(o_ * s_ * q_, yrow, s=22, facecolor="white", edgecolor="0.6", linewidth=1.0, zorder=3)
         axQ.scatter(o_ * Qm[i], yrow, s=34, marker="D", color=BLUE, zorder=4)
         axQ.plot([o_ * Qp[i]] * 2, [yrow - 0.3, yrow + 0.3], color=INK, lw=2.4, solid_capstyle="butt", zorder=5)
+        axQ.plot([o_ * Qm[i], o_ * Qp[i]], [yrow, yrow], color="0.55", lw=0.7, zorder=2.5)   # adjustment: weighted mean → Q′
     axQ.axvline(0, color="0.8", lw=0.6, zorder=1); axQ.set_yticks(range(1, len(order) + 1)); axQ.set_yticklabels([str(num[i]) for i in order[::-1]], fontsize=8)
     axQ.set_ylim(0.4, len(order) + 0.6); axQ.set_xlim(left=min(0, axQ.get_xlim()[0])); axQ.tick_params(labelsize=8)
     axQ.set_ylabel("Vessel", fontsize=9, labelpad=2); axQ.set_xlabel("Mean flux along the reconstructed flow direction (nL/s)", fontsize=9, labelpad=2)
     axQ.spines[["top", "right"]].set_visible(False)
     from matplotlib.lines import Line2D as _L2c
-    hq = [_L2c([], [], ls="", marker="o", ms=5, mfc="white", mec=TCOL[t_], mew=1.3, label=f"recording, tile {t_}") for t_ in ptiles]
-    hq += [_L2c([], [], ls="", marker="D", ms=5, color=BLUE, label="weighted mean"), _L2c([], [], color=INK, lw=2.4, label="reconciled $Q'$")]
-    axQ.legend(handles=hq, loc="lower right", frameon=False, fontsize=8, handletextpad=0.3, labelspacing=0.3, borderaxespad=0.1)
+    hq = [_L2c([], [], ls="", marker="o", ms=5, mfc="white", mec="0.6", mew=1.0, label="Recording"),
+          _L2c([], [], ls="", marker="D", ms=5, color=BLUE, label="Quality-weighted average"), _L2c([], [], color=INK, lw=2.4, label="Reconciled flux Q′")]
+    axQ.legend(handles=hq, loc="best", frameon=False, fontsize=8, handletextpad=0.3, labelspacing=0.3, borderaxespad=0.1)
     log("panel c: " + "; ".join(f"{num[i]}: recs " + "/".join(f"{np.sign(Qp[i]) * s_ * q_:+.3f}" for (_, q_, _, s_) in sorted(recs[i]))
                                  + f", mean {np.sign(Qp[i]) * Qm[i]:+.3f}, Q′ {abs(Qp[i]):.3f}" for i in order))
+    pidx, recs, ptiles, TCOL, order, num = _saved
     # a: one real recording (EX_TILE, EX_EDGE), rotated so the vessel runs left → right along its flow: dense time-mean optical
     #    flow inside the lumen, every Kloosterman cross-section (kept solid, rejected dashed), and the definition of c_k
     from scipy.ndimage import map_coordinates
