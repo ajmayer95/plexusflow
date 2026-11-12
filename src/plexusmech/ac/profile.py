@@ -58,7 +58,7 @@ def _chain(C, c, tile, gauge_sd_deg, ref_tile, var_phi, var_logpi, d_list, eta, 
         return out[0][0] + out[1][0], out[0][1], out[1][1]
 
     def model_phases(x, B1, B2):
-        q1 = B1 @ np.exp(x[:4] + 1j * x[8:]); q2 = B2 @ np.exp(x[4:8] + 2j * x[8:])
+        q1 = B1[:, :4] @ np.exp(x[:4] + 1j * x[8:]) + B1[:, 4]; q2 = B2[:, :4] @ np.exp(x[4:8] + 2j * x[8:]) + B2[:, 4]
         return q1, np.angle(q1 * sgnQs), np.angle(q2 * sgnQs)
 
     def nll(x, B1, B2, dl, beta=0.0):
@@ -149,7 +149,8 @@ def quadratic_min(d_grid, prof):
 def fitted_forcing(C, x):
     """Boundary flux forcing (per dom['bnd'] node, k = 1, 2) with the fitted group corrections applied."""
     bnd = np.asarray(C["dom"]["bnd"]); gid = groups(C); x = np.asarray(x)
-    return {k: C["F"][(k, "flux")][bnd] * np.exp(x[(k - 1) * 4 + gid] + 1j * k * x[8 + gid]) for k in (1, 2)}
+    g3 = np.minimum(gid, 3); fix = gid == 4                     # group 4 (topology interfaces): fixed, no correction
+    return {k: C["F"][(k, "flux")][bnd] * np.where(fix, 1.0, np.exp(x[(k - 1) * 4 + g3] + 1j * k * x[8 + g3])) for k in (1, 2)}
 
 
 def group_table(C, x):

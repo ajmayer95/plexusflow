@@ -39,6 +39,9 @@ def main():
     ap.add_argument("--out", default="ac_estimate_v8", help="results/<out>.json (default ac_estimate_v8, the paper fit)")
     ap.add_argument("--field", default="ac_field_v7", help="results/<field>.pkl (default ac_field_v7 = scripts/ac_field.py defaults)")
     ap.add_argument("--gauge-block", default=None, help="tiles sharing one extra gauge offset with a flat prior, e.g. 15,18,19,20,29,30,31,32,33,34")
+    ap.add_argument("--topo", default="flux", choices=("sealed", "flux", "supernode"),
+                    help="pulsatile closure of topology-uncertain regions (plexusmech.ac.model.build_context); sensitivity, none primary")
+    ap.add_argument("--supernode-scale", type=float, default=1.0, help="supernode compliance × this (region volume uncertain)")
     a = ap.parse_args()
     from plexusflow.config import StageConfig
     _cfg = StageConfig.load(paths.STAGE)                     # per-stage defaults (plexusflow.yaml)
@@ -52,7 +55,9 @@ def main():
         sys.exit("results/ac_field_v2.pkl predates the per-beat uncertainties — rerun scripts/ac_field.py")
     model = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text()); model["c_T"] = {int(k): v for k, v in model["c_T"].items()}
     dom = carved_domain(G); sup = supported(A); Am = dict(A, elig=sup)
-    C0 = build_context(D, Am, dom); c = ac_reliability(G, Am, model)
+    C0 = build_context(D, Am, dom, topo=a.topo, supernode_scale=a.supernode_scale); c = ac_reliability(G, Am, model)
+    log(f"  topology regions: {len(dom['regions'])} ({sum(not r['leaky'] for r in dom['regions'])} sealed-in-DC), pulsatile closure '{a.topo}'"
+        + (f" × {a.supernode_scale:g}" if a.topo == 'supernode' else ''))
     log(f"{paths.STAGE.name}: {sup.sum()} measurement-supported of {A['elig'].sum()} AC-eligible vessels; veins '{a.veins}'"
         f"{' (fitted)' if a.fit_veins else ' (pinned)'}; η {a.eta}; weights '{a.weights}'")
     d_grid = np.logspace(np.log10(a.d_range[0]), np.log10(a.d_range[1]), int(a.d_range[2])); gauge_rad = None
@@ -79,7 +84,8 @@ def main():
     log("  largest tile gauge corrections: " + ", ".join(f"{t}: {v:+.0f}° [SD {A['gauge_sd_deg'].get(t, np.nan):.0f}°]" for t, v in big))
     f = fitted_forcing(C, R["x"]); bnd = np.asarray(dom["bnd"])
     out = dict(stage=paths.STAGE.name, D=R["D"], D_parabola=quadratic_min(d_grid, prof), eta=R["eta"], nll=R["nll"],
-               forcing=f"carve: local ratio + L/R group corrections; veins: {a.veins}{' (fitted)' if a.fit_veins else ' (pinned)'}; "
+               topo=a.topo, supernode_scale=a.supernode_scale,
+               forcing=f"carve: local ratio + L/R group corrections; topology regions: {a.topo}; veins: {a.veins}{' (fitted)' if a.fit_veins else ' (pinned)'}; "
                        f"weights {a.weights}; tile gauge {'latent' if not a.no_gauge else 'off'}",
                settings=vars(a), D_grid=d_grid.tolist(), eta_grid=list(a.eta), S=R["S"].tolist(),
                nodes=[int(dom["nodes"][b]) for b in bnd], f1=[[float(z.real), float(z.imag)] for z in f[1]],
