@@ -40,3 +40,16 @@ def test_sections_outside_old_band_are_kept_but_reversed_ones_are_not():
     flow2 = flow.copy(); flow2[:, 60:80, 0] *= -1                # a reversed stretch is still rejected
     rev = kloosterman_scalar(flow2, cl, R, **PRODUCTION_KW)
     assert any(r == "sign_flip" for r in rev["per_slice_reason"]) and rev["Q_char"] > 0
+
+
+def test_contradictory_sections_give_no_flux():
+    # Fewer than min_valid_slices sign-consistent sections (here one forward and one reversed fit): no flux, instead of
+    # the pre-2026-11-11 fallback that averaged every finite section regardless of sign.
+    H, W, R = 60, 220, 6.0
+    yy, xx = np.mgrid[:H, :W].astype(float); rho = yy - 30
+    vx = np.where(np.abs(rho) <= R, 1 - (rho / R) ** 2, 0.0)
+    flow = np.stack([vx, np.zeros_like(vx)], axis=-1); flow[:, 102:, 0] *= -1
+    cl = np.column_stack([np.full(4, 30.0), np.arange(100, 104, dtype=float)])
+    r = kloosterman_scalar(flow, cl, R, **PRODUCTION_KW)
+    assert r["reason"] == "too_few_consistent_slices" and np.isnan(r["Q_char"]) and r["Q_char_valid_frac"] == 0.0
+    assert "ok" not in list(r["per_slice_reason"])

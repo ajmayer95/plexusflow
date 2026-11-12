@@ -368,7 +368,21 @@ def kloosterman_scalar(
                 per_slice_reason[i] = f"Q_hi({per_slice_Q[i]:.4f}>{hi_thr:.4f})"; continue
 
     if valid_mask.sum() < min_valid_slices:
-        valid_mask = q_finite
+        # Fewer than min_valid_slices sections survive the outlier rule (e.g. two fits of opposite direction): no flux.
+        # Before 2026-11-11 this fell back to averaging ALL finite sections — contradictory signs included (102 of 14 396
+        # 21S recordings, 74 % grossly off their repeats).
+        for i in range(N):
+            if per_slice_reason[i] == "ok" and not valid_mask[i]:
+                per_slice_reason[i] = "outlier_rejected"
+        return dict(
+            Q_char=float("nan"), V_CL_char=float("nan"), R_char=float("nan"),
+            Q_char_valid_frac=0.0, n_slices=int(N), n_valid=int(valid_mask.sum()),
+            per_slice_Q=per_slice_Q, per_slice_R=per_slice_R,
+            per_slice_v_CL=per_slice_v_CL, per_slice_arc=arc,
+            per_slice_reason=per_slice_reason, valid_mask=valid_mask,
+            per_slice_r2=per_slice_r2, per_slice_profiles=profiles, rho=rho,
+            reason="too_few_consistent_slices",
+        )
 
     Q_char    = float(np.nanmean(per_slice_Q[valid_mask]))
     V_CL_char = float(np.nanmean(per_slice_v_CL[valid_mask]))
