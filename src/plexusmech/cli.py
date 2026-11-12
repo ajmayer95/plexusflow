@@ -3,7 +3,7 @@
     plexusmech simulate <STAGE_ROOT>   # LEGACY intact two-pass transmission-line simulation (2026-09-30 recipe)
 
 The paper's pulsatile model is not this command: it is the distributed RC network of plexusmech.ac (driven by the
-measured boundary forcing and fitted by profile likelihood) — scripts/mech/ac_estimate.py and scripts/make_figure10.py.
+measured boundary forcing and fitted by profile likelihood) — scripts/mech/ac_estimate.py and scripts/make_figure9.py.
 """
 from __future__ import annotations
 

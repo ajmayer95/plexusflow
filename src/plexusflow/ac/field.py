@@ -91,7 +91,7 @@ def sync_diagnostics(pa, pb, pw, pz, nT, ref_i, psi, n_starts=50, step_deg=5.0, 
 #: Pass as ``build_ac_field(G, dc, sync_extra_edges=da_stub_edges(G), **CANONICAL_SYNC)``.
 CANONICAL_SYNC = dict(sync_weight="kappa", cont_lambda=1.0, sign_check=True, sync_extra_min_rho=0.5, sync_extra_weight=100.0)
 CANONICAL_FIELD = "ac_field_v7"     #: results/<name>.pkl written with CANONICAL_SYNC
-CANONICAL_F0_BAND = 0.21             #: heart-rate band of the paper (± fraction of the reference tile; Fig 8 "early" = below it)
+CANONICAL_F0_BAND = 0.21             #: heart-rate band of the paper (± fraction of the reference tile; SI fig8_S_regime "early" = below it)
 
 
 def da_stub_edges(G):

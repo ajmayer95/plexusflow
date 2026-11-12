@@ -273,7 +273,7 @@ export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results
 export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
 bash scripts/reproduce_paper.sh
 ```
-`reproduce_paper.sh` re-derives `results/` and draws Figs 1–10 into `$PLEXUSFLOW_FIGURES` (about 4 minutes; `--figures` to skip
+`reproduce_paper.sh` re-derives `results/` and draws Figs 1–9 into `$PLEXUSFLOW_FIGURES` (about 4 minutes; `--figures` to skip
 the analysis); `python examples/quickstart.py` is a one-minute tour of the DC reconciliation.  For the read-only viewer,
 `pip install -e ".[gui]"` and `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"`.  This folder is never written to:
 outputs go to PLEXUSFLOW_RESULTS / PLEXUSFLOW_FIGURES.

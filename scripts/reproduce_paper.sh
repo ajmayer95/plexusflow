@@ -7,7 +7,7 @@
 #   bash scripts/reproduce_paper.sh            # results + figures   (~5 min on a laptop)
 #   bash scripts/reproduce_paper.sh --figures  # figures only, from existing results
 #
-# Steps: DC reconciliation → weighting validation → aligned pulsatile (AC) field → distensibility fit → Figs 1–10 → figures/latest/.
+# Steps: DC reconciliation → weighting validation → aligned pulsatile (AC) field → distensibility fit → Figs 1–9 → figures/latest/.
 # Point RESULTS and FIGURES at your own folders so a frozen release is never modified.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -31,11 +31,11 @@ if [[ "${1:-}" != "--figures" ]]; then
   run scripts/mech/ac_estimate.py      # profiled distensibility fit                 → ac_estimate_v8.json
 fi
 
-for f in 1 2 3 4 5 6 7dc 7 10; do      # make_figure7dc.py = Fig 7; make_figure7.py = Figs 8 and 9
+for f in 1 2 3 4 5 6 7 8 9; do        # make_figureN.py draws Fig N (make_figure8.py also the pulsatile-regime SI figure)
   run "scripts/make_figure$f.py"
 done
 run scripts/make_figure_S_passive.py   # SI: passive-constrained comparison (add a second stage dir for 21S + 27S)
 run scripts/make_figure_S_junction_calibration.py   # SI: junction calibration per stage, Fig 6b companion (add a second stage dir for 21S + 27S)
 run scripts/make_figure_S_synthetic_dc.py  # SI: known-truth benchmark
 run scripts/make_figure_S_async_dc.py      # SI: asynchronous acquisition / tile-scale bias
-run scripts/collect_figures.py         # copies Fig1–Fig10 to <figures>/latest/
+run scripts/collect_figures.py         # copies Fig1–Fig9 to <figures>/latest/

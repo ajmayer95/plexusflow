@@ -134,7 +134,7 @@ left/right symmetry and coherence-based selection do not improve prediction; wit
 right-dominant (left 36–40 %).  Extent of the open region (none, ±1, ±2 junction steps): inflow 6.43–6.46 nL/s, left 37–38 %,
 held-out ×1.73–1.75; only the withdrawing boundary nodes change (fewest with the current carve).
 
-*Code: `plexusflow.reconcile` (driver `scripts/dc_reconcile.py`); figures `scripts/make_figure6.py` (reliability, reconciliation) and `scripts/make_figure7dc.py` (whole-organ DC, Fig 7).*
+*Code: `plexusflow.reconcile` (driver `scripts/dc_reconcile.py`); figures `scripts/make_figure6.py` (reliability, reconciliation) and `scripts/make_figure7.py` (whole-organ DC, Fig 7).*
 
 ## Scope of the error model (diagnostics, 21S, 2026-11-10)
 The reliability model is calibrated on junctions whose vessels were imaged simultaneously (one tile); it describes

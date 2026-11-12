@@ -54,7 +54,7 @@ editors), `vectorize` ([net3](https://github.com/ajmayer95/net3), mask → graph
 3. Run everything (about 4 minutes on a laptop):
 
    ```bash
-   bash scripts/reproduce_paper.sh             # results, then Figs 1–10 → $PLEXUSFLOW_FIGURES/latest/
+   bash scripts/reproduce_paper.sh             # results, then Figs 1–9 → $PLEXUSFLOW_FIGURES/latest/
    bash scripts/reproduce_paper.sh --figures   # figures only, from existing results
    ```
 
@@ -63,7 +63,7 @@ editors), `vectorize` ([net3](https://github.com/ajmayer95/net3), mask → graph
 | reliability model + conservative mean flow | `scripts/dc_reconcile.py` | `reliability_model_v1.json`, `dc_reconciled_v2.pkl` |
 | tile-synchronised harmonic field | `scripts/ac_field.py` | `ac_field_v7.pkl` |
 | profiled distensibility fit | `scripts/mech/ac_estimate.py` | `ac_estimate_v8.json` |
-| Figures 1–10 | `scripts/make_figure*.py` ([FIGURES.md](FIGURES.md)) | `$PLEXUSFLOW_FIGURES/figN/` |
+| Figures 1–9 | `scripts/make_figure*.py` ([FIGURES.md](FIGURES.md)) | `$PLEXUSFLOW_FIGURES/figN/` |
 
 Script defaults are the settings used in the paper (`plexusflow.ac.field.CANONICAL_SYNC` for the phase
 synchronisation). A run from a clean environment reproduces the published mean flows bit for bit, the harmonic field to

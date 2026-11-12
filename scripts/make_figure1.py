@@ -48,7 +48,7 @@ CORNERS = lambda H, W: np.array([[0, 0, 1], [H, 0, 1], [H, W, 1], [0, W, 1], [0,
 def tile_centres(cfg, mosaic):
     """Tile centres in mosaic pixels.  positions.json is stitch-relative, so the centre cloud is anchored to the organ's
     centroid (the scan covers the organ uniformly), which removes the constant offset."""
-    from net3.edit.video_overlay import load_tile_positions
+    from plexusflow.io.positions import load_tile_positions
     from scipy import ndimage as ndi
     pos = load_tile_positions(cfg.positions_path); tids = np.array(sorted(pos))
     tl = np.array([[pos[t]["top_left_x"], pos[t]["top_left_y"]] for t in tids], float)
@@ -333,7 +333,7 @@ def registration_panel(axF, axZ, positions, tile_dir, tile=T15, ds=1, zoom_um=28
 
 def order_panel(fig, ax, mos, positions):
     """Fused mosaic, all tile footprints, acquisition order as arrows coloured by tile index (archived make_figure2 F)."""
-    from net3.edit.video_overlay import load_tile_positions
+    from plexusflow.io.positions import load_tile_positions
     pos = load_tile_positions(str(positions))
     A = {t: np.asarray(e["affine_matrix"], float) for t, e in pos.items() if e.get("affine_matrix") is not None}
     tids = sorted(A); C = np.array([352.0, 320.0])                 # full-res tile centre (H/2, W/2)

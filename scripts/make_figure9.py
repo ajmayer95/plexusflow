@@ -1,11 +1,11 @@
-"""Figure 10 — pulsatile flow: measured field vs distributed RC network, and the distensibility fit.
+"""Figure 9 — pulsatile flow: measured field vs distributed RC network, and the distensibility fit.
 
 Needs results/dc_reconciled_v2.pkl, results/<field>.pkl (AC field, default ac_field_v7) and the profiled fit
 results/ac_estimate_v8.json (scripts/mech/ac_estimate.py: D, η, fitted boundary forcing, tile-gauge corrections and the
 profiled objective over a D grid).
 
   a  2 × 3 maps (rows measured / RC network): pulsatility fraction (|H1|²+|H2|²)/Q̄², H1 and H2 phase lag (deg) behind the
-     Fig 9 reference (ρ-weighted tile-14 dorsal-aorta + vitelline-vein stub phase, H_n in each vessel's own flow direction);
+     Fig 8 reference (ρ-weighted tile-14 dorsal-aorta + vitelline-vein stub phase, H_n in each vessel's own flow direction);
      both rows on the same reference.  Measured row: AC-eligible vessels; RC-network row: every vessel of the carved
      network, unmeasured ones included (the model is solved everywhere)
   b  normalised-harmonic residual sqrt(Σ_k=1,2 |h_k,meas − h_k,sim|²), h_k = H_k sgn(Q̄)/|Q̄| (complex; not the classical
@@ -15,8 +15,8 @@ profiled objective over a D grid).
      conditional on the radii, resistance scale and boundary model; no interval drawn
   e  Q/Q̄ over one beat at three well-measured vessels (marked in b), each titled with the RC network's mean flow relative to the measured mean (Q/Q̄ divides each
      curve by its own mean)
-SI fig10_S_distensibility: H1 lag and pulsatility fraction, measured vs the network at low / fitted / high D (boundary
-forcing held at the D̂ fit).  Writes figures/fig10/fig10[_<tag>].*; nothing to any graph.
+SI fig9_S_distensibility: H1 lag and pulsatility fraction, measured vs the network at low / fitted / high D (boundary
+forcing held at the D̂ fit).  Writes figures/fig9/fig9[_<tag>].*; nothing to any graph.
 """
 from __future__ import annotations
 import sys
@@ -41,7 +41,7 @@ from plexusmech.ac.model import build_context, solve
 
 D_MAIN, ETA_MAIN, VEIN_BC = 3.5e-4, 0.0, 'flux'
 GAUGE_SD_MAX = 30.0     # deg: tiles with a less certain time gauge are greyed in the measured phase maps
-OUT_DIR = _paths.FIGURES / 'fig10'                         # paper Fig 10 (was figures/fig9alt_v3/)
+OUT_DIR = _paths.FIGURES / 'fig9'                          # paper Fig 9 (Fig 10 until 2026-11-12)
 
 
 PAPER_PICKS = '67236,67239;36453,36993;93211,93245'   # 21S panel e vessels (auto rule on the 2026-11-02 field)
@@ -65,7 +65,7 @@ def main():
                     'good / typical / poor by harmonic-residual percentile 20/50/80 among well-measured vessels)')
     ap.add_argument('--bc-json', default=None, help='profiled fit (D, η, boundary forcing, D profile); default results/ac_estimate_v8.json')
     ap.add_argument('--field', default='ac_field_v7', help='results/<field>.pkl (canonical 2026-10-23: ac_field_v5_cont, DA anchor + seam continuity)')
-    ap.add_argument('--tag', default=None, help='output name suffix: fig10_<tag>')
+    ap.add_argument('--tag', default=None, help='output name suffix: fig9_<tag>')
     ap.add_argument('--abs-q', action='store_true', help='panel e in nL/s (each vessel in its own flow direction, own y axis) '
                     'instead of Q/Q̄; the model curve then also shows its mean-flow mismatch')
     args = ap.parse_args()
@@ -78,12 +78,12 @@ def main():
     bc = Path(args.bc_json) if args.bc_json else _paths.RESULTS / 'ac_estimate_v8.json'
     J = json.loads(bc.read_text()) if bc.exists() else None
     if J is None:
-        print(f'[fig10] {bc} not found: falling back to D = {D_MAIN:g}, no profile panel (run scripts/mech/ac_estimate.py)')
+        print(f'[fig9] {bc} not found: falling back to D = {D_MAIN:g}, no profile panel (run scripts/mech/ac_estimate.py)')
     gcorr = (J or {}).get('gauge_correction_deg')
     if gcorr:
         dlt = np.radians(np.array([gcorr.get(str(int(t)), 0.0) if t >= 0 else 0.0 for t in A['tile']]))
         A = dict(A, H=A['H'] * np.exp(-1j * np.arange(1, A['H'].shape[0] + 1)[:, None] * dlt[None, :]))
-        print(f'[fig9alt_v3] tile gauge corrections applied: {sum(abs(v) > 1 for v in gcorr.values())} tiles moved > 1°, '
+        print(f'[fig9] tile gauge corrections applied: {sum(abs(v) > 1 for v in gcorr.values())} tiles moved > 1°, '
               f'largest ' + ', '.join(f'{t}: {v:+.0f}°' for t, v in sorted(gcorr.items(), key=lambda kv: -abs(kv[1]))[:5]))
     C = build_context(D, A, dom)
     d_main, eta_main, bc_lab = D_MAIN, ETA_MAIN, 'local measured ratio'
@@ -100,11 +100,11 @@ def main():
     ph_ok = e & np.array([gsd.get(int(t), 0.0) <= GAUGE_SD_MAX if t >= 0 else False for t in A['tile']])
     Hs = {k: solve(C, k, d_main, eta_main, VEIN_BC) for k in (1, 2)}
     edges = dom['edges']; nE = len(edges)
-    print(f'[fig9alt_v3] phase-determined vessels {int(ph_ok.sum())} of {int(e.sum())} eligible (tile gauge SD ≤ {GAUGE_SD_MAX:.0f}°)')
-    print(f'[fig9alt_v3] {_paths.STAGE.name}: carved edges {nE}, AC-eligible {int(e.sum())}; ref tile '
+    print(f'[fig9] phase-determined vessels {int(ph_ok.sum())} of {int(e.sum())} eligible (tile gauge SD ≤ {GAUGE_SD_MAX:.0f}°)')
+    print(f'[fig9] {_paths.STAGE.name}: carved edges {nE}, AC-eligible {int(e.sum())}; ref tile '
           f'{A.get("ref_tile", "?")} ({C["f0"]:.2f} Hz); D={d_main:g}, η={eta_main}; boundary: {bc_lab}')
 
-    # phase reference = Fig 9's zero: ρ-weighted H1 (H2) phase of the dorsal-aorta and vitelline-vein stubs, all recorded in
+    # phase reference = Fig 8's zero: ρ-weighted H1 (H2) phase of the dorsal-aorta and vitelline-vein stubs, all recorded in
     # tile 14 (one clock), taken into this field's gauge (ψ_14 and the fitted correction δ_14), each in its own flow direction
     from plexusflow.reconcile.harmonics import phasors as _phz, coherence as _coh
     ZT = 14; tf0 = G.graph['tile_f0_piv']; psi14 = float(A['psi'][ZT]); d14 = np.radians((gcorr or {}).get(str(ZT), 0.0))
@@ -117,7 +117,7 @@ def main():
                     for k in (1, 2):
                         zr[k] += w_ * np.exp(1j * np.angle(np.sign(a0_) * H_[k - 1] * np.exp(-1j * k * (psi14 + d14))))
     phref = {k: np.angle(zr[k]) for k in (1, 2)}
-    print(f'[fig10] phase reference (tile-14 DA/V stubs): H1 {np.degrees(phref[1]):.0f}°, H2 {np.degrees(phref[2]):.0f}°')
+    print(f'[fig9] phase reference (tile-14 DA/V stubs): H1 {np.degrees(phref[1]):.0f}°, H2 {np.degrees(phref[2]):.0f}°')
     lag = lambda H, dc, k: (np.degrees(np.angle(np.exp(1j * phref[k]) * np.conj(H * np.sign(dc)))) + 30) % 360 - 30
     pulsfrac = lambda H1, H2, dc: (np.abs(H1) ** 2 + np.abs(H2) ** 2) / np.maximum(np.abs(dc), 1e-30) ** 2
     pf_m, pf_s = pulsfrac(Hm_[1], Hm_[2], Qp), pulsfrac(Hs[1], Hs[2], Qdc_s)
@@ -131,8 +131,8 @@ def main():
     ok = e & (pf_m > 0) & (pf_s > 0)
     stats = dict(pf_corr=lc(pf_m[ok], pf_s[ok]), rms_corr=lc(rms_m[e & (rms_s > 0)], rms_s[e & (rms_s > 0)]),
                  h1_dphi_deg=dphi(1), h2_dphi_deg=dphi(2), pires=np.median(pires[e]))
-    print('[fig9alt_v3] ' + ', '.join(f'{k} {v:.3f}' for k, v in stats.items()))
-    print(f'[fig10] n: RMS correlation {int((e & (rms_s > 0) & (rms_m > 0)).sum())}, phase errors {int(ph_ok.sum())}')
+    print('[fig9] ' + ', '.join(f'{k} {v:.3f}' for k, v in stats.items()))
+    print(f'[fig9] n: RMS correlation {int((e & (rms_s > 0) & (rms_m > 0)).sum())}, phase errors {int(ph_ok.sum())}')
 
     mos = tifffile.imread(str(_paths.MOSAIC)); mos = mos.mean(axis=-1) if mos.ndim == 3 else mos
     Hmos, Wmos = mos.shape
@@ -242,7 +242,7 @@ def main():
         axD.set_xlabel('Distensibility $D$ ($10^{-4}$ Pa$^{-1}$)', fontsize=8, labelpad=1)
         axD.set_ylabel(r'$\Delta\mathcal{L}(D)$, profiled', fontsize=8, labelpad=1); axD.tick_params(labelsize=8)
         axD.set_ylim(-0.03 * dS.max(), 1.05 * dS.max())
-        print(f'[fig10] D profile: min at {Dg[np.argmin(Sg)]:.3g} (fit {d_main:.3g}); Δ at grid ends {dS[0]:.0f} / {dS[-1]:.0f}')
+        print(f'[fig9] D profile: min at {Dg[np.argmin(Sg)]:.3g} (fit {d_main:.3g}); Δ at grid ends {dS[0]:.0f} / {dS[-1]:.0f}')
     axD.set_title('Distensibility fit', fontsize=9, pad=3); axD.spines[['top', 'right']].set_visible(False)
 
     # e  waveforms, Q/Q̄ over one beat
@@ -275,7 +275,7 @@ def main():
             ax.set_xlabel('$t/T$', fontsize=8, labelpad=1)
         ax.text(0.04, 0.95, str(k + 1), transform=ax.transAxes, ha='center', va='center', fontsize=8, fontweight='bold',
                 bbox=dict(fc='#f5d400', ec='black', lw=0.6, boxstyle='circle,pad=0.2'))
-        print(f"[fig10] e{k + 1} ({('good', 'typical', 'poor')[k]}): edge {edges[c]}, harmonic residual {pires[c]:.2f}")
+        print(f"[fig9] e{k + 1} ({('good', 'typical', 'poor')[k]}): edge {edges[c]}, harmonic residual {pires[c]:.2f}")
     axs_e[0].legend(fontsize=8, loc='lower left', frameon=False, borderaxespad=0.1, handlelength=1.8)
 
     # panel letters on a grid
@@ -294,7 +294,7 @@ def main():
             Hd = {k: solve(C, k, Dv, eta_main, VEIN_BC) for k in (1, 2)}; cols.append((nm_, Hd, Qdc_s, allmask, allmask))
             if Dv != d_main:
                 _dd = np.angle(np.exp(1j * (np.angle(Hm_[1][ph_ok] * np.sign(Qp[ph_ok])) - np.angle(Hd[1][ph_ok] * np.sign(Qdc_s[ph_ok])))))
-                print(f'[fig10 SI] D {Dv:.2g}: median |Δφ1| {np.degrees(np.median(np.abs(_dd))):.0f}°')
+                print(f'[fig9 SI] D {Dv:.2g}: median |Δφ1| {np.degrees(np.median(np.abs(_dd))):.0f}°')
         for j_, (nm_, Hr, dcr, pmask, mask) in enumerate(cols):
             for row in range(2):
                 ax = figS.add_subplot(gS[row, j_]); bg(ax)
@@ -314,12 +314,12 @@ def main():
                 cb.set_ticks([0, 90, 180, 270])
         figS.text(0.99, 0.965, '$D$ in $10^{-4}$ Pa$^{-1}$; boundary forcing held at the fitted values', ha='right', fontsize=8, color='0.3')
         OUT_DIR.mkdir(parents=True, exist_ok=True)
-        plos_style.save(figS, OUT_DIR / ('fig10_S_distensibility' + (f'_{args.tag}' if args.tag else '')))
+        plos_style.save(figS, OUT_DIR / ('fig9_S_distensibility' + (f'_{args.tag}' if args.tag else '')))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    stem = 'fig10' + (f'_{args.tag}' if args.tag else '')
+    stem = 'fig9' + (f'_{args.tag}' if args.tag else '')
     plos_style.save(fig, OUT_DIR / stem)
-    print(f"[fig10] wrote {OUT_DIR / f'{stem}.png'}")
+    print(f"[fig9] wrote {OUT_DIR / f'{stem}.png'}")
 
 
 if __name__ == '__main__':

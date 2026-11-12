@@ -1,4 +1,4 @@
-"""Copy the current main-text figures (Figs 1–10) into one folder for sharing / submission.
+"""Copy the current main-text figures (Figs 1–9) into one folder for sharing / submission.
 
 Reads $PLEXUSFLOW_STAGE/figures/figN/figN.{tif,pdf,png} (written by the make_figure*.py scripts, see FIGURES.md) and copies
 them to $PLEXUSFLOW_STAGE/figures/latest/ as Fig1.tif, Fig1.pdf, Fig1.png, …  Copies, not links (the stage folder lives on
@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import plexusflow.paths as _paths
 
-N_FIGS = 10
+N_FIGS = 9
 EXTS = ("tif", "pdf", "png")
 
 
