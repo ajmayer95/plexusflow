@@ -81,8 +81,10 @@ and its tags).  Steps marked GUI are interactive; the rest are batch.
 | 13 | reconstruct | `bash scripts/run_stage.sh STAGE` (`--no-ac`, `--no-validate`) | `results/` |
 | 14 | view | `plexusflow view STAGE` (read-only) | |
 
-Step 13 runs `dc_reconcile.py` (reliability model fitted on this stage's junctions + mean-flow reconstruction), the
-validations (`dc_validate_weighting.py`, `dc_junction_calibration.py`, `dc_withholding_curve.py`), `ac_field.py`
+Step 13 runs `dc_reconcile.py` (reliability model fitted on this stage's junctions + mean-flow reconstruction), `dc_qc.py`
+(review list `results/dc_qc.csv`: gross-error tests — measurement, repeat, nodal, radius — plus loop flow and large
+unmeasured flows, grouped into hotspots ranked by the flow involved; for review in the workbench, never applied
+automatically), the validations (`dc_validate_weighting.py`, `dc_junction_calibration.py`, `dc_withholding_curve.py`), `ac_field.py`
 (tile-synchronised pulsatile field) and `mech/ac_estimate.py` (distensibility fit).  Set `PLEXUSFLOW_RESULTS` to write
 results elsewhere.  The read-only viewer shows the measured graph and, when `results/` holds them, the reconstructed mean
 flow and pulsatile field.  Region tags can be revised in the workbench at any time; rerun step 13 afterwards
