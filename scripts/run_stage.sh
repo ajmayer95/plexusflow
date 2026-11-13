@@ -28,6 +28,7 @@ run() { echo; echo "=== $* ==="; "$PY" "$@"; }
 echo "stage $PLEXUSFLOW_STAGE → results $RES"
 
 run scripts/dc_reconcile.py                 # reliability model + reconciled mean flow → reliability_model_v1.json, dc_reconciled_v2.pkl
+run scripts/dc_qc.py                        # review list: gross-error tests, loops, hotspots → dc_qc.csv, dc_qc.json
 if [[ $VALIDATE == 1 ]]; then
   run scripts/dc_validate_weighting.py      # leave-one-recording-out validation       → dc_weighting_validation.json
   run scripts/dc_junction_calibration.py    # calibration on held-out tiles            → dc_junction_calibration.json
