@@ -4,13 +4,16 @@ Needs results/dc_reconciled_v2.pkl, results/<field>.pkl (AC field, default ac_fi
 results/ac_estimate_v8.json (scripts/mech/ac_estimate.py: D, η, fitted boundary forcing, tile-gauge corrections and the
 profiled objective over a D grid).
 
-  a  2 × 3 maps (rows measured / RC network): pulsatility fraction (|H1|²+|H2|²)/Q̄², H1 and H2 phase lag (deg) behind the
+  (layout 2026-11-16) a  boundary forcing: boundary nodes (arterial L / R, venous, topology interfaces) and the normalised
+     waveforms g_b(t) = F_b(t)/F̄_b (thin: individual arterial nodes; bold: flux-weighted group), F_b = F̄_b g_b
+  b (was a)  2 × 3 maps (rows measured / RC network): pulsatility fraction (|H1|²+|H2|²)/Q̄², H1 and H2 phase lag (deg) behind the
      Fig 8 reference (ρ-weighted tile-14 dorsal-aorta + vitelline-vein stub phase, H_n in each vessel's own flow direction);
      both rows on the same reference.  Measured row: AC-eligible vessels; RC-network row: every vessel of the carved
      network, unmeasured ones included (the model is solved everywhere)
-  b  normalised-harmonic residual sqrt(Σ_k=1,2 |h_k,meas − h_k,sim|²), h_k = H_k sgn(Q̄)/|Q̄| (complex; not the classical
+  (SI fig9_S_agreement) normalised-harmonic residual sqrt(Σ_k=1,2 |h_k,meas − h_k,sim|²), h_k = H_k sgn(Q̄)/|Q̄| (complex; not the classical
      PI = (Q_max − Q_min)/Q̄); examples of e marked
-  c  pulsatile RMS measured vs RC network (log), with r_log, n and median H1/H2 phase errors
+  c  pulsatility fraction (dimensionless: the reconstructed mean-flow scale cancels) measured vs RC network, median H1/H2 phase
+     errors; the dimensional pulsatile RMS scatter (shares the DC scale) is in SI fig9_S_agreement
   d  profiled fitting objective vs D (boundary group corrections re-fitted at each D; η = 0) — a composite pseudo-likelihood,
      conditional on the radii, resistance scale and boundary model; no interval drawn
   e  Q/Q̄ over one beat at three well-measured vessels (marked in b), each titled with the RC network's mean flow relative to the measured mean (Q/Q̄ divides each
@@ -31,6 +34,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.patheffects
+import matplotlib.text
 from matplotlib.collections import LineCollection
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src")); sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -181,14 +186,115 @@ def main():
             ax.text(*mid, str(k + 1), ha='center', va='center', fontsize=8, fontweight='bold', zorder=9)
 
     aspect = (y1 - y0) / (x1 - x0)          # >1 for tall embryos
-    fig = plt.figure(figsize=(7.5, 3.1 + 2.6 * aspect), facecolor='white')
-    outer = fig.add_gridspec(2, 1, height_ratios=[1.45 * aspect, 0.62], hspace=0.42, left=0.085, right=0.97, top=0.93, bottom=0.1)
-    top = outer[0].subgridspec(1, 2, width_ratios=[2.15, 1.0], wspace=0.2)
-    gA = top[0].subgridspec(2, 3, hspace=0.05, wspace=0.04)
-    gB = top[1].subgridspec(2, 1, hspace=0.62)
-    bot = outer[1].subgridspec(1, 2, width_ratios=[1.0, 3.0], wspace=0.28)
-    gE = bot[1].subgridspec(1, 3, wspace=0.32 if args.abs_q else 0.12)
+    # layout (2026-11-16, reviewer): a boundary forcing · b measured vs RC maps · c dimensionless agreement · d D fit · e waveforms;
+    # the harmonic-residual map and the dimensional RMS scatter (shares the DC scale) move to SI fig9_S_agreement
+    fig = plt.figure(figsize=(7.5, 2.9 + 2.75 * aspect), facecolor='white')
+    outer = fig.add_gridspec(2, 1, height_ratios=[1.62 * aspect, 0.7], hspace=0.5, left=0.075, right=0.975, top=0.94, bottom=0.085)
+    top = outer[0].subgridspec(1, 2, width_ratios=[1.0, 2.25], wspace=0.13)
+    gF = top[0].subgridspec(2, 1, height_ratios=[1.0, 0.10], hspace=0.04)
+    gA = top[1].subgridspec(2, 3, hspace=0.05, wspace=0.04)
+    bot = outer[1].subgridspec(1, 3, width_ratios=[0.95, 0.95, 2.6], wspace=0.42)
+    gE = bot[2].subgridspec(1, 3, wspace=0.32 if args.abs_q else 0.12)
 
+    # ---- a  boundary forcing: where the model is driven and with what waveform -------------------------------------------
+    nodes_ = dom['nodes']; nxy = np.array([[G.nodes[n]['x'], Hmos - G.nodes[n]['y']] for n in nodes_])
+    fb_ = np.asarray(D['fb']); Fk = {k: np.asarray(C['F'][(k, 'flux')]) for k in (1, 2)}
+    side_in, side_out = np.asarray(dom['side']), np.asarray(dom['side_out'])
+    GRP = [('Arterial, left', np.asarray(dom['inj'])[side_in == 'L'], '#0072B2', '^'),
+           ('Arterial, right', np.asarray(dom['inj'])[side_in == 'R'], '#D55E00', '^'),
+           ('Venous (shared)', np.asarray(dom['out']), '#009E73', '*')]
+    axF = fig.add_subplot(gF[0]); bg(axF)
+    axF.add_collection(LineCollection(segs, colors=(0.3, 0.3, 0.3, 0.6), linewidths=0.35, zorder=2))
+    # arterial open regions (inflow zones beside the aortae) and the aorta anchors, for orientation
+    from plexusflow.reconcile.regions import is_open as _is_open
+    opn_ = [np.column_stack([np.asarray(d_['path'], float)[:, 0], Hmos - np.asarray(d_['path'], float)[:, 1]])
+            for _, _, d_ in G.edges(data=True) if _is_open(d_) and d_.get('path') is not None]
+    axF.add_collection(LineCollection(opn_, colors=(0.85, 0.55, 0.2, 0.55), linewidths=0.9, zorder=2.5))
+    for n_ in dom['DA']:
+        axF.plot(G.nodes[n_]['x'], Hmos - G.nodes[n_]['y'], marker='v', ms=6, color='white', mec='black', mew=0.6, zorder=6)
+    bidx = np.r_[np.asarray(dom['inj']), np.asarray(dom['out'])].astype(int)
+    bxy = np.vstack([nxy[bidx], [[G.nodes[n_]['x'], Hmos - G.nodes[n_]['y']] for n_ in dom['DA']]])
+    cx_, cy_ = (bxy.min(0) + bxy.max(0)) / 2
+    # crop: the boundary nodes with room on both sides for the waveform insets; height follows the panel's aspect ratio
+    pos_ = axF.get_position(); ar_ = (pos_.height * fig.get_figheight()) / (pos_.width * fig.get_figwidth())
+    hw = 0.5 * np.ptp(bxy[:, 0]) + 640; hh = max(hw * ar_, 0.5 * np.ptp(bxy[:, 1]) + 120); hw = hh / ar_
+    axF.set_xlim(cx_ - hw, cx_ + hw); axF.set_ylim(cy_ + hh, cy_ - hh)
+    # highlighted arterial nodes: per side, of the 6 largest-inflow nodes the two farthest apart (A1–A4, colour = side)
+    hi_nodes = []
+    _tt = np.linspace(0, 1, 100)
+    for (lab_, idx_, col_, mk_), tag_ in zip(GRP[:2], ('L', 'R')):
+        idx_ = idx_[fb_[idx_] > 0]
+        gmin_ = np.array([min(1 + sum((Fk[k][i_] / fb_[i_] * np.exp(2j * np.pi * k * _tt)).real for k in (1, 2))) for i_ in idx_])
+        cand_ = idx_[gmin_ > 0][np.argsort(-fb_[idx_[gmin_ > 0]])][:6]       # the 6 largest-inflow nodes (no reversal) …
+        if len(cand_) >= 2:                                                  # … the two farthest apart
+            dd_ = np.linalg.norm(nxy[cand_][:, None] - nxy[cand_][None], axis=2); a_, b_ = np.unravel_index(np.argmax(dd_), dd_.shape)
+            chosen = sorted([int(cand_[a_]), int(cand_[b_])], key=lambda i_: nxy[i_, 1])
+        else:
+            chosen = [int(c_) for c_ in cand_]
+        hi_nodes += [(tag_, i_, col_) for i_ in chosen]
+    hi_nodes = [(f'A{k_ + 1}', i_, col_) for k_, (_, i_, col_) in enumerate(hi_nodes)]   # A1–A4; colour gives the side
+    for lab_, idx_, col_, mk_ in GRP:
+        if len(idx_):
+            axF.scatter(nxy[idx_, 0], nxy[idx_, 1], s=40 if mk_ == '*' else 16, marker=mk_, c=col_, edgecolors='black', linewidths=0.35, zorder=5)
+    _sb = 200 / 1.7                                                                    # 200 µm at 1.7 µm/px (as Fig 8)
+    axF.plot([cx_ - hw + 40, cx_ - hw + 40 + _sb], [cy_ + hh - 45] * 2, color='black', lw=1.5, zorder=7)
+    axF.text(cx_ - hw + 40 + _sb / 2, cy_ + hh - 60, '200 µm', ha='center', va='bottom', fontsize=8, zorder=7)
+    axF.set_title(r'Boundary forcing  $F_b(t) = \bar F_b\, g_b(t)$', fontsize=9, pad=3)
+    # waveform insets on the crop: g_b(t) over one beat at each highlighted node (and the shared venous waveform)
+    tt = np.linspace(0, 1, 200)
+    nwave = lambda i_: 1 + sum((Fk[k][i_] / fb_[i_] * np.exp(2j * np.pi * k * tt)).real for k in (1, 2))
+    vidx_ = np.asarray(dom['out'])
+    gV = 1 + sum((Fk[k][vidx_].sum() / fb_[vidx_].sum() * np.exp(2j * np.pi * k * tt)).real for k in (1, 2))
+    curves = [(nm_, [i_], col_, nwave(i_)) for nm_, i_, col_ in hi_nodes] + [('V1 = V2', list(vidx_), '#009E73', gV)]
+    sideof_ = {nm_: ('L' if col_ == GRP[0][2] else 'R') for nm_, _, col_ in hi_nodes}
+    gmax = max(float(c_[3].max()) for c_ in curves) * 1.08
+    from matplotlib.patches import ConnectionPatch
+    to_ax = lambda pt: axF.transAxes.inverted().transform(axF.transData.transform(pt))
+    IW, IH = 0.27, 0.12
+    # inset positions: beside their node, pushed apart on each side so they do not overlap
+    ypos = {}
+    for sd_ in ('L', 'R'):
+        cs_ = sorted([c_ for c_ in curves if sideof_.get(c_[0]) == sd_], key=lambda c_: -to_ax(nxy[c_[1][0]])[1])   # top first
+        ys_ = [float(np.clip(to_ax(nxy[c_[1][0]])[1] - IH / 2, 0.02, 0.97 - IH)) for c_ in cs_]
+        for k_ in range(1, len(ys_)):
+            gap_ = ys_[k_ - 1] - ys_[k_] - (IH + 0.03)
+            if gap_ < 0:
+                ys_[k_ - 1] = min(ys_[k_ - 1] - gap_ / 2, 0.97 - IH); ys_[k_] = ys_[k_ - 1] - IH - 0.03
+        ypos.update({c_[0]: y_ for c_, y_ in zip(cs_, ys_)})
+    for nm_, ids_, col_, g_ in curves:
+        pts = [to_ax(nxy[i_]) for i_ in ids_]; ya = float(np.mean([p_[1] for p_ in pts]))
+        if nm_.startswith('V'):                                            # centred above the two outlets
+            xa = float(np.mean([p_[0] for p_ in pts])); x0i, y0i = float(np.clip(xa - IW / 2, 0.02, 0.98 - IW)), min(0.97 - IH, ya + 0.07)
+        else:
+            x0i = 0.02 if sideof_[nm_] == 'L' else 0.98 - IW; y0i = ypos[nm_]
+        ins = axF.inset_axes([x0i, y0i, IW, IH], zorder=9)
+        ins.set_facecolor((1, 1, 1, 0.88)); ins.axhline(1, color='0.65', lw=0.6, zorder=1)
+        ins.plot(tt, g_, color=col_, lw=1.4, zorder=2); ins.set_xlim(0, 1); ins.set_ylim(0, gmax * 1.38)   # headroom for the label
+        ins.set_xticks([]); ins.set_yticks([]); [sp_.set_color(col_) for sp_ in ins.spines.values()]; [sp_.set_linewidth(0.8) for sp_ in ins.spines.values()]
+        if nm_.startswith('V'):
+            ins.text(-0.04, 0.5, nm_, transform=ins.transAxes, ha='right', va='center', fontsize=8, fontweight='bold', color=col_,
+                     path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground='white')])
+        else:
+            ins.text(0.04, 0.93, nm_, transform=ins.transAxes, ha='left', va='top', fontsize=8, fontweight='bold', color=col_)
+        for i_ in ids_:
+            if not nm_.startswith('V'):
+                axF.scatter(*nxy[i_], s=70, facecolors='none', edgecolors='black', linewidths=1.0, zorder=7)
+                xyB = (1.0, 0.5) if x0i < 0.5 else (0.0, 0.5)
+            else:                                                          # label each outlet, connect to the inset's lower edge
+                k_ = ids_.index(i_); xyB = (0.3 + 0.4 * (to_ax(nxy[i_])[0] > np.mean([p_[0] for p_ in pts])), 0.0)
+                _left = to_ax(nxy[i_])[0] <= np.mean([p_[0] for p_ in pts])
+                axF.annotate(f'V{k_ + 1}', nxy[i_], xytext=(-8 if _left else 8, 0), textcoords='offset points', ha='right' if _left else 'left',
+                             va='center', fontsize=8,
+                             fontweight='bold', color='#009E73', zorder=8,
+                             path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground='white')])
+            fig.add_artist(ConnectionPatch(xyA=tuple(nxy[i_]), coordsA=axF.transData, xyB=xyB, coordsB=ins.transAxes,
+                                           color=col_, lw=0.7, zorder=8))
+    axL = fig.add_subplot(gF[1]); axL.axis('off')
+    hnd = [plt.Line2D([], [], color=c_, marker=m_, ms=5 if m_ != '*' else 7, mec='black', mew=0.3, lw=0) for _, _, c_, m_ in GRP]
+    axL.legend(hnd, [g_[0] for g_ in GRP], fontsize=8, loc='upper center', ncol=3, frameon=False, handlelength=1.0,
+               columnspacing=0.6, borderaxespad=0, handletextpad=0.3)
+
+    # ---- b  measured vs RC network maps ---------------------------------------------------------------------------------
     nPF = mcolors.LogNorm(0.05, 0.6); cPF = plt.cm.magma
     nPH = mcolors.Normalize(-30, 330); cPH = plt.cm.twilight_shifted          # cyclic: −30° ≡ 330°
     allmask = np.ones(nE, bool); axes_A = {}
@@ -202,6 +308,7 @@ def main():
                 ax.set_title(['Pulsatility fraction', 'Fundamental phase lag', '2nd-harmonic phase lag'][col], fontsize=9, pad=3)
             if col == 0:
                 ax.text(-0.05, 0.5, side, transform=ax.transAxes, rotation=90, ha='center', va='center', fontsize=9)
+    pick_marks(axes_A[0, 0])
     for col, (nrm, cm_, lab) in enumerate(((nPF, cPF, 'Pulsatile / mean power'), (nPH, cPH, 'Lag (°)'), (nPH, cPH, 'Lag (°)'))):
         cax = axes_A[1, col].inset_axes([0.1, -0.08, 0.8, 0.035])
         cb = plt.colorbar(plt.cm.ScalarMappable(norm=nrm, cmap=cm_), cax=cax, orientation='horizontal')
@@ -211,41 +318,35 @@ def main():
         else:
             cb.set_ticks([0, 90, 180, 270])
 
-    # b  PI residual map
+    # ---- c  dimensionless agreement: pulsatility fraction (DC scale cancels) + phase errors -------------------------------
     nPI = mcolors.LogNorm(0.05, 1.5); cPI = plt.cm.magma
-    axB = fig.add_subplot(gB[0]); bg(axB); edgemap(axB, pires, e, nPI, cPI, 0.45); pick_marks(axB)
-    cb = plt.colorbar(plt.cm.ScalarMappable(norm=nPI, cmap=cPI), cax=axB.inset_axes([1.03, 0.10, 0.05, 0.80]))
-    cb.set_label('Harmonic residual', fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
-    axB.set_title('Harmonic residual', fontsize=9, pad=3)
+    axC = fig.add_subplot(bot[0]); selp = ok
+    axC.scatter(pf_m[selp], pf_s[selp], s=1.5, color='0.25', alpha=0.35, linewidths=0, rasterized=True)
+    lo_ = max(min(np.percentile(pf_m[selp], 1), np.percentile(pf_s[selp], 1)) * 0.7, 1e-3)
+    hi_ = max(np.percentile(pf_m[selp], 99), np.percentile(pf_s[selp], 99)) * 1.3
+    axC.plot([lo_, hi_], [lo_, hi_], 'k--', lw=0.5, alpha=0.6)
+    axC.set_xscale('log'); axC.set_yscale('log'); axC.set_xlim(lo_, hi_); axC.set_ylim(lo_, hi_); axC.set_aspect('equal')
+    axC.set_xlabel('Measured pulsatility fraction', fontsize=8, labelpad=1); axC.set_ylabel('RC network', fontsize=8, labelpad=1)
+    axC.tick_params(labelsize=8); axC.spines[['top', 'right']].set_visible(False)
+    axC.text(0.03, 0.97, f"$r_{{\\log}}$ = {stats['pf_corr']:.2f}\nmedian $|\\Delta\\phi_1|$ {stats['h1_dphi_deg']:.0f}°\nmedian $|\\Delta\\phi_2|$ {stats['h2_dphi_deg']:.0f}°",
+             transform=axC.transAxes, va='top', ha='left', fontsize=8, linespacing=1.15, zorder=5,
+             bbox=dict(fc='white', ec='none', alpha=0.85, pad=1.5))
+    print(f"[fig9] c: pulsatility fraction r_log {stats['pf_corr']:.3f} (n {int(selp.sum())}); dimensional RMS r_log {stats['rms_corr']:.3f} → SI")
 
-    # c  pulsatile RMS scatter + statistics
-    axC = fig.add_subplot(gB[1])
-    sel = e & (rms_s > 0) & (rms_m > 0)
-    axC.scatter(rms_m[sel], rms_s[sel], c=pires[sel], s=1.5, cmap=cPI, norm=nPI, alpha=0.6, linewidths=0, rasterized=True)
-    lo = max(min(np.percentile(rms_m[sel], 2), np.percentile(rms_s[sel], 2)) * 0.5, 1e-4)
-    hi = max(np.percentile(rms_m[sel], 99.5), np.percentile(rms_s[sel], 99.5)) * 2
-    axC.plot([lo, hi], [lo, hi], 'k--', lw=0.5, alpha=0.6)
-    axC.set_xscale('log'); axC.set_yscale('log'); axC.set_xlim(lo, hi); axC.set_ylim(lo, hi); axC.set_aspect('equal')
-    axC.set_xlabel('Measured pulsatile RMS (nL/s)', fontsize=8, labelpad=1)
-    axC.set_ylabel('RC network (nL/s)', fontsize=8, labelpad=1); axC.tick_params(labelsize=8)
-    axC.text(0.0, 1.03, f"$r_{{\\log}}$ = {stats['rms_corr']:.2f}\nmedian $|\\Delta\\phi_1|$ = {stats['h1_dphi_deg']:.0f}°, $|\\Delta\\phi_2|$ = {stats['h2_dphi_deg']:.0f}°",
-             transform=axC.transAxes, va='bottom', fontsize=8, linespacing=1.2)
-    axC.spines[['top', 'right']].set_visible(False)
-
-    # d  profiled objective vs D
-    axD = fig.add_subplot(bot[0])
+    # ---- d  profiled objective vs D -------------------------------------------------------------------------------------
+    axD = fig.add_subplot(bot[1])
     if J and J.get('D_grid') and J.get('S'):
         Dg = np.array(J['D_grid']); Sg = np.array(J['S'][0]); dS = Sg - Sg.min()
         axD.plot(Dg * 1e4, dS, 'o-', color='0.2', ms=2.5, lw=1.0)
         axD.axvline(d_main * 1e4, color='#d62728', lw=0.8, ls='--')
         axD.text(d_main * 1e4, 0.97 * dS.max(), f" $\\hat D$ = {d_main * 1e4:.1f}", color='#d62728', fontsize=8, va='top', ha='left')
-        axD.set_xlabel('Distensibility $D$ ($10^{-4}$ Pa$^{-1}$)', fontsize=8, labelpad=1)
+        axD.set_xlabel('$D$ ($10^{-4}$ Pa$^{-1}$)', fontsize=8, labelpad=1)
         axD.set_ylabel(r'$\Delta\mathcal{L}(D)$, profiled', fontsize=8, labelpad=1); axD.tick_params(labelsize=8)
         axD.set_ylim(-0.03 * dS.max(), 1.05 * dS.max())
         print(f'[fig9] D profile: min at {Dg[np.argmin(Sg)]:.3g} (fit {d_main:.3g}); Δ at grid ends {dS[0]:.0f} / {dS[-1]:.0f}')
     axD.set_title('Distensibility fit', fontsize=9, pad=3); axD.spines[['top', 'right']].set_visible(False)
 
-    # e  waveforms, Q/Q̄ over one beat
+    # ---- e  waveforms, Q/Q̄ over one beat -------------------------------------------------------------------------------
     t = np.linspace(0, 1, 400)
     def wave(dc_, Hk):
         q = dc_ + sum((Hk[k] * np.exp(2j * np.pi * k * t)).real for k in (1, 2))
@@ -262,7 +363,7 @@ def main():
         ax.set_xticks([0, 0.5, 1]); ax.set_xticklabels(['0', '0.5', '1']); ax.tick_params(labelsize=8)
         ax.spines[['top', 'right']].set_visible(False)
         dm = 100 * (abs(Qdc_s[c]) / abs(Qp[c]) - 1)          # RC-network mean flow vs the measured (reconciled) mean
-        ax.set_title(f'Model mean {dm:+.0f} %'.replace('-', '\u2212'), fontsize=8, pad=3, color='#d62728')
+        ax.text(0.97, 0.03, f'mean {dm:+.0f} %'.replace('-', '−'), transform=ax.transAxes, ha='right', va='bottom', fontsize=8, color='#d62728')
         if args.abs_q:
             ax.set_ylim(bottom=0)
             if k == 0:
@@ -276,13 +377,37 @@ def main():
         ax.text(0.04, 0.95, str(k + 1), transform=ax.transAxes, ha='center', va='center', fontsize=8, fontweight='bold',
                 bbox=dict(fc='#f5d400', ec='black', lw=0.6, boxstyle='circle,pad=0.2'))
         print(f"[fig9] e{k + 1} ({('good', 'typical', 'poor')[k]}): edge {edges[c]}, harmonic residual {pires[c]:.2f}")
-    axs_e[0].legend(fontsize=8, loc='lower left', frameon=False, borderaxespad=0.1, handlelength=1.8)
+    axs_e[1].legend(*axs_e[0].get_legend_handles_labels(), fontsize=8, loc='lower center', bbox_to_anchor=(0.5, 1.02), ncol=2,
+                    frameon=False, borderaxespad=0.1, handlelength=1.8, columnspacing=1.2)
 
-    # panel letters on a grid
-    pa, pb, pc, pd, pe = axes_A[0, 0].get_position(), axB.get_position(), axC.get_position(), axD.get_position(), axs_e[0].get_position()
-    xl = pa.x0 - 0.045; xr = pb.x0 - 0.04; yt = max(pa.y1, pb.y1) + 0.02; yb = pd.y1 + 0.03
-    for x_, y_, l_ in ((xl, yt, 'a'), (xr, yt, 'b'), (xr, pc.y1 + 0.055, 'c'), (xl, yb, 'd'), (pe.x0 - 0.035, yb, 'e')):
+    # panel letters
+    pf_, pa, pc, pd, pe = axF.get_position(), axes_A[0, 0].get_position(), axC.get_position(), axD.get_position(), axs_e[0].get_position()
+    yt = max(pf_.y1, pa.y1) + 0.022; yb = max(pc.y1, pd.y1) + 0.03
+    for x_, y_, l_ in ((pf_.x0 - 0.05, yt, 'a'), (pa.x0 - 0.04, yt, 'b'), (pc.x0 - 0.065, yb, 'c'), (pd.x0 - 0.06, yb, 'd'),
+                       (pe.x0 - 0.045, yb, 'e')):
         fig.text(x_, y_, l_, fontsize=12, fontweight='bold', va='bottom', ha='left')
+
+    # SI: harmonic residual map + dimensional pulsatile RMS (shares the DC scale of the reconstruction)
+    figA = plt.figure(figsize=(7.5, 3.3 * aspect + 0.4), facecolor='white')
+    gAg = figA.add_gridspec(1, 2, width_ratios=[1.25, 1.0], wspace=0.35, left=0.03, right=0.97, top=0.9, bottom=0.14)
+    axB = figA.add_subplot(gAg[0]); bg(axB); edgemap(axB, pires, e, nPI, cPI, 0.45); pick_marks(axB)
+    cb = plt.colorbar(plt.cm.ScalarMappable(norm=nPI, cmap=cPI), cax=axB.inset_axes([1.03, 0.10, 0.04, 0.80]))
+    cb.set_label('Harmonic residual', fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
+    axB.set_title('Harmonic residual', fontsize=9, pad=3)
+    axR = figA.add_subplot(gAg[1]); sel = e & (rms_s > 0) & (rms_m > 0)
+    axR.scatter(rms_m[sel], rms_s[sel], c=pires[sel], s=1.5, cmap=cPI, norm=nPI, alpha=0.6, linewidths=0, rasterized=True)
+    lo = max(min(np.percentile(rms_m[sel], 2), np.percentile(rms_s[sel], 2)) * 0.5, 1e-4)
+    hi = max(np.percentile(rms_m[sel], 99.5), np.percentile(rms_s[sel], 99.5)) * 2
+    axR.plot([lo, hi], [lo, hi], 'k--', lw=0.5, alpha=0.6)
+    axR.set_xscale('log'); axR.set_yscale('log'); axR.set_xlim(lo, hi); axR.set_ylim(lo, hi); axR.set_aspect('equal')
+    axR.set_xlabel('Measured pulsatile RMS (nL/s)', fontsize=8, labelpad=1); axR.set_ylabel('RC network (nL/s)', fontsize=8, labelpad=1)
+    axR.tick_params(labelsize=8); axR.spines[['top', 'right']].set_visible(False)
+    axR.text(0.0, 1.03, f"$r_{{\\log}}$ = {stats['rms_corr']:.2f}  (both scale with the reconstructed mean flow)", transform=axR.transAxes,
+             va='bottom', fontsize=8)
+    for x_, l_ in ((0.01, 'a'), (0.55, 'b')):
+        figA.text(x_, 0.93, l_, fontsize=12, fontweight='bold', va='bottom')
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    plos_style.save(figA, OUT_DIR / ('fig9_S_agreement' + (f'_{args.tag}' if args.tag else '')))
 
     # SI: stiff / fitted / compliant (boundary forcing held at the D̂ fit)
     if J and J.get('D_grid'):
@@ -316,6 +441,23 @@ def main():
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         plos_style.save(figS, OUT_DIR / ('fig9_S_distensibility' + (f'_{args.tag}' if args.tag else '')))
 
+    # text-collision check: every pair of visible text boxes (labels, titles, ticks, legends, annotations) must not overlap
+    fig.canvas.draw(); _r = fig.canvas.get_renderer(); _tb = []
+    _ticks_off = set()
+    for ax_ in fig.axes:                       # tick labels outside the view limits are kept by matplotlib but never drawn
+        for axis_, (lo_, hi_) in ((ax_.xaxis, sorted(ax_.get_xlim())), (ax_.yaxis, sorted(ax_.get_ylim()))):
+            for tk_ in axis_.get_major_ticks() + axis_.get_minor_ticks():
+                if not (lo_ - 1e-9 * abs(hi_ - lo_) <= tk_.get_loc() <= hi_ + 1e-9 * abs(hi_ - lo_)):
+                    _ticks_off.update({id(tk_.label1), id(tk_.label2)})
+    for t_ in fig.findobj(matplotlib.text.Text):
+        if t_.get_visible() and t_.get_text().strip() and id(t_) not in _ticks_off:
+            try:
+                _tb.append((t_.get_text().strip(), t_.get_window_extent(_r)))
+            except Exception:
+                pass
+    _hits = [(a_[0], b_[0]) for i_, a_ in enumerate(_tb) for b_ in _tb[i_ + 1:] if a_[1].overlaps(b_[1])
+             and a_[1].width > 0 and b_[1].width > 0]
+    print(f'[fig9] text overlaps: {len(_hits)}' + ('' if not _hits else ' — ' + '; '.join(f'{a_!r}/{b_!r}' for a_, b_ in _hits[:12])))
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     stem = 'fig9' + (f'_{args.tag}' if args.tag else '')
     plos_style.save(fig, OUT_DIR / stem)

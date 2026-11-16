@@ -20,8 +20,19 @@ MU, PX_M, NL = 3.5e-3, 1.7e-6, 1e-12      # Pa·s, m per pixel, m³ per nL
 TOPO_MODES = ("sealed", "flux", "supernode")
 
 
-def build_context(dc, field, dom, topo="flux", supernode_scale=1.0):
+RATIO_MODES = ("weighted", "sum")
+RATIO_FLAG = 2.0          # |r| above this at a boundary node is reported in C["forcing_flags"]
+
+
+def build_context(dc, field, dom, topo="flux", supernode_scale=1.0, ratio="weighted"):
     """Arrays for the harmonic solves: topology, geometry (consensus radii), DC field, eligible Ĥ, boundary forcing F.
+
+    Boundary waveform r_n^(k) at a boundary node n (f_n^(k) = f_DC,n · r_n^(k)) from the AC-eligible vessels e within
+    4 hops (stop once ≥ 3 are found):
+      'weighted' (default since 2026-11-16)  r = Σ |Q'_e| h_e / Σ |Q'_e|,  h_e = Ĥ_e / Q'_e — the flux-weighted mean of the
+                 vessels' own normalised waveforms; |r| ≤ max_e |h_e|.
+      'sum'      r = Σ s_e Ĥ_e / Σ s_e Q'_e (s = orientation w.r.t. n) — the previous rule; blows up where the nearby mean
+                 flows cancel (21S: one node at 0.6 % of the left inflow had |r| ≈ 130 and set 82 % of the left forcing).
 
     Topology-uncertain regions (dom['regions'], conserving black boxes in the DC reconstruction) need a pulsatile
     closure — the DC black box says nothing about how they transmit pressure.  Sensitivity options (none is primary):
@@ -33,6 +44,8 @@ def build_context(dc, field, dom, topo="flux", supernode_scale=1.0):
     Leaky regions (fed through an open region) are already inflow boundary nodes and are driven by the local ratio."""
     if topo not in TOPO_MODES:
         raise ValueError(f"topo must be one of {TOPO_MODES}, not {topo!r}")
+    if ratio not in RATIO_MODES:
+        raise ValueError(f"ratio must be one of {RATIO_MODES}, not {ratio!r}")
     nodes = dom["nodes"]; ix = {n: i for i, n in enumerate(nodes)}; sub = dom["edges"]
     tail = np.array([ix[u] for u, v in sub]); head = np.array([ix[v] for u, v in sub]); nE = len(sub); nN = len(nodes)
     Qp, fb, elig = dc["Qp"], dc["fb"], field["elig"]
@@ -51,7 +64,11 @@ def build_context(dc, field, dom, topo="flux", supernode_scale=1.0):
                         continue
                     seen.add(nb); nxt.append(nb)
                     if elig[e_]:
-                        ah += val * H[k][e_]; aq += val * Qp[e_]; cnt += 1
+                        if ratio == "sum":
+                            ah += val * H[k][e_]; aq += val * Qp[e_]
+                        else:                                        # sgn(Q')·Ĥ / |Q'| summed = Σ|Q'| h_e, h_e = Ĥ/Q'
+                            ah += np.sign(Qp[e_]) * H[k][e_]; aq += abs(Qp[e_])
+                        cnt += 1
             frontier = nxt
             if cnt >= 3:
                 break
@@ -65,9 +82,11 @@ def build_context(dc, field, dom, topo="flux", supernode_scale=1.0):
         if topo == "flux":
             for n_ in dom.get("topo_cut", []):
                 v = fb[n_] * local_r(n_, k); F[(k, "P=0")][n_] = v; F[(k, "flux")][n_] = v
+    flags = sorted({int(nodes[n_]) for k in (1, 2) for (kk, m), F_ in F.items() if kk == k and m == "flux"
+                    for n_ in np.flatnonzero(np.abs(F_) > RATIO_FLAG * np.maximum(np.abs(fb), 1e-12))})
     sup = [(np.array([ix[n] for n in r["cut"]]), r["volume_px3"] * PX_M ** 3 * supernode_scale)
            for r in dom.get("regions", []) if not r["leaky"] and r["cut"]] if topo == "supernode" else []
-    return dict(topo=topo, supernode_scale=supernode_scale, super=sup, f0=field["f_ref"], nN=nN, nE=nE, dom=dom, Qp=Qp, Qs_dc=dc["Qs"],
+    return dict(topo=topo, supernode_scale=supernode_scale, super=sup, ratio=ratio, forcing_flags=flags, f0=field["f_ref"], nN=nN, nE=nE, dom=dom, Qp=Qp, Qs_dc=dc["Qs"],
                 H={1: np.where(elig, H[1], np.nan), 2: np.where(elig, H[2], np.nan)},
                 elig=elig, F=F, tail=tail, head=head, r_m=dc["radius"] * PX_M, l_m=dc["length"] * PX_M)
 
@@ -125,7 +144,7 @@ def ac_reliability(G, field, model):
 def vein_forcing(C, field, mode="mean", gauge_rad=None):
     """Replace the vein-node forcing of context C by stub waveforms.  field: the FULL AC field (all eligible vessels —
     stubs are usually outside the measurement-supported fit set because their DC is under-read).  Per vein node n the stub
-    ratio r_n,k = Σ s Ĥ_k / Σ s Q' over its incident AC-eligible vessels (Ĥ gauge-corrected by gauge_rad[tile] if
+    ratio r_n,k = Σ |Q'| (Ĥ_k/Q') / Σ |Q'| over its incident AC-eligible vessels (Ĥ gauge-corrected by gauge_rad[tile] if
     given), and f_n,k = f_DC,n · r with
         'own'   r = r_n (nodes without an eligible stub keep the local-ratio forcing)
         'mean'  r = mean_n r_n at every vein node (one shared venous waveform)
@@ -139,8 +158,8 @@ def vein_forcing(C, field, mode="mean", gauge_rad=None):
         if not es:
             continue
         for k in (1, 2):
-            Hh = sum(s_ * field["H"][k - 1][e] * np.exp(-1j * k * g.get(int(field["tile"][e]), 0.0)) for e, s_ in es)
-            ratio[k][int(n)] = Hh / sum(s_ * Qp[e] for e, s_ in es)
+            Hh = sum(np.sign(Qp[e]) * field["H"][k - 1][e] * np.exp(-1j * k * g.get(int(field["tile"][e]), 0.0)) for e, s_ in es)
+            ratio[k][int(n)] = Hh / sum(abs(Qp[e]) for e, s_ in es)            # flux-weighted mean of Ĥ/Q' (as build_context)
     stubbed = sorted(ratio[1]); C2 = dict(C); C2["F"] = dict(C["F"]); rbar = {}
     if not stubbed:
         raise ValueError("no vein node has an AC-eligible stub")
@@ -158,12 +177,17 @@ def vein_forcing(C, field, mode="mean", gauge_rad=None):
 
 
 def group_response(C, k, D, eta, gid, el):
-    """Vessel-mean H_k (rows: eligible edges) driven by the context's flux forcing restricted to each boundary group
+    """Vessel-mean H_k (rows: eligible edges) driven by the context's flux forcing restricted to each boundary group.
+    C["vmode"] = "P=0" holds the vein nodes at zero pressure instead (their flux forcing is then unused)
     (columns g = 0..3; column 4 = the fixed, never-corrected forcing at topology-region interfaces).  Equals response(C, k, D, eta, bnd)[el][:, gid == g] @ f[bnd][gid == g], with 4 right-hand sides
     instead of one per boundary node."""
     Ys, Yt, Y = _admittances(C, k, D, eta); t, h, nN = C["tail"], C["head"], C["nN"]; bnd = np.asarray(C["dom"]["bnd"])
     f = C["F"][(k, "flux")][bnd]; RHS = np.zeros((nN, 5), complex)
     for g in range(5):                                   # column 4: fixed forcing (topology-region interfaces, flux closure)
         RHS[bnd[gid == g], g] = f[gid == g] * NL
-    P = spla.splu(Y).solve(RHS)
+    if C.get("vmode", "flux") == "P=0":                  # veins held at zero pressure (needed for the rigid limit D → 0)
+        out = np.asarray(C["dom"]["out"]); free = np.setdiff1d(np.arange(nN), out); P = np.zeros((nN, 5), complex)
+        P[free] = spla.splu(Y[free][:, free].tocsc()).solve(RHS[free])
+    else:
+        P = spla.splu(Y).solve(RHS)
     return (0.5 * (Ys + Yt)[:, None] * (P[t] - P[h]) / NL)[el]
