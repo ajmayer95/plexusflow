@@ -29,6 +29,15 @@ import numpy as np
 import networkx as nx
 
 
+def require_numpy1() -> None:
+    """Stage graphs are pickled with numpy 1.x so every environment can read them (plexusflow.paths.load_graph); a
+    numpy-2 pickle cannot be loaded under numpy 1.x.  Refuse to write one unless PLEXUSFLOW_ALLOW_NUMPY2=1."""
+    if int(np.__version__.split(".")[0]) >= 2 and os.environ.get("PLEXUSFLOW_ALLOW_NUMPY2") != "1":
+        raise RuntimeError(f"refusing to write a stage graph under numpy {np.__version__}: numpy-1 environments (the "
+                           f"workbench) could not read it.  Run with a numpy<2 environment (set PLEXUSFLOW_ALLOW_NUMPY2=1 "
+                           f"to override).")
+
+
 def _same(a, b) -> bool:
     """Deep equality with NaN == NaN (measurement records carry NaNs, e.g. Q_kl of a failed fit)."""
     if a is b:
@@ -159,6 +168,7 @@ class PatchLog:
 
     # ── graph I/O ──
     def _write_graph(self, G: nx.Graph, dump=None) -> None:
+        require_numpy1()
         fd, tmp = tempfile.mkstemp(prefix=".patch_", suffix=".gpickle", dir=str(self.graph_path.parent)); os.close(fd)
         try:
             with open(tmp, "wb") as fh:
@@ -204,6 +214,7 @@ class PatchLog:
         """Record G_old → G_new as the next patch, write G_new to the graph file (atomic) and, if given, the mask.
         ``G_old`` must be the graph currently on disk (the caller's loaded copy).  ``dump(fh)`` overrides pickling
         (the viewer strips in-memory attributes).  Returns the log entry."""
+        require_numpy1()
         d = diff(G_old, G_new)
         if is_empty(d):
             raise ValueError("no change to record")

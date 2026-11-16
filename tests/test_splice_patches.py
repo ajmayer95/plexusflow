@@ -152,8 +152,9 @@ def test_diff_apply_revert_round_trip(setup):
     assert PT.is_empty(PT.diff(G2, G))
 
 
-def test_patch_log_accept_revert_and_conflicts(tmp_path, setup):
+def test_patch_log_accept_revert_and_conflicts(tmp_path, setup, monkeypatch):
     import tifffile
+    monkeypatch.setenv("PLEXUSFLOW_ALLOW_NUMPY2", "1")              # test files only; stage writes need numpy < 2
     m, G = setup
     gp = tmp_path / "graph" / "g.gpickle"; gp.parent.mkdir(); gp.write_bytes(pickle.dumps(G))
     mp = tmp_path / "mask" / "mask.tif"; mp.parent.mkdir(); tifffile.imwrite(mp, (m * 255).astype(np.uint8))
@@ -185,3 +186,12 @@ def test_diff_ignores_nan_in_nested_measurements():
     assert PT.is_empty(PT.diff(G, G2))
     G2.edges[1, 2]["measurements_piv"][0]["tile_id"] = 4
     assert len(PT.diff(G, G2)["changed_edges"]) == 1
+
+
+def test_stage_writes_refused_under_numpy2(monkeypatch):
+    monkeypatch.delenv("PLEXUSFLOW_ALLOW_NUMPY2", raising=False)
+    if int(np.__version__.split(".")[0]) >= 2:
+        with pytest.raises(RuntimeError, match="numpy"):
+            PT.require_numpy1()
+    else:
+        PT.require_numpy1()

@@ -161,6 +161,9 @@ def evaluate(stage_root: Path, pending: Path, *, measure: bool = True, workers: 
     """Measure the candidate's new vessels, refit current vs candidate, write result.json / result.pkl."""
     import plexusflow.paths as paths
     from ..config import StageConfig
+    from .patches import require_numpy1
+    if measure:
+        require_numpy1()                      # the measurement rewrites the candidate pickle
     pending = Path(pending); meta = json.loads((pending / "meta.json").read_text())
     cfg = StageConfig.load(Path(stage_root)); graph_path = Path(meta["graph"]); cand = pending / "candidate.gpickle"
     G0 = pickle.loads(graph_path.read_bytes()); poly = np.asarray(meta["polygon"], float)

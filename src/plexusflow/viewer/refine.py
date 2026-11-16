@@ -24,15 +24,10 @@ REFINE_MASK = "Refine mask"
 
 
 def _job_python() -> str:
-    """Python for background jobs: $PLEXUSFLOW_JOB_PYTHON, else the repo's .venv, else this interpreter."""
-    env = os.environ.get("PLEXUSFLOW_JOB_PYTHON")
-    if env:
-        return env
-    repo = Path(__file__).resolve().parents[3]
-    for cand in (repo / ".venv" / "bin" / "python", repo / ".venv" / "Scripts" / "python.exe"):
-        if cand.exists():
-            return str(cand)
-    return sys.executable
+    """Python for background jobs: $PLEXUSFLOW_JOB_PYTHON, else this (the workbench's) interpreter.  The job writes the
+    candidate graph, which Accept then loads here — so it must use the same numpy major version (stage graphs are
+    pickled with numpy 1.x; see plexusflow.paths.load_graph)."""
+    return os.environ.get("PLEXUSFLOW_JOB_PYTHON") or sys.executable
 
 
 class RefineMixin:
