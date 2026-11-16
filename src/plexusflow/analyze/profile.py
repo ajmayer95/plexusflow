@@ -518,12 +518,15 @@ def compute_of_profile_and_Q(
                 profile_sum[i_bin] += float(np.mean(finite)) * int(m.sum())
                 profile_cnt[i_bin] += int(m.sum())
 
-        # Per-frame R-fixed Poiseuille fit
+        # Per-frame R-fixed Poiseuille fit.  Every vessel pixel in every frame — NO per-frame speed threshold: the pooled
+        # amplitude v0(t) is proportional to the common waveform only if the pixel weights are fixed in time; a threshold
+        # drops slow near-wall pixels at the trough, inflating it and flattening the pulsatility (known-truth benchmark:
+        # |H1| recovery 0.930 → 0.947, slowest vessels 0.93 → 0.97; tile 36 +0.5 %; 2026-11-13).
         r_valid_t, v_valid_t = [], []
         for i_bin, in_bin in enumerate(bin_members):
             if abs(bin_centers[i_bin]) > r_cut:
                 continue
-            m = in_bin & active
+            m = in_bin
             vals = v_axial[m]
             finite = vals[np.isfinite(vals)]
             if len(finite) >= 2:
