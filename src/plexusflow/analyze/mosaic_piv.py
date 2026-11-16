@@ -780,11 +780,16 @@ def analyze_stage(cfg: StageConfig,
                     dry_run: bool = False,
                     verbose: bool = True,
                     kl_sidecar_dir: Optional[Path] = None,
-                    out_path: Optional[Path] = None) -> Path:
+                    out_path: Optional[Path] = None,
+                    mask_path: Optional[Path] = None,
+                    local: bool = False) -> Path:
     """Run the batch analyzer.
 
     Reads: ``cfg.graph_vessels_path`` (make with `plexusflow condense`),
     ``cfg.positions_path``, per-tile raw videos.
+
+    ``local=True`` (refinement candidates, plexusflow.edit.refine): measure into ``out_path`` only — no stage-wide f0
+    sanity refit and no provenance stamp, so nothing outside the candidate's new vessels changes.
 
     Writes: measurements into edge ``measurements_piv`` and saves the
     graph incrementally after every tile to ``cfg.graph_piv_path``
@@ -870,11 +875,12 @@ def analyze_stage(cfg: StageConfig,
     # into the OF ridge-refinement gate.  If mask.tif isn't present,
     # refinement runs without avascular-noise suppression.
     fuse_mask = None
-    if cfg.mask_path.exists():
-        _mask_arr = tifffile.imread(cfg.mask_path)
+    _mpath = Path(mask_path) if mask_path is not None else cfg.mask_path      # override: a refinement candidate's mask
+    if _mpath.exists():
+        _mask_arr = tifffile.imread(_mpath)
         fuse_mask = (_mask_arr > 0)
         if verbose:
-            print(f'  loaded mask {cfg.mask_path.name} for OF ridge gating '
+            print(f'  loaded mask {_mpath.name} for OF ridge gating '
                   f'({fuse_mask.sum():,} true px)')
     if verbose:
         print(f'  mosaic geom: fuse {geom.fuse_shape}, '
@@ -1123,7 +1129,7 @@ def analyze_stage(cfg: StageConfig,
     # median (typical subharmonic mistake), reverifies via that tile's own
     # aggregated Q(t) spectrum, and — if the spectrum peak agrees with
     # neighbors — refits every measurement's `harm` at the corrected f0.
-    if not dry_run:
+    if not dry_run and not local:
         try:
             _n_fixed = _sanity_check_tile_f0(G, verbose=verbose, f_lo=F0_FMIN_HZ, f_hi=F0_FMAX_HZ)
             if verbose and _n_fixed:
@@ -1132,7 +1138,7 @@ def analyze_stage(cfg: StageConfig,
         except Exception as _e:
             print(f'[sanity] neighbor f0 sanity check skipped: {_e}')
 
-    if not dry_run:
+    if not dry_run and not local:
         cfg.write_provenance("graph_piv", extra={
             "source_graph": src.name,
             "output_graph": out.name,

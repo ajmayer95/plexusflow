@@ -77,11 +77,12 @@ from ._common import (  # noqa: F401 - re-exported: app.py was the single viewer
 )
 from .simulate import SimulateMixin
 from .edit import EditMixin
+from .refine import RefineMixin
 from .optical_flow import OpticalFlowMixin
 from .timeseries import TimeseriesMixin
 
 
-class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, TimeseriesMixin):
+class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMixin, TimeseriesMixin):
     """napari-based mosaic viewer with field colouring + edge inspection.
 
     Two capability levels (``mode``):
@@ -1796,9 +1797,12 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
             # drawn.  Inspecting here would rebuild the highlight layer,
             # which napari makes the active layer — stealing the clicks
             # from the region layer after a couple of presses.
-            _rl = getattr(self, '_region_tag_layer', None)
-            if (_rl is not None and _rl in self.viewer.layers
-                    and str(_rl.mode).startswith('add_')):
+            for _rl in (getattr(self, '_region_tag_layer', None), getattr(self, '_rf_region_layer', None)):
+                if (_rl is not None and _rl in self.viewer.layers
+                        and str(_rl.mode).startswith('add_')):
+                    return
+            _ml = self.viewer.layers['Refine mask'] if 'Refine mask' in self.viewer.layers else None
+            if _ml is not None and self.viewer.layers.selection.active is _ml and str(_ml.mode) in ('paint', 'erase', 'fill'):
                 return
             row, col = self._world_to_mosaic_data(event.position)
             # Edit-tab boundary marking takes priority — when a mode is
@@ -1812,7 +1816,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
             # selected region tag class on the nearest edge.  Same
             # hit-testing radius as the normal inspect click.
             if getattr(self, '_click_to_tag_mode', False):
-                self._tag_nearest_edge(col, row)
+                self._tag_nearest_edge(col, self.mosaic_height - row)   # display row → graph y
                 return
             self._inspect_nearest_edge(col, row)
 
@@ -1995,18 +1999,21 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
         _ru_lay.addWidget(self._radial_uncertain_chk)
 
         # Tag class used by every tagging action below.
-        from ..reconcile.regions import OPEN, TOPOLOGY, LABELS
+        from ..reconcile.regions import OPEN, VENOUS, TOPOLOGY, LABELS
         _cls_row = QWidget(); _cls_lay = QHBoxLayout(_cls_row); _cls_lay.setContentsMargins(0, 0, 0, 0)
         _cls_lay.addWidget(QLabel("Tag class:"))
         self._tag_class_combo = QComboBox()
         self._tag_class_combo.addItem(LABELS[TOPOLOGY], userData=TOPOLOGY)
         self._tag_class_combo.addItem(LABELS[OPEN], userData=OPEN)
+        self._tag_class_combo.addItem(LABELS[VENOUS], userData=VENOUS)
         self._tag_class_combo.setToolTip(
             "Topology uncertain: the graph here does not represent the vessels "
             "(unresolvable marginal band, sheet flow); the region is removed and "
             "treated as a mass-conserving black box.\n"
-            "Open boundary: blood enters / leaves the network here (zones beside "
-            "the dorsal aortae); cut nodes become free inflow boundaries.")
+            "Open boundary, arterial: blood enters the network here (dense zones "
+            "beside the dorsal aortae); cut nodes become free inflow boundaries.\n"
+            "Open boundary, venous: blood leaves the network here (dense zones "
+            "before the vitelline-vein outlets); cut nodes become free outflow boundaries.")
         self._tag_class_combo.currentIndexChanged.connect(
             lambda _i: setattr(self, '_tag_class', self._tag_class_combo.currentData()))
         self._tag_class = TOPOLOGY
@@ -2770,6 +2777,13 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, OpticalFlowMixin, Timeserie
         _edit_scroll.setWidget(edit_panel)
         if self.workbench:
             tabs.addTab(_edit_scroll, "Edit")
+            # Refine tab: region re-vectorisation + local measure / refit + patch log (viewer/refine.py).
+            try:
+                _ref_scroll = QScrollArea(); _ref_scroll.setWidgetResizable(True)
+                _ref_scroll.setWidget(self._build_refine_panel())
+                tabs.addTab(_ref_scroll, "Refine")
+            except Exception as _e:
+                print(f"  (Refine tab unavailable: {_e})")
         self._edit_mode = None
         self._apply_capabilities()
         self.viewer.window.add_dock_widget(tabs, name="Controls", area='right')

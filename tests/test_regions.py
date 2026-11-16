@@ -92,3 +92,40 @@ def test_region_tags_are_exclusive_and_write_the_legacy_key():
     RG.set_region(d, None)
     assert RG.region_class(d) is None
     assert RG.region_class({"radial_uncertain": True}) == RG.OPEN                       # legacy graphs still read as open
+
+
+def test_venous_open_region_is_an_outflow_boundary():
+    """A venous open region beside a V anchor: removed like an open region, interface nodes are outflow (out), inflow
+    boundary unchanged; the domain is identical to tagging it arterial open except for the inflow/outflow accounting."""
+    def build(cls):
+        G, idx = grid_graph()
+        tag(G, [(idx(8, j), idx(9, j)) for j in (1, 2)] + [(idx(9, 1), idx(9, 2)), (idx(8, 1), idx(8, 2))], cls)
+        return G, idx, carved_domain(G)
+    G, idx, v = build(RG.VENOUS)
+    _, _, o = build(RG.OPEN)
+    _, _, n = build(None)
+    nodes = lambda d, k: {d["nodes"][i] for i in d[k]}
+    assert v["edges"] == o["edges"] and set(v["bnd"].tolist()) == set(o["bnd"].tolist())       # same network, same free nodes
+    assert nodes(v, "inj") == nodes(n, "inj")                                                     # inflow boundary untouched
+    ven = nodes(v, "out") - set(n["V"])
+    assert ven and ven == {v["nodes"][i] for i in v["out_from_venous"]} and not ven & nodes(v, "inj")
+    assert len(v["side_out"]) == len(v["out"])
+    y = data(v); w = np.ones(len(y)); fb = emergent(project(y, w, v), v)
+    assert np.isclose(fb[v["inj"]].sum() + fb[v["out"]].sum(), 0, atol=1e-9)                     # mass balance in = out
+
+
+def test_topology_region_touching_a_venous_region_drains_as_outflow():
+    G, idx = grid_graph()
+    tag(G, [(idx(8, j), idx(9, j)) for j in (1, 2)], RG.VENOUS)
+    tag(G, [(idx(7, j), idx(8, j)) for j in (1, 2, 3)] + [(idx(7, 1), idx(7, 2)), (idx(7, 2), idx(7, 3))], RG.TOPOLOGY)
+    dom = carved_domain(G)
+    reg = dom["regions"][0]
+    assert reg["leaky"] and reg["drains"] == "outflow" and dom["B"].shape[0] == dom["n_real"]
+    ix = {n: k for k, n in enumerate(dom["nodes"])}
+    assert {ix[n] for n in reg["cut"]} <= set(dom["out"].tolist()) and not {ix[n] for n in reg["cut"]} & set(dom["inj"].tolist())
+
+
+def test_venous_tag_is_exclusive_and_has_no_legacy_key():
+    d = {}
+    RG.set_region(d, RG.OPEN); RG.set_region(d, RG.VENOUS)
+    assert RG.is_venous(d) and not RG.is_open(d) and RG.LEGACY_OPEN_KEY not in d and RG.OPEN_KEY not in d
