@@ -104,3 +104,20 @@ def test_kloosterman_operator_time_mean_equals_q_char():
     q_t = np.array([(w @ f.ravel())[0] for f in frames])
     assert abs(q_t.mean() - r["Q_char"]) < 1e-9 * abs(r["Q_char"])
     assert abs(np.corrcoef(q_t, s)[0, 1]) > 0.99                    # follows the waveform
+
+
+def test_motion_stats_regimes_and_scale_invariance():
+    from plexusflow.analyze.motion import motion_stats, regime
+    rng = np.random.default_rng(1); fs, f0, T = 250.0, 2.5, 2000
+    t = np.arange(T) / fs; noise = 0.05 * rng.standard_normal(T)
+    cases = {"steady": 1.0 + noise, "pulsatile": 1.0 + 0.4 * np.sin(2 * np.pi * f0 * t) + noise,
+             "oscillatory": 0.4 * np.sin(2 * np.pi * f0 * t) + noise, "unresolved": noise}
+    expect = {"steady": "steady", "pulsatile": "directed+cardiac", "oscillatory": "oscillatory", "unresolved": "unresolved"}
+    for k, v in cases.items():
+        ms = motion_stats(v, f0, fs)
+        assert regime(ms) == expect[k], (k, ms)
+        ms2 = motion_stats(-7.3 * v, f0, fs)                      # calibration / sign invariant
+        assert abs(ms2["z_dc"] - ms["z_dc"]) < 1e-6 * max(ms["z_dc"], 1) and abs(ms2["eta_osc"] - ms["eta_osc"]) < 1e-9
+    assert motion_stats(cases["oscillatory"], f0, fs)["eta_osc"] > 0.95 and motion_stats(cases["oscillatory"], f0, fs)["reversal"]
+    assert motion_stats(cases["pulsatile"], f0, fs)["reversal"] is False
+    assert abs(motion_stats(cases["pulsatile"], f0, fs)["eta_osc"] - 0.08 / 1.08) < 0.01

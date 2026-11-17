@@ -568,6 +568,10 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
         "Q_kl_valid_frac": Q_kl_valid_frac,
         "Q_kl_n_valid": Q_kl_n_valid,
         "Q_t": (Qt.astype(np.float32) if Qt is not None else None),
+        # Motion diagnostics (analyze.motion), independent of the flux fit: from the vessel-aligned pooled streamwise
+        # velocity series v(t) (a fixed spatial average; stored float16 so a later f0 refit can recompute them).
+        "v_t": np.asarray(Qt_ridge, np.float16),
+        "motion": _motion(Qt_ridge, f0, 1.0 / pt["FRAME_DT_S"]),
         "prov": {"method": "plexusflow_vessel_merged_of",
                   "n_cross_sections": int(len(cl_rc)),
                   "R_free_um": float(u.get("R_fit_free", np.nan))
@@ -675,6 +679,14 @@ def _tile_qt_spectrum_peak(G: nx.Graph, tile: int, fs: float = 250.0,
     return float(f0) if np.isfinite(f0) else None
 
 
+def _motion(v, f0, fs):
+    from .motion import motion_stats
+    try:
+        return motion_stats(v, f0, fs)
+    except Exception:
+        return None
+
+
 def _refit_tile_harm(G: nx.Graph, tile: int, f0_hz: float,
                       fs: float = 250.0, n_h: int = 3) -> int:
     """Refit each of the tile's measurements' ``harm`` at a corrected f0 with
@@ -685,6 +697,8 @@ def _refit_tile_harm(G: nx.Graph, tile: int, f0_hz: float,
     n = 0
     for _u, _v, d in G.edges(data=True):
         for m in (d.get("measurements_piv") or []):
+            if m.get("tile_id") == tile and m.get("v_t") is not None:     # motion diagnostics at the corrected f0
+                m["motion"] = _motion(np.asarray(m["v_t"], float), float(f0_hz), fs)
             if m.get("tile_id") != tile or m.get("Q_t") is None:
                 continue
             Qt = np.asarray(m["Q_t"], dtype=float)
