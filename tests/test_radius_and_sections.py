@@ -83,3 +83,24 @@ def test_tube_radii_resistance_compliance_and_fallback():
     assert T["profiled"].tolist() == [True, False]
     assert T["compliance"][0] > T["resistance"][0] and abs(T["resistance"][0] - 6.5) < 0.6
     assert T["resistance"][1] == T["compliance"][1] == 4.0      # unprofiled: stored radius for both
+
+
+def test_kloosterman_operator_time_mean_equals_q_char():
+    """Per-frame flux from the frozen time-mean fit: its time mean equals Q_char of the time-mean field (linear operator)."""
+    from plexusflow.analyze.kloosterman import kloosterman_operator
+    rng = np.random.default_rng(0)
+    H, W, R = 60, 160, 6.0
+    yy, xx = np.mgrid[:H, :W].astype(float); rho = yy - 30
+    shape = np.where(np.abs(rho) <= R, 1 - (rho / R) ** 2, 0.0)
+    T = 40; s = 1 + 0.5 * np.sin(2 * np.pi * np.arange(T) / 13)
+    frames = np.zeros((T, H, W, 2))
+    frames[..., 0] = s[:, None, None] * shape[None] + 0.05 * rng.standard_normal((T, H, W))
+    frames[..., 1] = 0.05 * rng.standard_normal((T, H, W))
+    mean = frames.mean(axis=0)
+    cl = np.column_stack([np.full(120, 30.0), np.arange(20, 140, dtype=float)])
+    r = kloosterman_scalar(mean, cl, R, **PRODUCTION_KW)
+    assert np.isfinite(r["Q_char"])
+    w = kloosterman_operator(r, cl, mean.shape, slice_window=PRODUCTION_KW["slice_window"])
+    q_t = np.array([(w @ f.ravel())[0] for f in frames])
+    assert abs(q_t.mean() - r["Q_char"]) < 1e-9 * abs(r["Q_char"])
+    assert abs(np.corrcoef(q_t, s)[0, 1]) > 0.99                    # follows the waveform

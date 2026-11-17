@@ -201,6 +201,7 @@ def kloosterman_scalar(
         return v0 * np.maximum(0.0, 1.0 - ((r - r0) / Rf) ** 2)
 
     per_slice_offset = np.full(N, np.nan)
+    per_slice_fit_bins = np.zeros((N, n_bins), dtype=bool)   # ρ bins each section's fit used (frozen for the per-frame operator)
 
     for i in range(N):
         p = profiles[i]
@@ -314,6 +315,7 @@ def kloosterman_scalar(
             per_slice_reason[i] = f"non_parabolic(R2={_r2:.2f}<{min_r2:.2f})"
             continue
         R_for_area = R_prior if use_r_prior_area else R_slice
+        per_slice_fit_bins[i] = valid
         per_slice_v_CL[i] = v_CL
         per_slice_R[i]    = R_slice
         per_slice_offset[i] = r0_slice
@@ -413,5 +415,65 @@ def kloosterman_scalar(
         # measured windowed cross-section profiles + the ρ grid, so a
         # walkthrough panel can draw the per-slice parabolas + measured points.
         per_slice_profiles=profiles, rho=rho, per_slice_offset=per_slice_offset,
+        per_slice_fit_bins=per_slice_fit_bins, R_area=(np.full(N, float(R_prior)) if use_r_prior_area else per_slice_R),
         valid_mask=valid_mask, reason="ok",
     )
+
+
+def kloosterman_operator(res, cl, shape, mask=None, slice_window: int = 2):
+    """Linear flux operator of a Kloosterman fit: a sparse row vector w over the flattened (H, W, 2) flow field with
+    Q = w · flow equal to the fit's Q_char when ``flow`` is the field it was fitted on.
+
+    Freezes everything the time-mean fit decided — accepted sections, the ρ bins each section's fit used, section radius
+    R_s, centre offset r0_s — and keeps only the centreline speed free.  With those fixed, every step is linear in the
+    field: bilinear sampling of the axial component (static NaN pattern from bounds and mask), the ±slice_window
+    window mean, the least-squares speed U_s = Σ p_s(ρ) u(ρ) / Σ p_s(ρ)², p_s = max(0, 1 − ((ρ − r0_s)/R_s)²) (the free fit
+    is stationary in v_CL, so this equals its v_CL), Q_s = π/2 R_s² U_s and the plain mean over accepted sections.
+    Hence ⟨w · flow_t⟩_t = w · ⟨flow_t⟩_t: applied to every frame of the recording it gives Q(t) in physical units whose
+    arithmetic time mean is Q_char of the time-mean field, with no rescaling.  ``mask``, ``slice_window`` and the field
+    shape must be those of the fit.  Returns None when the fit has no accepted sections."""
+    import scipy.sparse as sp
+    vm = np.asarray(res.get("valid_mask", []), bool)
+    if not vm.any() or res.get("per_slice_fit_bins") is None:
+        return None
+    H, W = shape[:2]; cl = np.asarray(cl, float); N = len(cl); rho = np.asarray(res["rho"], float); nb = len(rho)
+    _, tang, norm = _centerline_geometry(cl)
+    # sampling operator rows (k, j) → flow entries
+    S = {}                                              # (k, j) → dict(flat index → weight)
+    for k in range(N):
+        rc, cc0 = cl[k]; nr, nc = norm[k]; tr, tc = tang[k]
+        for j, rv in enumerate(rho):
+            rr, cc = rc + rv * nr, cc0 + rv * nc
+            if not (0 <= rr < H - 1 and 0 <= cc < W - 1):
+                continue
+            if mask is not None:
+                mr, mc = int(round(rr)), int(round(cc))
+                if not (0 <= mr < mask.shape[0] and 0 <= mc < mask.shape[1] and mask[mr, mc]):
+                    continue
+            r0i, c0i = int(rr), int(cc); fr, fc = rr - r0i, cc - c0i; d = {}
+            for (dr, dc_, wgt) in ((0, 0, (1 - fr) * (1 - fc)), (1, 0, fr * (1 - fc)), (0, 1, (1 - fr) * fc), (1, 1, fr * fc)):
+                base = ((r0i + dr) * W + (c0i + dc_)) * 2
+                d[base + 0] = d.get(base + 0, 0.0) + wgt * tc          # flow[..., 0] = dx (col) · t_col
+                d[base + 1] = d.get(base + 1, 0.0) + wgt * tr          # flow[..., 1] = dy (row) · t_row
+            S[(k, j)] = d
+    w = {}
+    vi = np.flatnonzero(vm); nv = len(vi)
+    Ra = np.asarray(res.get("R_area", res["per_slice_R"]), float); Rs = np.asarray(res["per_slice_R"], float)
+    off = np.asarray(res.get("per_slice_offset", np.zeros(N)), float)
+    for i in vi:
+        bins = np.flatnonzero(res["per_slice_fit_bins"][i]); o = off[i] if np.isfinite(off[i]) else 0.0
+        p = np.maximum(0.0, 1.0 - ((rho[bins] - o) / Rs[i]) ** 2); den = float(np.sum(p ** 2))
+        if den <= 0:
+            return None
+        cq = 0.5 * np.pi * Ra[i] ** 2 / nv
+        lo, hi = max(0, i - slice_window), min(N, i + slice_window + 1)
+        for j, pj in zip(bins, p):
+            ks = [k for k in range(lo, hi) if (k, j) in S]
+            if not ks or pj == 0:
+                continue
+            a = cq * pj / den / len(ks)
+            for k in ks:
+                for idx, wt in S[(k, j)].items():
+                    w[idx] = w.get(idx, 0.0) + a * wt
+    idx = np.fromiter(w.keys(), int); val = np.fromiter(w.values(), float)
+    return sp.csr_matrix((val, (np.zeros_like(idx), idx)), shape=(1, H * W * 2))
