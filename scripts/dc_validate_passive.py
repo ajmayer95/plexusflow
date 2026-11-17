@@ -1,7 +1,7 @@
 """Conservation-only vs passive-resistance-constrained DC reconstruction, scored against independent repeat recordings
 (input to SI figure fig6_S_passive).
 
-Passive-resistance-constrained field: every vessel obeys Δp = R q with R = ℓ/r⁴ (consensus radii, as the Fig 7 passive
+Passive-resistance-constrained field: every vessel obeys Δp = R q with R = ℓ/r⁴ (model radii D['radius'], tube-interior by default; as the Fig 7 passive
 model), i.e. q = K ⊙ Bᵀp with interior conservation → q = A p_B (boundary pressures, one gauge).  It is fitted with the same
 quasi-likelihood objective as the production reconstruction (plexusflow.reconcile.dc), by L-BFGS over p_B started from the
 fixed-weight (1/σ² at Q′) least-squares fit; convergence is reported as the projected gradient ‖Aᵀ∇L‖ relative to its start.

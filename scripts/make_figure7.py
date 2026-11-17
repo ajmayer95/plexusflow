@@ -2,7 +2,7 @@
 
 Inputs: results/dc_reconciled_v2.pkl (scripts/dc_reconcile.py: reliability-weighted IRLS projection of the measured mean
 flows onto mass conservation on the carved network, emergent boundary fluxes f = BQ′) and the canonical graph.
-Passive model: conductance K = r⁴/ℓ (consensus radii), the emergent boundary fluxes imposed at every boundary vertex, and a
+Passive model: conductance K = r⁴/ℓ (model radii: tube-interior segmentation radius by default, results D['radius']), the emergent boundary fluxes imposed at every boundary vertex, and a
 soft equal-pressure penalty at the two vitelline-vein outlets (plexusflow.reconcile.venous_pressure_penalty, σ_P = 2 Pa;
 FIG7_SIGMA_P=inf renders the unpenalised variant).
 
@@ -11,7 +11,7 @@ FIG7_SIGMA_P=inf renders the unpenalised variant).
   b  Q_sim on the same vessels, arterial / venous boundary markers, the model's own divide
   c  local agreement log10(|Q_sim|/|Q′|) on resolved vessels (clipped ±1), direction mismatches marked
   d  measured vs predicted |Q| (log hexbin): r_log on all measured and on resolved vessels, direction agreement
-  e  radius controls: measured (consensus) vs uniform vs shuffled radii (r_log, all measured vessels)
+  e  radius controls: measured (model radius) vs uniform vs shuffled radii (r_log, all measured vessels)
 SI: fig7_S_boundary_distance, fig7_S_threshold (k = 0–3σ), fig7_S_forcing (arterial-inflow redistributions).
 Writes figures/fig7/; nothing to any graph.
 """
@@ -41,7 +41,7 @@ MOSAIC_P = _paths.MOSAIC
 OUT_DIR = _paths.FIGURES / 'fig7'
 import os
 SIGMA_P = float(os.environ.get('FIG7_SIGMA_P', '2.0'))   # Pa; 'inf' = no pressure penalty (measured venous split)  #: soft equal-venous-pressure penalty (any σ_P ≲ 5 Pa gives the same split)
-SCHEME, RADIUS, N_SHUFFLE = 'irls', 'consensus', 200
+SCHEME, RADIUS, N_SHUFFLE = 'irls', 'tube', 200
 
 
 def main():

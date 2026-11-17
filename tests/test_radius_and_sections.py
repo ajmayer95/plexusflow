@@ -53,3 +53,33 @@ def test_contradictory_sections_give_no_flux():
     r = kloosterman_scalar(flow, cl, R, **PRODUCTION_KW)
     assert r["reason"] == "too_few_consistent_slices" and np.isnan(r["Q_char"]) and r["Q_char_valid_frac"] == 0.0
     assert "ok" not in list(r["per_slice_reason"])
+
+
+def _straight_tube_with_side_branch(a=6, H=120, W=200):
+    """Horizontal tube of half-width a (rows 60 ± a) with a wide perpendicular branch at columns 95–125; path along row 60."""
+    m = np.zeros((H, W), bool); m[60 - a:60 + a + 1, 10:190] = True; m[:60, 95:126] = True
+    path = np.column_stack([np.arange(20, 181, 10, dtype=float), np.full(17, H - 60.0)])
+    return m, path
+
+
+def test_tube_interior_profile_excludes_junction_and_recovers_half_width():
+    from plexusflow.reconcile.radius import tube_interior_profile
+    m, path = _straight_tube_with_side_branch()
+    a, wl = tube_interior_profile(m, path)
+    cols = np.linspace(20, 180, len(a))
+    in_branch = (cols > 97) & (cols < 123)
+    assert not wl[in_branch].any()                               # the normal runs up the branch: not a tube section
+    assert wl[~in_branch].mean() > 0.9
+    assert abs(np.median(a[wl]) - 6.5) < 0.6                    # half-width to the first background pixel (6 px + ½ step)
+
+
+def test_tube_radii_resistance_compliance_and_fallback():
+    import networkx as nx
+    from plexusflow.reconcile.radius import tube_radii
+    m, path = _straight_tube_with_side_branch()
+    m[60 - 9:60 + 10, 150:181] = True                            # a wider stretch: a_C > median
+    G = nx.Graph(); G.add_edge(0, 1, path=path, radius=9.0); G.add_edge(2, 3, path=path[:1], radius=4.0)
+    T = tube_radii(G, [(0, 1), (2, 3)], m)
+    assert T["profiled"].tolist() == [True, False]
+    assert T["compliance"][0] > T["resistance"][0] and abs(T["resistance"][0] - 6.5) < 0.6
+    assert T["resistance"][1] == T["compliance"][1] == 4.0      # unprofiled: stored radius for both

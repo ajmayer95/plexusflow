@@ -88,12 +88,15 @@ def build_context(dc, field, dom, topo="flux", supernode_scale=1.0, ratio="weigh
            for r in dom.get("regions", []) if not r["leaky"] and r["cut"]] if topo == "supernode" else []
     return dict(topo=topo, supernode_scale=supernode_scale, super=sup, ratio=ratio, forcing_flags=flags, f0=field["f_ref"], nN=nN, nE=nE, dom=dom, Qp=Qp, Qs_dc=dc["Qs"],
                 H={1: np.where(elig, H[1], np.nan), 2: np.where(elig, H[2], np.nan)},
-                elig=elig, F=F, tail=tail, head=head, r_m=dc["radius"] * PX_M, l_m=dc["length"] * PX_M)
+                elig=elig, F=F, tail=tail, head=head, r_m=dc["radius"] * PX_M, l_m=dc["length"] * PX_M,
+                rc_m=np.asarray(dc.get("radius_compliance", dc["radius"])) * PX_M)
 
 
 def _admittances(C, k, D, eta):
     r, l = C["r_m"], C["l_m"]; Gc = np.pi * r ** 4 / (8 * MU * l); om = 2 * np.pi * k * C["f0"]
-    ks = 1j * om * (D * (1 - 1j * eta)) * 8 * MU * l ** 2 / r ** 2
+    rc = C.get("rc_m", r)                                # compliance radius a_C (dc["radius_compliance"]); default = r
+    # κ² = iω R'C' l², R' = 8μ/(π a_R⁴), C' = D π a_C²  →  iω D 8μ l² a_C² / a_R⁴  (= 8μ D l² / r² for one radius)
+    ks = 1j * om * (D * (1 - 1j * eta)) * 8 * MU * l ** 2 * rc ** 2 / r ** 4
     xi = np.sqrt(ks.astype(complex)); small = np.abs(xi) < 1e-3
     Ys = Gc * np.where(small, 1 + ks / 3, xi / np.tanh(np.where(small, 1, xi)))
     Yt = Gc * np.where(small, 1 - ks / 6, xi / np.sinh(np.where(small, 1, xi)))

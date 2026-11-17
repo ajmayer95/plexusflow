@@ -70,6 +70,10 @@ def kloosterman_scalar(
     #    the flow actually ends when the mask R under-segments or the CL is
     #    offset.  The fit REGION (fit_fraction) and gates still key off R_prior.
     sample_frac: float = 2.0,
+    #  * R_fix: if given (px), every section is fitted with the radius FIXED at R_fix (v_CL and the centre offset free;
+    #    no radius gates); sampling and the fit region still key off R_prior.  Diagnostic for "does the freely fitted
+    #    radius improve flux?" (sandbox); production leaves it None.
+    R_fix: Optional[float] = None,
     #  * min_r2: reject a slice whose measured cross-section does not actually
     #    fit a parabola (coefficient of determination below this) — the direct
     #    "is this cross-section parabolic?" test that catches END / JUNCTION
@@ -265,19 +269,27 @@ def kloosterman_scalar(
                 fit_kw["method"] = "trf"
                 fit_kw["loss"]   = "huber"
                 fit_kw["f_scale"] = 1.0
-            popt, _ = curve_fit(_poi, rho[valid], p[valid], **fit_kw)
-            v_CL, R_slice = float(popt[0]), float(popt[1])
-            r0_slice = float(popt[2]) if fit_center_offset else 0.0
+            if R_fix is not None:                       # radius held fixed: fit (v_CL[, r0]) only
+                _f = (lambda x, v, r0: _poi(x, v, R_fix, r0)) if fit_center_offset else (lambda x, v: _poi(x, v, R_fix))
+                kw2 = dict(fit_kw); kw2["p0"] = [fit_kw["p0"][0]] + fit_kw["p0"][2:]
+                kw2["bounds"] = ([fit_kw["bounds"][0][0]] + list(fit_kw["bounds"][0][2:]), [fit_kw["bounds"][1][0]] + list(fit_kw["bounds"][1][2:]))
+                popt, _ = curve_fit(_f, rho[valid], p[valid], **kw2)
+                v_CL, R_slice = float(popt[0]), float(R_fix)
+                r0_slice = float(popt[1]) if fit_center_offset else 0.0
+            else:
+                popt, _ = curve_fit(_poi, rho[valid], p[valid], **fit_kw)
+                v_CL, R_slice = float(popt[0]), float(popt[1])
+                r0_slice = float(popt[2]) if fit_center_offset else 0.0
         except Exception:
             per_slice_reason[i] = "curve_fit_fail"
             continue
         if not np.isfinite(v_CL) or not np.isfinite(R_slice):
             per_slice_reason[i] = "nan_fit"
             continue
-        if R_slice <= R_slice_lo * R_prior:
+        if R_fix is None and R_slice <= R_slice_lo * R_prior:
             per_slice_reason[i] = f"R_low({R_slice:.1f}<{R_slice_lo * R_prior:.1f})"
             continue
-        if R_slice >= R_slice_hi * R_prior:
+        if R_fix is None and R_slice >= R_slice_hi * R_prior:
             per_slice_reason[i] = f"R_hi({R_slice:.1f}>{R_slice_hi * R_prior:.1f})"
             continue
         # Vertex must exceed the mean of the fitted velocities — a valid

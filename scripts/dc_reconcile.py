@@ -5,7 +5,7 @@
 2. Per vessel the 1/c²-weighted average of its Kloosterman-valid recordings (between-recording spread kept as a variance
    floor); carved network; quasi-likelihood reconciliation under interior conservation (variance c²Q′² + σ0² evaluated at
    the reconciled flow, projected Newton from the uniform projection; plexusflow.reconcile.dc); emergent boundary
-   f = B Q'; passive comparison (--radius: consensus or calibrated anatomical radii) + radius shuffle.
+   f = B Q'; passive comparison (--radius: tube-interior [default], consensus or calibrated anatomical radii) + radius shuffle.
 Graph regions (plexusflow.reconcile.regions): open-boundary regions are carved with free inflow boundaries; topology-uncertain
 regions are carved as mass-conserving black boxes (--no-topology ignores them, reproducing the open-region-only carve).
 See plexusflow.reconcile.  Writes results/reliability_model_v1.json and results/dc_reconciled_v2.pkl.
@@ -23,9 +23,10 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tile-terms", action="store_true", help="per-tile c_T (the pre-2026-10-19 model) instead of one c0")
-    ap.add_argument("--radius", default="consensus", choices=("consensus", "anatomical"),
-                    help="radius for the passive model and the AC model: consensus √(R_graph·R_kl) or the calibrated "
-                         "segmentation radius (scripts/anatomical_radius.py)")
+    ap.add_argument("--radius", default="tube", choices=("tube", "consensus", "anatomical"),
+                    help="model radius for the passive and AC models: uncalibrated tube-interior segmentation radius (median "
+                         "for resistance, √⟨a²⟩ for compliance; default), consensus √(R_graph·R_kl) (sensitivity), or the "
+                         "calibrated segmentation radius (scripts/anatomical_radius.py)")
     ap.add_argument("--no-topology", action="store_true", help="ignore topology-uncertain region tags (open-region carve only)")
     a = ap.parse_args()
     G = paths.load_graph()
@@ -36,6 +37,11 @@ def main():
           f"σ0 {model['sigma0']:.4f}  " + (f"c0 {model['c0']:.3f}" if 'c0' in model else
           f"c_T median {np.median(cT):.2f} [IQR {np.percentile(cT, 25):.2f}–{np.percentile(cT, 75):.2f}]"))
     D = reconcile_dc(G, model, M, radius=a.radius, topology=not a.no_topology)
+    if a.radius == "tube":
+        pr = D["radius_profiled"]
+        print(f"    tube-interior radius profiled for {pr.sum()} of {len(pr)} vessels ({pr.mean():.0%}; others keep the segmented radius); "
+              f"median radius / segmented {np.median(D['radius'][pr] / np.array([G.edges[e]['radius'] for e in D['edges']])[pr]):.3f}, "
+              f"compliance / resistance radius {np.median(D['radius_compliance'][pr] / D['radius'][pr]):.3f}")
     dom, met, C, im = D.pop("dom"), D["metrics"], D["c"], D["imaged"]
     print(f"[2] carved network: {len(D['edges'])} edges, boundary {len(dom['inj'])} carve + {len(dom['out'])} V;  measured {im.sum()} "
           f"({im.mean():.0%}): trusted {np.sum(im & (C < 0.5))}, weak {np.sum(im & (C >= 0.5) & (C < 0.8))}, untrusted {np.sum(im & (C >= 0.8))}")
