@@ -158,6 +158,9 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         # one at a time; clicking a new edge replaces the previous overlay.
         self._video_layer = None
         self._video_tile_id: Optional[int] = None
+        # Optional second overlay (slot 1) for side-by-side playback of two tiles on the shared time axis.
+        self._video_layer2 = None
+        self._video_tile_id2: Optional[int] = None
         # Precompute midpoints for nearest-edge lookup.
         self._edge_midpoints = np.array([
             [0.5 * (self.G.nodes[u]['x'] + self.G.nodes[v]['x']),
@@ -198,6 +201,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self.show_nodes = False
         self.show_kcl = False
         self._kcl_layer = None
+        self.show_bnd_levels = False
+        self._bnd_levels_layer = None
+        self._rec_D = None
+        self._rec_sym_fb = None        # node → net inflow under the 50 %-left fit (cached)
         self._edges_layer = None
         self._nodes_layer = None
         self._click_marker_layer = None
@@ -210,6 +217,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         # tile to be selected (Tile filter ≠ "All tiles") to render —
         # otherwise the labels overlap into clutter at mosaic scale.
         self.show_edge_labels = False
+        self.edge_labels_all_tiles = False      # also label in All-tiles mode (Display tab checkbox)
         self._edge_labels_layer = None
         # Network-wide reliability filtering is intentionally out of the
         # UI for now — the cached per-harmonic Z layers (`_h_Z_DC`,
@@ -605,6 +613,40 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 return sd / abs(dc) if sd is not None and dc else None
             if prop == 'rec_gauge_sd':
                 return _safe_float(d.get('_rec_gauge_sd'))
+            tf = self.current_tile_filter
+            tin = None
+            if tf is not None:                                    # Tile filter: only this tile's recordings
+                tin = (d.get('_rec_tile_inputs') or {}).get(int(tf))
+                if tin is None:
+                    return None
+            if prop in ('rec_sym', 'rec_sym_signed', 'rec_symdiff_signed'):
+                qs = _safe_float(d.get('_rec_Qsym')); qp0 = _safe_float(d.get('_h_amp_DC_rec'))
+                if qs is None:
+                    return None
+                if prop == 'rec_sym':
+                    return abs(qs)
+                if prop == 'rec_sym_signed':
+                    return qs
+                return abs(qs) - abs(qp0) if qp0 is not None else None
+            if prop in ('rec_input', 'rec_input_signed', 'rec_input_c', 'rec_adjust_signed'):
+                if tin is not None:
+                    qm, cm = tin                                  # this tile's recording as fed in
+                else:
+                    qm, cm = _safe_float(d.get('_rec_Qm')), _safe_float(d.get('_rec_c'))
+                if qm is None:
+                    return None                                   # unmeasured: no input (grey)
+                if prop == 'rec_input':
+                    return abs(qm)
+                if prop == 'rec_input_signed':
+                    return qm
+                if prop == 'rec_input_c':
+                    return cm
+                qp = _safe_float(d.get('_h_amp_DC_rec'))
+                if qp is None or qm == 0:
+                    return None
+                if np.sign(qp) != np.sign(qm):
+                    return 1.0 if abs(qp) >= abs(qm) else -1.0      # direction reversed by the reconciliation
+                return float(np.clip(np.log10(abs(qp) / abs(qm)), -1.0, 1.0))
             if k_idx == 0:
                 dc = _safe_float(d.get('_h_amp_DC_rec'))
                 if dc is None:
@@ -1190,22 +1232,30 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         return None
 
 
-    def _remove_video_overlay(self):
+    @staticmethod
+    def _video_attrs(slot: int):
+        return ("_video_layer", "_video_tile_id") if slot == 0 else ("_video_layer2", "_video_tile_id2")
+
+
+    def _remove_video_overlay(self, slot: int = 0):
         # Stop autoplay before destroying anything that the
         # AnimationThread is connected to.
         try:
             self.viewer.window._qt_viewer.dims.stop()
         except Exception:
             pass
-        if self._video_layer is not None:
+        la, ta = self._video_attrs(slot)
+        layer = getattr(self, la, None)
+        if layer is not None:
             try:
-                self.viewer.layers.remove(self._video_layer)
+                self.viewer.layers.remove(layer)
             except Exception:
                 pass
-            self._video_layer = None
-            self._video_tile_id = None
-        # Per-tile harmonic cache is tile-local; without a tile, drop it.
-        self._tile_harmonic_cache.clear()
+            setattr(self, la, None)
+            setattr(self, ta, None)
+        # Per-tile harmonic cache is tile-local (primary slot); without a tile, drop it.
+        if slot == 0:
+            self._tile_harmonic_cache.clear()
 
 
     def _populate_tile_harmonic_cache(self, tile_id: int):
@@ -1243,7 +1293,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
               f"{tile_id} (f0 anchored at tile-{tile_id}'s value).")
 
 
-    def _load_video_overlay(self, tile_id: int):
+    def _load_video_overlay(self, tile_id: int, slot: int = 0):
         """Load the per-tile video and add it as a napari 3D Image layer
         translated/scaled onto the mosaic so the embryo lines up with
         the graph.  Replaces any prior overlay (only one at a time).
@@ -1254,8 +1304,12 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         previous QtDimSliderWidget, which raises TypeError on the next
         .play() (`prev_slider.fps_changed.disconnect(...)` fails).
         Keeping the layer alive avoids that path entirely.
+
+        ``slot`` 1 is an optional second overlay (another tile at its own mosaic position) that shares the time
+        axis with slot 0, so both videos play together; it is resampled to the other slot's frame count.
         """
-        if tile_id == self._video_tile_id:
+        la, ta = self._video_attrs(slot)
+        if tile_id == getattr(self, ta, None):
             return  # already showing
         # Stop autoplay before mutating layer data — keeps the
         # AnimationThread from sampling .data during the swap.
@@ -1289,6 +1343,14 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             stack = stack[::_stride]
             print(f"  temporally decimated video ×{_stride} → "
                   f"{stack.shape[0]} frames (≈ real-time at 30 fps)")
+        # Two overlays share napari's time axis: match the other slot's frame count so both span one loop.
+        _other = getattr(self, self._video_attrs(1 - slot)[0], None)
+        if _other is not None and _other in self.viewer.layers:
+            _n = int(_other.data.shape[0])
+            if _n > 1 and stack.shape[0] != _n:
+                stack = stack[np.round(np.linspace(0, stack.shape[0] - 1, _n)).astype(int)]
+                print(f"  resampled to {_n} frames to play in step with tile "
+                      f"{getattr(self, self._video_attrs(1 - slot)[1], '?')}")
         # Normalise to uint8 with 1%/99% contrast — keeps GPU upload cheap
         # and gives a sensible default contrast.
         if stack.dtype != np.uint8:
@@ -1360,22 +1422,22 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         # without destroying the QtDimSliderWidget that the
         # AnimationThread is connected to.
         replaced_in_place = False
-        if (self._video_layer is not None
-                and self._video_layer in self.viewer.layers):
+        layer = getattr(self, la, None)
+        if layer is not None and layer in self.viewer.layers:
             try:
-                self._video_layer.data = stack
-                self._video_layer.scale = (1.0, 1.0, 1.0)
-                self._video_layer.translate = (0.0, 0.0, 0.0)
-                self._video_layer.affine = affine44
-                self._video_layer.name = new_name
-                self._video_layer.contrast_limits = (0, 255)
+                layer.data = stack
+                layer.scale = (1.0, 1.0, 1.0)
+                layer.translate = (0.0, 0.0, 0.0)
+                layer.affine = affine44
+                layer.name = new_name
+                layer.contrast_limits = (0, 255)
                 replaced_in_place = True
             except Exception as exc:
                 print(f"  in-place video swap failed ({exc!r}); "
                       f"falling back to remove+add.")
-                self._remove_video_overlay()
+                self._remove_video_overlay(slot)
         if not replaced_in_place:
-            self._video_layer = self.viewer.add_image(
+            setattr(self, la, self.viewer.add_image(
                 stack,
                 name=new_name,
                 colormap='gray',
@@ -1384,12 +1446,13 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 affine=affine44,
                 opacity=0.85,
                 blending='translucent',
-            )
-        self._video_tile_id = tile_id
+            ))
+        setattr(self, ta, tile_id)
         # Populate per-tile harmonic cache (used by the time-series
         # inspect panel for cross-edge-comparable phase at the loaded
         # tile's f0).  Fast: typically 100–500 edges × ~5 ms each.
-        self._populate_tile_harmonic_cache(tile_id)
+        if slot == 0:
+            self._populate_tile_harmonic_cache(tile_id)
         # Reset the time slider to frame 0.  Use the modern `current_step`
         # API — `set_point(0, 0)` is deprecated in napari ≥ 0.5 and on a
         # second layer swap can leave the slider at a stale index that
@@ -2448,6 +2511,17 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             self._tile_load_btn = QPushButton('Load this tile video')
             self._tile_load_btn.clicked.connect(self._load_video_from_dropdown)
             tile_lay.addWidget(self._tile_load_btn)
+            self._tile_load2_btn = QPushButton('Load as 2nd video (play together)')
+            self._tile_load2_btn.setToolTip(
+                "Overlay the picked tile as a SECOND video at its own mosaic position.\n"
+                "Both videos share the time slider and play in step (frame counts matched).")
+            self._tile_load2_btn.clicked.connect(self._load_video2_from_dropdown)
+            tile_lay.addWidget(self._tile_load2_btn)
+            self._tile_unload2_btn = QPushButton('Remove 2nd video')
+            self._tile_unload2_btn.setEnabled(False)
+            self._tile_unload2_btn.clicked.connect(
+                lambda: (self._remove_video_overlay(1), self._tile_unload2_btn.setEnabled(False)))
+            tile_lay.addWidget(self._tile_unload2_btn)
             layout.addWidget(tile_group)
 
         # Display toggles
@@ -2475,6 +2549,13 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             "Labels update when you change Property / Harmonic / tile.")
         self._edge_labels_chk.toggled.connect(self._on_edge_labels_toggle)
         d_lay.addWidget(self._edge_labels_chk)
+        self._edge_labels_all_chk = QCheckBox("   …also in All-tiles mode (every edge with a value)")
+        self._edge_labels_all_chk.setToolTip(
+            "Label every edge that has a value for the current field when Tile filter is 'All tiles'\n"
+            "(best measurement, Reconciled Q′ / inputs, Sim).  Text is a fixed screen size:\n"
+            "zoom in to read it.  Many thousand labels can make panning slower.")
+        self._edge_labels_all_chk.toggled.connect(self._on_edge_labels_all_toggle)
+        d_lay.addWidget(self._edge_labels_all_chk)
         # Kirchhoff KCL residuals: per-node signed sum of incident Q
         # for the selected tile's measurements.  Internal nodes should
         # net to ~0 (mass conservation); large residuals flag measurement
@@ -2491,6 +2572,15 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             "Diverging colourmap: red = net outflow, blue = net inflow.")
         self._kcl_chk.toggled.connect(self._on_kcl_toggle)
         d_lay.addWidget(self._kcl_chk)
+        self._bnd_levels_chk = QCheckBox("Boundary node fluxes (tiles | input | Q\u2032 | 50 %)")
+        self._bnd_levels_chk.setToolTip(
+            "Label every arterial inlet / venous outlet of the reconstruction with its net inflow:\n"
+            "  per-tile recordings (Tile filter → that tile only; * = tile saw only some of the node's vessels)\n"
+            "  in  = from the averaged inputs Q\u0304 (what the reconciliation fits)\n"
+            "  Q\u2032 = reconciled (free),  50% = reconciled with the left share forced to 50 %\n"
+            "The 50 % fit is computed on first use (~10–30 s) and cached.  Needs the reconciliation results.")
+        self._bnd_levels_chk.toggled.connect(self._on_bnd_levels_toggle)
+        d_lay.addWidget(self._bnd_levels_chk)
         layout.addWidget(d_group)
 
         layout.addStretch()
@@ -2652,6 +2742,13 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._clear_comp_btn.setEnabled(False)
         self._clear_comp_btn.clicked.connect(self._clear_comparison)
         inspect_lay.addWidget(self._clear_comp_btn)
+        self._edge_card_btn = QPushButton("Edge flux card (recordings \u2192 input \u2192 Q\u2032)")
+        self._edge_card_btn.setToolTip(
+            "For the selected edge: every tile recording, the single averaged input Q\u0304 the\n"
+            "reconciliation fits, and the reconciled Q\u2032 — plus both end junctions (why it moved).\n"
+            "Needs the reconciliation results (results/dc_reconciled_v2.pkl).")
+        self._edge_card_btn.clicked.connect(self._show_edge_card)
+        inspect_lay.addWidget(self._edge_card_btn)
         # Video overlay controls — only shown if positions + video paths
         # were given on the CLI.  Otherwise hide them rather than confuse
         # the user.
@@ -3375,6 +3472,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._refresh_cbar()
         if self.show_kcl:
             self._refresh_kcl_overlay()
+        if self.show_bnd_levels:
+            self._refresh_bnd_levels()
 
 
     def _on_cbar_toggle(self, checked: bool):
@@ -3773,6 +3872,52 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                         info.append(f"    {k}: {float(val):.4g}")
                     except (TypeError, ValueError):
                         info.append(f"    {k}: {val}")
+            # Current-format fields (flux estimator, quality, motion) — the legacy keys above are mostly absent.
+            try:
+                q_ = mm.get('quality') or {}; mo_ = mm.get('motion') or {}
+                f0_ = MeasurementView(mm).harm.f0_hz
+                mv_ = MeasurementView(mm); ff_, ft_ = mv_.flow_from, mv_.flow_to
+                dir_ = f", flow {ff_}\u2192{ft_}" if ff_ is not None and ft_ is not None else ""
+                if q_.get('kl_ok'):
+                    info.append(f"    Kloosterman |Q|: {abs(float(mm.get('Q_kl', float('nan')))):.4g} nL/s{dir_}"
+                                f"   (alignment {float(q_.get('align', float('nan'))):.2f}, parabolicity {float(q_.get('p', float('nan'))):.2f})")
+                else:
+                    info.append("    Kloosterman: no flux (fit failed)")
+                if mo_:
+                    info.append(f"    motion: z_DC {float(mo_.get('z_dc', float('nan'))):.1f}, cardiac p {float(mo_.get('p_ac', float('nan'))):.1e}"
+                                + (f", f0 {float(f0_):.2f} Hz" if f0_ else ""))
+                tin_ = (d.get('_rec_tile_inputs') or {}).get(int(tile_id)) if tile_id is not None else None
+                if tin_ is not None:
+                    _all = (d.get('_rec_tile_inputs') or {}).values()
+                    _wsum = sum(1.0 / max(c__, 1e-12) ** 2 for _, c__ in _all)
+                    _w = (1.0 / max(tin_[1], 1e-12) ** 2) / _wsum if _wsum else float('nan')
+                    info.append(f"    contributes Q {tin_[0]:+.4f} nL/s (edge orientation), c {tin_[1]:.2f}"
+                                f"  \u2192 weight {_w:.0%} of the vessel average")
+                elif self._rec:
+                    info.append("    not used by the reconciliation")
+            except Exception as exc_:
+                info.append(f"    (details unavailable: {exc_!r})")
+        # DC reconciliation for this vessel (results/dc_reconciled_v2.pkl): averaged input and output.
+        if self._rec:
+            qm_, c_, qp_ = d.get('_rec_Qm'), d.get('_rec_c'), d.get('_h_amp_DC_rec')
+            info.append("\n  DC reconciliation (one input per vessel):")
+            if qp_ is None:
+                info.append("    not in the carved network")
+            else:
+                if qm_ is not None:
+                    n_in = len(d.get('_rec_tile_inputs') or {})
+                    info.append(f"    INPUT to the fit  Q\u0304 = {qm_:+.4f} nL/s  (1/c\u00b2-weighted average of {n_in} recording(s)), c {c_:.2f}"
+                                f"  \u2192 \u03c3 \u2248 {abs(c_ * qm_):.4f}")
+                else:
+                    info.append("    input: unmeasured (set by conservation only)")
+                sd_ = d.get('_rec_Qp_sd')
+                info.append(f"    reconciled Q\u2032 {qp_:+.4f} nL/s" + (f"  (ensemble SD {sd_:.4f})" if sd_ is not None and np.isfinite(sd_) else "")
+                            + ("  [unstable]" if d.get('_rec_unstable') else ""))
+                if qm_:
+                    flip_ = np.sign(qp_) != np.sign(qm_)
+                    info.append(f"    adjustment |Q\u2032|/|Q\u0304| = {abs(qp_) / abs(qm_):.2f}" + ("  — DIRECTION REVERSED" if flip_ else "")
+                                + (f"  ({(qp_ - qm_) / abs(c_ * qm_):+.1f}\u03c3)" if c_ and qm_ else ""))
+                info.append("    (signs follow the stored edge orientation u\u2192v)")
         # Per-harmonic Z-statistics + classification for the best
         # measurement.  Computed on demand (one harmonic fit per click,
         # cheap).  Shows the user which harmonics rise above the noise.
@@ -3793,6 +3938,23 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 info.append(f"  Resolved: {_harmonic_class_label(klass)} "
                             f"(threshold Z > {HARMONIC_SNR_THRESHOLD:.0f})")
         self._info_box.setPlainText("\n".join(info))
+
+
+    def _show_edge_card(self):
+        e = getattr(self, '_selected_edge', None)
+        if e is None:
+            self._info_box.setPlainText("Select an edge first (click it), then 'Edge flux card'.")
+            return
+        if not self._rec:
+            self._info_box.setPlainText("No reconciliation results loaded (results/dc_reconciled_v2.pkl).")
+            return
+        try:
+            import matplotlib.pyplot as plt
+            from .edge_card import edge_flux_card
+            edge_flux_card(self.G, e, mosaic_height=self.mosaic_height)
+            plt.show(block=False)
+        except Exception as exc:
+            self._info_box.setPlainText(f"Edge flux card: {exc}")
 
 
     def _goto_edge_from_input(self):
@@ -3951,6 +4113,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         if new_p is None or new_p == self.current_property:
             return
         self.current_property = new_p
+        if str(new_p).startswith('rec_sym'):
+            self._ensure_sym_fit()
         self._sync_field_combos()
         self._refresh_edges()
         self._refresh_nodes()
@@ -4092,6 +4256,9 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             ks = [k for k in d if k.startswith(self._IN_MEMORY_PREFIXES) or (k.startswith('_h_') and k.endswith('_rec'))]
             if ks:
                 stash.append((d, {k: d.pop(k) for k in ks}))
+        gks = [k for k in self.G.graph if k.startswith(self._IN_MEMORY_PREFIXES)]     # e.g. _rec_boundary
+        if gks:
+            stash.append((self.G.graph, {k: self.G.graph.pop(k) for k in gks}))
         try:
             if protocol is None:
                 _pk.dump(self.G, f)
@@ -4163,9 +4330,33 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         Qp = np.asarray(D['Qp'], float)
         sd = np.asarray(D.get('Qp_sd', np.full(len(edges), np.nan)), float)
         uns = np.asarray(D.get('unstable', np.zeros(len(edges), bool)), bool)
+        self._rec_D = D
+        Qm = np.asarray(D.get('Qm', np.full(len(edges), np.nan)), float)
+        cc = np.asarray(D.get('c', np.full(len(edges), np.nan)), float)
+        imd = np.asarray(D.get('imaged', np.isfinite(Qm)), bool)
         for i, (u, v) in enumerate(edges):
             d = self.G.edges[u, v]
-            d['_h_amp_DC_rec'] = float(Qp[i]); d['_rec_Qp_sd'] = float(sd[i]); d['_rec_unstable'] = bool(uns[i])
+            d['_h_amp_DC_rec'] = float(Qp[i]); d['_rec_Qp_sd'] = float(sd[i]); d['_rec_unstable'] = bool(uns[i]); d['_rec_uv'] = (u, v)
+            if imd[i]:
+                d['_rec_Qm'] = float(Qm[i]); d['_rec_c'] = float(cc[i])     # reconciliation input (recording average)
+            else:
+                d.pop('_rec_Qm', None); d.pop('_rec_c', None)
+            d.pop('_rec_tile_inputs', None)
+        # Per-recording inputs {tile: (Q, c)} — what each tile contributes before averaging (Tile filter view).
+        # Same measurement table + quality model as the saved run (gain None → raw recordings).
+        try:
+            from ..reconcile import measurement_table
+            from ..reconcile.reliability import c_of
+            Mt = measurement_table(self.G, gain=D.get('gain'))
+            mdl = D.get('model')
+            eset = set(edges)
+            for (t, e), m in Mt.items():
+                if e not in eset:
+                    continue
+                self.G.edges[e].setdefault('_rec_tile_inputs', {})[int(t)] = (
+                    float(m['Q']), float(c_of(mdl, m)) if isinstance(mdl, dict) else float('nan'))
+        except Exception as exc:
+            print(f"  reconciliation: per-recording inputs unavailable ({exc!r})")
         n_ac = n_ph = 0
         f_ref = float('nan')
         if A is not None and [tuple(e) for e in A['edges']] == edges:
@@ -4182,6 +4373,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                     d[f'_h_amp_H{k + 1}_rec'] = abs(h); d[f'_h_phase_H{k + 1}_rec'] = float(np.angle(h))
                 d['_rec_tile'] = t; d['_rec_gauge_sd'] = float(gsd.get(t, np.nan)); d['_rec_phase_ok'] = bool(ph_ok[i])
                 n_ac += 1; n_ph += int(ph_ok[i])
+        try:
+            nds = D['nodes']
+            self.G.graph['_rec_boundary'] = {nds[i] for i in np.r_[np.asarray(D['inj'], int), np.asarray(D['out'], int)]}
+        except Exception:
+            pass
         print(f"  reconciliation ({res}): DC on {len(edges)} carved edges ({int(uns.sum())} flagged unstable); "
               f"AC field on {n_ac} edges, phase-determined {n_ph}")
         return dict(results_dir=res, n_dc=len(edges), n_ac=n_ac, n_phase=n_ph, f_ref=f_ref,
@@ -4206,6 +4402,116 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
     def _on_edge_labels_toggle(self, checked: bool):
         self.show_edge_labels = bool(checked)
         self._refresh_edge_labels()
+
+
+    def _on_edge_labels_all_toggle(self, checked: bool):
+        self.edge_labels_all_tiles = bool(checked)
+        if checked and not self.show_edge_labels and getattr(self, '_edge_labels_chk', None) is not None:
+            self._edge_labels_chk.setChecked(True)          # turns labels on → refresh via its handler
+        else:
+            self._refresh_edge_labels()
+
+
+    def _ensure_sym_fit(self) -> bool:
+        """Reconciliation with the left share of arterial inflow forced to 50 % (same model, inputs and network as the
+        saved run).  Attaches `_rec_Qsym` per edge and caches node inflows.  Computed once per session."""
+        if self._rec_sym_fb is not None:
+            return True
+        D = self._rec_D
+        if D is None:
+            self._info_box.setPlainText("No reconciliation results loaded — the 50 % fit needs results/dc_reconciled_v2.pkl.")
+            return False
+        try:
+            import scipy.sparse as _sp
+            from ..reconcile import measurement_table, carved_domain, reconcile_dc
+            self._info_box.setPlainText("Computing the reconciliation with the left share forced to 50 % (~10–30 s)…")
+            try:
+                from qtpy.QtWidgets import QApplication
+                QApplication.processEvents()
+            except Exception:
+                pass
+            dom = carved_domain(self.G)
+            if [tuple(e) for e in dom['edges']] != [tuple(e) for e in D['edges']]:
+                self._info_box.setPlainText("50 % fit: the graph's carved network differs from the saved results — rerun the stage chain.")
+                return False
+            inj, sd = np.asarray(dom['inj']), np.asarray(dom['side'])
+            row = np.asarray(0.5 * dom['B'][inj[sd == 'L']].sum(0) - 0.5 * dom['B'][inj[sd == 'R']].sum(0)).ravel()
+            dom['B'] = _sp.vstack([dom['B'], _sp.csr_matrix(row)]).tocsr()
+            M = measurement_table(self.G, gain=D.get('gain'))
+            R = reconcile_dc(self.G, D['model'], M, dom=dom, n_starts=2, n_shuffle=0)
+            Qs = np.asarray(R['Qp'], float)
+            for i, e in enumerate(D['edges']):
+                self.G.edges[tuple(e)]['_rec_Qsym'] = float(Qs[i])
+            f = np.asarray(dom['B'] @ Qs).ravel()[:len(dom['nodes'])]
+            self._rec_sym_fb = {dom['nodes'][k]: float(f[k]) for k in np.r_[np.asarray(D['inj'], int), np.asarray(D['out'], int)]}
+            L = sum(self._rec_sym_fb[dom['nodes'][k]] for k in inj[sd == 'L']); Rr = sum(self._rec_sym_fb[dom['nodes'][k]] for k in inj[sd == 'R'])
+            self._info_box.setPlainText(f"50 % fit done: inflow L {L:.2f} / R {Rr:.2f} nL/s.")
+            return True
+        except Exception as exc:
+            self._info_box.setPlainText(f"50 % fit failed: {exc!r}")
+            return False
+
+
+    def _on_bnd_levels_toggle(self, checked: bool):
+        self.show_bnd_levels = bool(checked)
+        if checked:
+            self._ensure_sym_fit()
+        self._refresh_bnd_levels()
+
+
+    def _refresh_bnd_levels(self):
+        """Points layer at every boundary node of the reconstruction with a multi-line label: per-tile net inflow,
+        input (averaged Q̄), reconciled Q′ and the 50 %-left fit."""
+        if self._bnd_levels_layer is not None:
+            try:
+                self.viewer.layers.remove(self._bnd_levels_layer)
+            except (KeyError, ValueError):
+                pass
+            self._bnd_levels_layer = None
+        D = self._rec_D
+        if not self.show_bnd_levels or D is None:
+            return
+        nodes = D['nodes']; bidx = list(np.asarray(D['inj'], int)) + list(np.asarray(D['out'], int))
+        inc = {}
+        for e in D['edges']:
+            u, v = int(e[0]), int(e[1])
+            inc.setdefault(u, []).append(((u, v), +1)); inc.setdefault(v, []).append(((u, v), -1))   # injection = +Q at tail
+        tf = self.current_tile_filter
+        pts, texts, cols = [], [], []
+        for k in bidx:
+            n = nodes[k]; es = inc.get(n, [])
+            def net(get):
+                tot, have = 0.0, 0
+                for e, sgn in es:
+                    q = get(self.G.edges[e])
+                    if q is not None:
+                        tot += sgn * q; have += 1
+                return tot, have
+            fin, nm = net(lambda d: d.get('_rec_Qm'))
+            fq, _ = net(lambda d: d.get('_h_amp_DC_rec'))
+            tiles = sorted({t for e, _ in es for t in (self.G.edges[e].get('_rec_tile_inputs') or {})})
+            if tf is not None:
+                tiles = [t for t in tiles if t == int(tf)]
+            tl = []
+            for t in tiles:
+                v_, h_ = net(lambda d, t=t: (d.get('_rec_tile_inputs') or {}).get(t, (None,))[0])
+                tl.append(f"t{t} {v_:+.2f}{'*' if h_ < len(es) else ''}")
+            sym = self._rec_sym_fb.get(n) if self._rec_sym_fb else None
+            out = k in set(np.asarray(D['out'], int))
+            lab = (f"{n}{' (vein)' if out else ''}\n" + ("  ".join(tl) if tl else ("no recordings" if tf is None else f"no t{tf} recording")) + "\n"
+                   f"in {fin:+.2f}{'' if nm == len(es) else f' ({nm}/{len(es)})'} | Q\u2032 {fq:+.2f}" + (f" | 50% {sym:+.2f}" if sym is not None else ""))
+            pts.append([self.mosaic_height - self.G.nodes[n]['y'], self.G.nodes[n]['x']]); texts.append(lab)
+            moved = abs(fq - fin) > 0.3 or (sym is not None and abs(sym - fin) > 0.3)
+            cols.append('#ffb347' if moved else 'white')
+        if not pts:
+            return
+        try:
+            self._bnd_levels_layer = self.viewer.add_points(
+                np.asarray(pts, float), size=9, face_color=cols, border_color='black',
+                text={'string': texts, 'size': 9, 'color': cols, 'anchor': 'upper_left', 'translation': [6, 6]},
+                name='Boundary node fluxes')
+        except Exception as e:
+            print(f"  Could not add boundary-flux layer: {e}")
 
 
     def _on_kcl_toggle(self, checked: bool):
@@ -4391,9 +4697,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             self._edge_labels_layer = None
         if not self.show_edge_labels:
             return
-        if self.current_tile_filter is None:
+        all_tiles = self.current_tile_filter is None
+        if all_tiles and not getattr(self, 'edge_labels_all_tiles', False):
             return
-        tile_id = int(self.current_tile_filter)
+        tile_id = None if all_tiles else int(self.current_tile_filter)
         prop = self.current_property
         # Format helpers for the most common property types
         def _fmt(val: float) -> str:
@@ -4418,8 +4725,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             d = self.G.edges[u, v]
             # Only edges with a measurement on the active tile.
             # v4 migration: was m.get('tile_id')
-            if not any(MeasurementView(m).tile_id == tile_id
-                       for m in (d.get('measurements_piv') or [])):
+            if tile_id is not None and not any(MeasurementView(m).tile_id == tile_id
+                                               for m in (d.get('measurements_piv') or [])):
                 continue
             val = self._resolve_field_value(u, v)
             if val is None or not np.isfinite(val):
@@ -4465,6 +4772,17 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             return
         self._load_video_overlay(int(tid))
         self._unload_video_btn.setEnabled(self._video_layer is not None)
+
+
+    def _load_video2_from_dropdown(self):
+        """Second overlay: the picked tile plays alongside the primary one (shared time axis)."""
+        if not hasattr(self, '_tile_combo'):
+            return
+        tid = self._tile_combo.currentData()
+        if tid is None:
+            return
+        self._load_video_overlay(int(tid), slot=1)
+        self._tile_unload2_btn.setEnabled(self._video_layer2 is not None)
 
 
     # ── public entry ───────────────────────────────────────────────────
