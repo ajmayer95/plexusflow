@@ -88,7 +88,7 @@ def build_context(dc, field, dom, topo="flux", supernode_scale=1.0, ratio="weigh
            for r in dom.get("regions", []) if not r["leaky"] and r["cut"]] if topo == "supernode" else []
     return dict(topo=topo, supernode_scale=supernode_scale, super=sup, ratio=ratio, forcing_flags=flags, f0=field["f_ref"], nN=nN, nE=nE, dom=dom, Qp=Qp, Qs_dc=dc["Qs"],
                 H={1: np.where(elig, H[1], np.nan), 2: np.where(elig, H[2], np.nan)},
-                elig=elig, F=F, tail=tail, head=head, r_m=dc["radius"] * PX_M, l_m=dc["length"] * PX_M,
+                elig=elig, F=F, tail=tail, head=head, r_m=dc["radius"] * PX_M, l_m=np.maximum(np.asarray(dc["length"], float), 1.0) * PX_M,
                 rc_m=np.asarray(dc.get("radius_compliance", dc["radius"])) * PX_M)
 
 

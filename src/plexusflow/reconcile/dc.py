@@ -181,7 +181,7 @@ def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, 
         r = [m["R_kl_um"] / PX_UM for m in G.edges[e].get("measurements_piv") or [] if m.get("R_kl_um") and np.isfinite(m["R_kl_um"])]
         return float(np.median(r)) if r else np.nan
     rt = np.array([_median_rkl(e) for e in sub])
-    r_cons = np.sqrt(rg * np.where(np.isfinite(rt), rt, rg)); L = np.array([G.edges[e]["length"] for e in sub], float)
+    r_cons = np.sqrt(rg * np.where(np.isfinite(rt), rt, rg)); L = np.maximum(np.array([G.edges[e]["length"] for e in sub], float), 1.0)   # ≥ 1 px: zero-length splice artefacts
     profiled = np.zeros(me, bool)
     if isinstance(radius, str) and radius == "tube":
         r, rc, profiled = tube_radius_arrays(G, sub, mask)

@@ -181,6 +181,13 @@ def evaluate(stage_root: Path, pending: Path, *, measure: bool = True, workers: 
     n_meas = sum(1 for e in new if any((m.get("quality") or {}).get("kl_ok") for m in G1.edges[e].get("measurements_piv") or []))
     model = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text())
     log("[refine] fitting current graph …"); F0 = quick_fit(G0, model)
+    import networkx as _nx
+    _main = max(_nx.connected_components(G1), key=len)
+    _disc = [int(n) for n in G1.nodes if n not in _main and G1.nodes[n].get("boundary_type") in ("source", "sink")]
+    if _disc:
+        log(f"[refine] WARNING: boundary anchor node(s) {_disc} are disconnected from the network in the candidate "
+            f"(vein outlet / dorsal-aorta stub cut by the re-vectorisation) — the candidate fit will be singular; redraw the region "
+            f"so these anchors stay outside it, or repair the mask connection.  Do NOT accept.")
     log("[refine] fitting candidate …"); F1 = quick_fit(G1, model)
     r0, r1 = near_region(G0, poly), near_region(G1, poly)
     res = dict(

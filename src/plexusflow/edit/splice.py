@@ -39,6 +39,7 @@ from scipy.spatial import cKDTree
 FILL_HOLES, CLOSE_SLITS = 20, True          # stage vectorise defaults (plexusflow.yaml vectorize_fill_holes / close_slits)
 MIN_FEATURE, PRUNE_ORDER = 100, 3           # stage net3 settings (vectorize_min_feature_size / prune_order)
 JOIN_PX = 10.0                              # minimum port-matching distance
+DENSIFY_PX = 2.0                            # max spacing of new-skeleton nodes (ports land at the polygon border)
 MIN_COMPONENT_PX = 10.0                     # new interior pieces shorter than this (total centreline) are dropped
 TMP_KEEP = "_splice_keep"
 
@@ -161,6 +162,16 @@ def splice_region(G: nx.Graph, mask: np.ndarray, polygon_xy, *, margin: Optional
     dy = Hm - r1                                               # crop y_up → stage y_up
     for n, d in R.nodes(data=True):
         d["x"] = float(d["x"]) + c0; d["y"] = float(d["y"]) + dy
+    # densify long straight skeleton edges (net3 keeps some up to ~60 px) so that a border-crossing segment's inside end — the
+    # new port — lies at the polygon border, next to the old vessel's port, instead of up to tens of px inside (dead ends)
+    nid = [max(max(R.nodes), max(G.nodes)) + 1]
+    for u, v in list(R.edges):
+        pu, pv = _xy(R, u), _xy(R, v); L = float(np.linalg.norm(pv - pu))
+        if L > DENSIFY_PX:
+            k = int(np.ceil(L / DENSIFY_PX)); R.remove_edge(u, v); prev = u
+            for i in range(1, k):
+                q = pu + (pv - pu) * i / k; R.add_node(nid[0], x=float(q[0]), y=float(q[1])); R.add_edge(prev, nid[0]); prev = nid[0]; nid[0] += 1
+            R.add_edge(prev, v)
     full = np.zeros((Hm, Wm), bool); full[r0:r1, c0:c1] = crop
     edt = np.zeros((Hm, Wm)); edt[r0:r1, c0:c1] = ndi.distance_transform_edt(crop)
 
@@ -278,7 +289,12 @@ def splice_region(G: nx.Graph, mask: np.ndarray, polygon_xy, *, margin: Optional
     G2.remove_nodes_from(iso)
     orphan = [n for n in G2.nodes if G2.degree(n) == 0 and n in G and G.degree(n) > 0]
     n_meas = sum(1 for e in removed if G.edges[e].get("measurements_piv"))
-    report = dict(polygon=poly.tolist(), crop_rc=[r0, c0, r1, c1], margin=float(m),
+    # structural checks: boundary anchors (DA sources, vein sinks) cut off from the main network, zero-length joins
+    comps = sorted(nx.connected_components(G2), key=len); main = comps[-1] if comps else set()
+    disc_bnd = [int(n) for n in G2.nodes if n not in main and G2.nodes[n].get("boundary_type") in ("source", "sink")]
+    zero_len = [(int(u), int(v)) for u, v, d in G2.edges(data=True) if not (d.get("length") or 0) > 0]
+    report = dict(disconnected_boundary=disc_bnd, small_components=[len(c) for c in comps[:-1]], zero_length_edges=zero_len,
+                  polygon=poly.tolist(), crop_rc=[r0, c0, r1, c1], margin=float(m),
                   old_removed=len(removed), old_cut=len(trimmed), old_nodes_removed=len(old_inside_nodes),
                   new_edges=len(new_edges), new_nodes=sum(1 for n in G2.nodes if n not in G),
                   ports_old=len(old_ports), ports_new=len(npl), joins=len(joins),

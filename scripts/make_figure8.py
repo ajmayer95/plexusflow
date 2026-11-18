@@ -318,7 +318,7 @@ def main():
     rv_t = sorted([t_ for t_, y_ in xr_.items() if t_ in stitch and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
     # retained examples 3, 4: interior vessels (≥ 1 mm from the organ outline) whose recordings are far apart in time (43–45 min),
     # with typical D for that separation (sandbox/find_fig8_examples.py)
-    RV3 = (56890, 57078); RV3e = RV3 if RV3 in mall else RV3[::-1]; xr3_ = mall[RV3e]
+    RV3 = (103378, 57078); RV3e = RV3 if RV3 in mall else RV3[::-1]; xr3_ = mall[RV3e]
     rv3_t = sorted([t_ for t_, y_ in xr3_.items() if t_ in stitch and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
     EXe = EXV if EXV in mall else EXV[::-1]
     def _trace(ax_, E_, t_, col_, lab_):

@@ -33,8 +33,8 @@ from plexusflow.analyze.geometry import load_tile_geometry, tile_video_shape, gr
 from plexusflow.reconcile.harmonics import phasors, FS
 import plos_style
 
-REGIONS = [dict(tile=27, A=(72246, 72354), B=(75201, 75266), title="Arterial-side path", short="arterial side", col="#00838f"),
-           dict(tile=13, A=(57078, 57118), B=(53492, 53651), title="Venous-return path", short="venous return", col="#7b3f99")]
+REGIONS = [dict(tile=27, A=(72106, 72354), B=(75201, 75266), title="Arterial-side path", short="arterial side", col="#00838f"),
+           dict(tile=13, A=(57078, 57118), B=(97659, 101363), title="Venous-return path", short="venous return", col="#7b3f99")]
 COL_A, COL_B, PATHCOL, INK = "#2166ac", "#d73027", "#f0ad00", "#1a1a1a"
 PX_UM = 1.7
 

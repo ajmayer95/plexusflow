@@ -1,6 +1,8 @@
 """Mean-flow (DC) reconstruction of one stage from its measured graph (final method, frozen 2026-11-12).
 
-1. Reliability scale c = c0 + c_p(1 − p) + c_a(1 − align) (p = parabolicity), ML-fitted on same-tile junction balance of
+0. Recording-scale correction (2026-11-18): every recording's flux normalised to the median heart rate, y·(f_ref/f)^β, β fitted
+   on repeat recordings (plexusflow.reconcile.gain).
+1. Reliability scale c = c0 + c_a(1 − align) (alignment only since 2026-11-18), ML-fitted on same-tile junction balance of
    this stage (--tile-terms: per-tile c_T).
 2. Per vessel the 1/c²-weighted average of its Kloosterman-valid recordings (between-recording spread kept as a variance
    floor); carved network; quasi-likelihood reconciliation under interior conservation (variance c²Q′² + σ0² evaluated at
@@ -31,12 +33,18 @@ def main():
     a = ap.parse_args()
     G = paths.load_graph()
     M = measurement_table(G)
+    from plexusflow.reconcile.reliability import LAST_GAIN
+    gfit = LAST_GAIN.get(id(G))
+    if gfit:
+        print(f"[0] heart-rate correction: flux ∝ f^β, β = {gfit['beta']:.2f} (f_ref {gfit['f_ref']:.2f} Hz; {gfit['n_recordings']} recordings of "
+              f"{gfit['n_vessels']} repeat vessels)")
     model, J = fit_reliability(G, M, tile_terms=a.tile_terms)
     cT = np.array(list(model["c_T"].values()))
-    print(f"[1] reliability fit: {model['n_junctions']} junctions, {len(cT)} tiles:  c_{model['profile_term']} {model['c_' + model['profile_term']]:.2f}  c_a {model['c_a']:.2f}  "
+    print(f"[1] reliability fit: {model['n_junctions']} junctions, {len(cT)} tiles:  {model['formula'].split(';')[0]}:  c_a {model['c_a']:.2f}  "
           f"σ0 {model['sigma0']:.4f}  " + (f"c0 {model['c0']:.3f}" if 'c0' in model else
           f"c_T median {np.median(cT):.2f} [IQR {np.percentile(cT, 25):.2f}–{np.percentile(cT, 75):.2f}]"))
     D = reconcile_dc(G, model, M, radius=a.radius, topology=not a.no_topology)
+    D["gain"] = gfit
     if a.radius == "tube":
         pr = D["radius_profiled"]
         print(f"    tube-interior radius profiled for {pr.sum()} of {len(pr)} vessels ({pr.mean():.0%}; others keep the segmented radius); "

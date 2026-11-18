@@ -265,18 +265,35 @@ class RefineMixin:
     def _rf_draw_preview(self, res):
         if REFINE_PREVIEW in self.viewer.layers:
             self.viewer.layers.remove(REFINE_PREVIEW)
-        H = self.mosaic_height; data, cols, widths = [], [], []
+        H = self.mosaic_height; data, cols, widths = [], [], []; bad = []
         G_src = self._rf.get("G_src", self.G)
+        def add(path, col, w, e):
+            p = np.asarray(path, float).reshape(-1, 2) if path is not None else np.zeros((0, 2))
+            p = p[np.all(np.isfinite(p), axis=1)]
+            if len(p) < 2 or np.ptp(p, axis=0).max() == 0:                 # napari paths need ≥ 2 distinct vertices
+                bad.append(e); return
+            data.append(np.column_stack([H - p[:, 1], p[:, 0]])); cols.append(col); widths.append(w)
         for e in res.removed_edges:
-            p = np.asarray(G_src.edges[e]["path"], float); data.append(np.column_stack([H - p[:, 1], p[:, 0]])); cols.append("#ff3030"); widths.append(5)
+            add(G_src.edges[e].get("path") if G_src.has_edge(*e) else None, "#ff3030", 5, e)
         for e in res.new_edges:
-            p = np.asarray(res.G.edges[e]["path"], float); data.append(np.column_stack([H - p[:, 1], p[:, 0]])); cols.append("#39ff14"); widths.append(2)
+            add(res.G.edges[e].get("path"), "#39ff14", 2, e)
         for d in res.report["dead_ends"]:
             x, y = d["x"], d["y"]; s = 8
             data += [np.array([[H - y - s, x - s], [H - y + s, x + s]]), np.array([[H - y - s, x + s], [H - y + s, x - s]])]
             cols += ["#ffe600", "#ffe600"]; widths += [3, 3]
+        rep = res.report
+        if rep.get("disconnected_boundary"):
+            self._rf_say(f"WARNING: boundary anchor node(s) {rep['disconnected_boundary']} are cut off from the network by this "
+                         f"re-vectorisation (vein outlet / aorta stub) — redraw the region to leave them outside, or repair the mask; "
+                         f"do not accept.", append=True)
+        if bad:
+            self._rf_say(f"preview: {len(bad)} edge(s) with a degenerate path (< 2 distinct points) not drawn: {bad[:6]}"
+                         + (" — new zero-length edges usually mean a junction artefact; check before accepting" if any(e in res.new_edges for e in bad) else ""))
         if data:
-            self.viewer.add_shapes(data, shape_type="path", edge_color=cols, edge_width=widths, name=REFINE_PREVIEW, opacity=0.9)
+            try:
+                self.viewer.add_shapes(data, shape_type="path", edge_color=cols, edge_width=widths, name=REFINE_PREVIEW, opacity=0.9)
+            except Exception as ex:
+                self._rf_say(f"preview drawing failed ({ex}); the re-vectorised result is kept — you can still run step 4")
 
     # ── 4 evaluate ─────────────────────────────────────────────────────────────────────────────────────────────────
     def _rf_evaluate(self):
