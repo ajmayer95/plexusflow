@@ -1,4 +1,10 @@
-"""Recording-scale (heart-rate) correction of mean fluxes (adopted 2026-11-18).
+"""Recording-scale (heart-rate) correction of mean fluxes — SENSITIVITY ANALYSIS ONLY (not applied by default since 2026-11-18 pm).
+
+Not the primary method: the flux ratio of repeat recordings does not follow a power law over the full heart-rate range
+(pairwise slope ≈ 2.5–3.3 for small heart-rate differences, ≈ 0.6 for the 112 pairs with ratios > 1.3 that involve the
+earliest recordings), heart rate is confounded with acquisition time, β moves from 2.1 to 3.4 when four early recordings are
+dropped, and the predictive gain is small (held-out fold error 1.444× → 1.428×) while the left share moves by ~9 points.
+Use measurement_table(G, gain="hr") for the sensitivity run.
 
 Recordings of one vessel made at different times differ systematically in flux: across the 21S acquisition the flux of a
 vessel scales with the recording's heart rate as ≈ f^2.4 (repeat recordings of the same vessels; significant, cross-validated
@@ -19,7 +25,7 @@ from collections import defaultdict
 
 import numpy as np
 
-DEFAULT = "hr"                    # "hr" | None
+DEFAULT = None                    # None (primary) | "hr" (sensitivity)
 
 
 def tile_heart_rates(G):

@@ -1,7 +1,6 @@
 """Mean-flow (DC) reconstruction of one stage from its measured graph (final method, frozen 2026-11-12).
 
-0. Recording-scale correction (2026-11-18): every recording's flux normalised to the median heart rate, y·(f_ref/f)^β, β fitted
-   on repeat recordings (plexusflow.reconcile.gain).
+0. (Sensitivity only, off by default) heart-rate normalisation of recording fluxes, plexusflow.reconcile.gain.
 1. Reliability scale c = c0 + c_a(1 − align) (alignment only since 2026-11-18), ML-fitted on same-tile junction balance of
    this stage (--tile-terms: per-tile c_T).
 2. Per vessel the 1/c²-weighted average of its Kloosterman-valid recordings (between-recording spread kept as a variance

@@ -796,9 +796,125 @@ def main():
     # a (calibration plot, top right) and c (withheld validation, bottom)
     # ---- main figure, two panels: a calibration of the discrepancy model (with a same-tile junction inset), b prediction of
     #      withheld fluxes.  The reconstructed network itself is shown at organ scale in Fig 7 (pair: SI fig6_S_networks).
-    HF = 6.0; fig = plt.figure(figsize=(7.5, HF), facecolor="white"); T1 = 5.82 / HF; T2 = 2.95 / HF
-    axC2 = fig.add_axes([0.105, 3.85 / HF, 0.37, 1.95 / HF]); draw_calibration_cum(axC2)
-    axD2 = fig.add_axes([0.615, 3.85 / HF, 0.37, 1.95 / HF]); draw_withheld_fold(axD2)
+    # ---- main figure (11-18): a physiological variability (heart rate) · b measurement uncertainty (alignment) ·
+    #      c conservative reconstruction (worked example) · d predictive validation (ablation).  Withholding → SI.
+    def draw_hr(ax_t, ax_r):
+        from plexusflow.reconcile.gain import tile_heart_rates, fit_hr_gain
+        from plexusflow.io.acquisition import tile_acquisition_minutes
+        from plexusflow.config import StageConfig as _SC6
+        f0_ = tile_heart_rates(G); R0_ = measurement_table(G, gain=None); fit_ = fit_hr_gain(R0_, f0_); ts_ = sorted(f0_)
+        tq_ = tile_acquisition_minutes(ST, _SC6.load(ST), ts_)
+        xs_ = np.array([tq_[t] for t in ts_]) if tq_ else np.array(ts_, float)
+        ax_t.plot(xs_, [f0_[t] for t in ts_], "o", ms=3.2, color=BLUE, mec="white", mew=0.4)
+        ax_t.set_xlabel("Acquisition time (min)" if tq_ else "Recording (acquisition order)", fontsize=9, labelpad=2); ax_t.set_ylabel("Heart rate (Hz)", fontsize=9, labelpad=2)
+        ax_t.tick_params(labelsize=8); ax_t.spines[["top", "right"]].set_visible(False)
+        # the data the exponent is estimated from: pairs of recordings of the same vessel, log flux ratio vs log heart-rate ratio
+        by_ = {}
+        for (t, e), m in R0_.items():
+            if m["Q"] != 0: by_.setdefault(e, {})[t] = abs(m["Q"])
+        xr_, yr_ = [], []
+        for r in by_.values():
+            tt = sorted(r)
+            for i in range(len(tt)):
+                for j in range(i + 1, len(tt)):
+                    a_, b2_ = (tt[i], tt[j]) if f0_[tt[i]] >= f0_[tt[j]] else (tt[j], tt[i])
+                    xr_.append(f0_[a_] / f0_[b2_]); yr_.append(r[a_] / r[b2_])
+        xr_, yr_ = np.array(xr_), np.array(yr_)
+        ax_r.scatter(xr_, yr_, s=1.5, color="0.7", alpha=0.18, lw=0, rasterized=True, zorder=1)
+        edges_ = np.array([1.0, 1.03, 1.08, 1.15, 1.3, 1.6, 2.2, 3.5]); bc, bm, bl, bh, bn = [], [], [], [], []
+        for lo_, hi_ in zip(edges_[:-1], edges_[1:]):
+            m_ = (xr_ >= lo_) & (xr_ < hi_)
+            if m_.sum() >= 15:
+                bc.append(np.exp(np.median(np.log(xr_[m_])))); q_ = np.log(yr_[m_]); bm.append(np.exp(np.median(q_)))
+                bl.append(np.exp(np.percentile(q_, 25))); bh.append(np.exp(np.percentile(q_, 75))); bn.append(int(m_.sum()))
+        bc, bm, bl, bh = map(np.array, (bc, bm, bl, bh))
+        ax_r.errorbar(bc, bm, yerr=[bm - bl, bh - bm], fmt="o", ms=4.5, color=BLUE, mec="white", mew=0.5, ecolor=BLUE, elinewidth=1, capsize=0, zorder=4, label="binned median (IQR)")
+        xx_ = np.linspace(1, xr_.max(), 50); ax_r.plot(xx_, xx_ ** fit_["beta"], color=INK, lw=1.2, zorder=5, label=r"$Q \propto f^{\,%.1f}$" % fit_["beta"])
+        ax_r.axhline(1, color=MUTED, lw=0.6, ls=(0, (1, 2)), zorder=2)
+        ax_r.set_xscale("log"); ax_r.set_yscale("log"); ax_r.set_xlim(0.98, xr_.max() * 1.05); ax_r.set_ylim(0.1, 10)
+        ax_r.set_xticks([1, 1.5, 2, 3]); ax_r.set_xticklabels(["1", "1.5", "2", "3"]); ax_r.set_yticks([0.1, 1, 10]); ax_r.set_yticklabels(["0.1", "1", "10"]); ax_r.minorticks_off()
+        ax_r.set_xlabel("Heart-rate ratio, $f_2/f_1$", fontsize=9, labelpad=2); ax_r.set_ylabel("Flux ratio, $Q_2/Q_1$\n(same vessel)", fontsize=9, labelpad=2)
+        ax_r.tick_params(labelsize=8); ax_r.spines[["top", "right"]].set_visible(False); ax_r.legend(loc="lower right", frameon=False, fontsize=7.5, handletextpad=0.3, borderaxespad=0.1)
+        Vv, ok_ = list(by_), np.ones(1, bool)
+        log(f"panel a: {len(xr_)} repeat pairs; bins (n) {bn}")
+        log(f"panel a: β {fit_['beta']:.2f} (f_ref {fit_['f_ref']:.2f} Hz)")
+    def draw_norm_effect(axN):
+        """held-out prediction error without / with heart-rate normalisation (alignment weighting; dc_ablation.json)"""
+        A_ = json.loads((P.RESULTS / "dc_ablation.json").read_text()); V_ = {(v["hr"], v["weighting"], v["reconstruction"]): v for v in A_["variants"]}
+        for g_, (rec, lab) in enumerate((("average", "per-vessel\naverage"), ("conservation", "conservative\nreconstruction"))):
+            pts = []
+            for dx, hr, fc in ((-0.14, False, "white"), (0.14, True, BLUE)):
+                v = V_[(hr, "alignment", rec)]; y_ = v["fold_error"]; lo_, hi_ = v["fold_error_ci"]; pts.append((g_ + dx, y_))
+                axN.errorbar(g_ + dx, y_, yerr=[[y_ - lo_], [hi_ - y_]], fmt="o", ms=5.5, mfc=fc, mec=BLUE, mew=1.2, ecolor=BLUE, elinewidth=1, capsize=0, zorder=4)
+            axN.plot(*zip(*pts), color="0.6", lw=0.8, zorder=2)
+        axN.set_xticks([0, 1]); axN.set_xticklabels(["average\nonly", "conser-\nvation"], fontsize=8); axN.set_xlim(-0.5, 1.5)
+        axN.set_ylabel("Median fold error,\nheld-out recordings", fontsize=9, labelpad=2); axN.tick_params(labelsize=8); axN.spines[["top", "right"]].set_visible(False)
+        from matplotlib.lines import Line2D as _L2n
+        axN.legend(handles=[_L2n([], [], ls="", marker="o", ms=5.5, mfc="white", mec=BLUE, mew=1.2, label="raw"),
+                            _L2n([], [], ls="", marker="o", ms=5.5, mfc=BLUE, mec=BLUE, label="HR-normalised")],
+                   loc="upper right", frameon=False, fontsize=7.5, handletextpad=0.2, borderaxespad=0.0, bbox_to_anchor=(1.12, 1.08))
+
+    def draw_validation(axV):
+        """held-out prediction (no heart-rate normalisation): constant vs alignment-dependent uncertainty, each as per-vessel
+        average only (open) and conservative reconstruction (filled); dc_ablation.json"""
+        A_ = json.loads((P.RESULTS / "dc_ablation.json").read_text()); V_ = {(v["hr"], v["weighting"], v["reconstruction"]): v for v in A_["variants"]}
+        for g_, wl in enumerate(("constant", "alignment")):
+            pts = []
+            for dx, rec, fc in ((-0.14, "average", "white"), (0.14, "conservation", BLUE)):
+                v = V_[(False, wl, rec)]; y_ = v["fold_error"]; lo_, hi_ = v["fold_error_ci"]; pts.append((g_ + dx, y_))
+                axV.errorbar(g_ + dx, y_, yerr=[[y_ - lo_], [hi_ - y_]], fmt="o", ms=5.5, mfc=fc, mec=BLUE, mew=1.2, ecolor=BLUE, elinewidth=1, capsize=0, zorder=4)
+            axV.plot(*zip(*pts), color="0.6", lw=0.8, zorder=2)
+        WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); ry = np.exp(WH["repeat"]["err"])
+        axV.axhline(ry, color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1); axV.text(1.45, ry, "repeat\nrecordings", fontsize=7, color=MUTED, va="center", ha="left")
+        axV.set_xticks([0, 1]); axV.set_xticklabels(["constant\nuncertainty", "alignment-\ndependent"], fontsize=8); axV.set_xlim(-0.5, 1.4)
+        axV.set_ylabel("Median fold error,\nheld-out recordings", fontsize=9, labelpad=2); axV.tick_params(labelsize=8); axV.spines[["top", "right"]].set_visible(False)
+        from matplotlib.lines import Line2D as _L2v
+        axV.legend(handles=[_L2v([], [], ls="", marker="o", ms=5.5, mfc="white", mec=BLUE, mew=1.2, label="per-vessel average"),
+                            _L2v([], [], ls="", marker="o", ms=5.5, mfc=BLUE, mec=BLUE, label="conservative reconstruction")],
+                   loc="upper right", frameon=False, fontsize=7.5, handletextpad=0.2, borderaxespad=0.0, bbox_to_anchor=(1.05, 1.1))
+        log("panel b: " + "; ".join(f"{wl} {rec}: ×{V_[(False, wl, rec)]['fold_error']:.3f}" for wl in ("constant", "alignment") for rec in ("average", "conservation")))
+
+    def draw_ablation(axA):
+        A_ = json.loads((P.RESULTS / "dc_ablation.json").read_text()); V_ = {(v["hr"], v["weighting"], v["reconstruction"]): v for v in A_["variants"]}
+        groups = [(False, "constant"), (True, "constant"), (False, "alignment"), (True, "alignment")]
+        labs = ["constant\nraw", "constant\nHR-norm.", "alignment\nraw", "alignment\nHR-norm."]
+        for g_, (hr, wl) in enumerate(groups):
+            pts = []
+            for dx, rec, mk, fc in ((-0.13, "average", "o", "white"), (0.13, "conservation", "o", BLUE)):
+                v = V_[(hr, wl, rec)]; y_ = v["fold_error"]; lo_, hi_ = v["fold_error_ci"]; pts.append((g_ + dx, y_))
+                axA.errorbar(g_ + dx, y_, yerr=[[y_ - lo_], [hi_ - y_]], fmt=mk, ms=6, mfc=fc, mec=BLUE, mew=1.2, ecolor=BLUE, elinewidth=1, capsize=0, zorder=4)
+            axA.plot(*zip(*pts), color="0.6", lw=0.8, zorder=2)
+        WH = json.loads((P.RESULTS / "dc_withholding.json").read_text())
+        axA.axhline(np.exp(WH["repeat"]["err"]), color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1)
+        axA.text(3.45, np.exp(WH["repeat"]["err"]), "repeat\nrecordings", fontsize=7.5, color=MUTED, va="center", ha="left")
+        axA.set_xticks(range(4)); axA.set_xticklabels(labs, fontsize=8); axA.set_xlim(-0.5, 3.4)
+        axA.set_ylabel("Median fold error,\nheld-out recordings", fontsize=9, labelpad=2); axA.tick_params(labelsize=8); axA.spines[["top", "right"]].set_visible(False)
+        from matplotlib.lines import Line2D as _L2a
+        axA.legend(handles=[_L2a([], [], ls="", marker="o", ms=6, mfc="white", mec=BLUE, mew=1.2, label="per-vessel average only"),
+                            _L2a([], [], ls="", marker="o", ms=6, mfc=BLUE, mec=BLUE, label="conservative reconstruction")],
+                   loc="upper right", frameon=False, fontsize=8, handletextpad=0.3, borderaxespad=0.1, bbox_to_anchor=(1.0, 1.02))
+        log(f"panel d: {A_['n_heldout']} held-out recordings ({A_['n_tiles']} tiles); " + "; ".join(f"{k}: ×{V_[k]['fold_error']:.3f}" for k in V_))
+    HF = 6.2; fig = plt.figure(figsize=(7.5, HF), facecolor="white")
+    yA = 4.05 / HF; hA = 1.75 / HF
+    # SI (sensitivity, not applied): heart rate over acquisition + pairwise flux / heart-rate ratios; normalisation effect
+    figS = plt.figure(figsize=(7.2, 2.7), facecolor="white"); axS1 = figS.add_axes([0.08, 0.2, 0.25, 0.72]); axS2 = figS.add_axes([0.42, 0.2, 0.25, 0.72])
+    draw_hr(axS1, axS2); axS3 = figS.add_axes([0.78, 0.2, 0.2, 0.72]); draw_norm_effect(axS3)
+    plos_style.save(figS, OUT.parent / "fig6_S_hr_scaling"); log("wrote fig6_S_hr_scaling")
+    for k_, (e_, lab_, colr_) in enumerate(((HIGH, "well aligned", BLUE), (LOW, "poorly aligned", PINK))):
+        axX = fig.add_axes([0.03 + k_ * 0.115, yA + 0.3 / HF, 0.105, hA - 0.3 / HF]); x_ = ex[e_]; draw_measurement(axX, img, x_["ki"], colr_, x_["valid"])
+        axX.set_title(lab_, fontsize=8, color=colr_, pad=2)
+        axX.text(0.5, -0.04, f"a = {x_['align']:.2f}\nc = {x_['c']:.2f}", transform=axX.transAxes, ha="center", va="top", fontsize=8, color=colr_)
+    axC2 = fig.add_axes([0.335, yA, 0.17, hA]); draw_calibration_cum(axC2)
+    axVb = fig.add_axes([0.71, yA, 0.2, hA]); draw_validation(axVb)
+    axC2.set_xlabel("Fraction of junctions\n(lowest error first)", fontsize=8.5, labelpad=2); axC2.set_ylabel("Cumulative squared\nimbalance", fontsize=8.5, labelpad=1)
+    for t_ in list(axC2.texts): t_.remove()
+    axC2.set_xticks([0, 0.5, 1]); axC2.set_xticklabels(["0", "0.5", "1"])
+    axC2.legend(handles=axC2.get_legend().legend_handles, labels=["calibrated", "constant", "alignment"], loc="upper left", frameon=False, fontsize=7, handlelength=1.5, borderaxespad=0.05)
+    figA = plt.figure(figsize=(5.0, 2.6), facecolor="white"); draw_ablation(figA.add_axes([0.15, 0.22, 0.6, 0.72]))   # SI
+    plos_style.save(figA, OUT.parent / "fig6_S_ablation"); log("wrote fig6_S_ablation")
+    T1, T2 = 6.0 / HF, 3.02 / HF
+    figW = plt.figure(figsize=(3.75, 2.6), facecolor="white"); draw_withheld_fold(figW.add_axes([0.2, 0.2, 0.75, 0.72]))           # SI
+    plos_style.save(figW, OUT.parent / "fig6_S_withholding"); log("wrote fig6_S_withholding")
     figDir = plt.figure(figsize=(3.6, 2.6), facecolor="white"); draw_withheld_dir(figDir.add_axes([0.2, 0.2, 0.75, 0.72]))   # SI
     plos_style.save(figDir, OUT.parent / "fig6_S_direction"); log("wrote fig6_S_direction")
     # c: worked example — the nine-vessel patch at the tile 22/26/27 overlap: every recording (tile colour), the 1/c²-weighted
@@ -1002,7 +1118,7 @@ def main():
     plos_style.save(figJ, OUT.parent / "fig6_S_junction"); log("wrote fig6_S_junction (example same-tile junction)")
     log(f"caption: junction in {sum(yin_):.3f} ({' + '.join(f'{v_:.3f}' for v_ in yin_)}), out {sum(yout_):.3f}, |r_j| {abs(rj):.3f} ({100 * abs(rj) / qin_:.0f} %)")
     log(f"panel a formula (caption): c = {c0f:.2f} + {cff:.2f}(1 − {pterm}) + {caf:.2f}(1 − a) = {cx:.2f}; p = {np.mean(r2x):.3f} (stored {mx.get('p', float('nan')):.3f})")
-    for x_, y_, l_ in ((0.0, T1, "a"), (0.51, T1, "b"), (0.0, T2, "c")):  # panel letters only; the caption names the results
+    for x_, y_, l_ in ((0.0, T1, "a"), (0.6, T1, "b"), (0.0, T2, "c")):  # panel letters only
         fig.text(x_, y_ - 0.004, l_, **LET)
     plos_style.save(fig, OUT)
     figD = plt.figure(figsize=(3.6, 3.2), facecolor="white"); draw_obs_pred(figD.add_axes([0.2, 0.17, 0.75, 0.75]))   # SI: diagonal calibration
