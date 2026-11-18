@@ -1,6 +1,6 @@
 # Mean flow (DC): conservative reconciliation and passive-geometry comparison
 
-*Final method, frozen 2026-11-12.  Numbers are 21S production (`results/dc_reconciled_v2.pkl`).*
+*Method frozen 2026-11-12; uncertainty model switched to CV 2026-11-18.  Numbers are 21S production (`results/dc_reconciled_v2.pkl`); some later sections still quote the earlier (alignment / parabolicity) run — see [status_2026-11.md](status_2026-11.md) for current values.*
 
 ## Measured flux per vessel
 Each vessel segment $e$ is imaged by one or more tiles $\alpha$, each giving a flux time series
@@ -12,17 +12,20 @@ flux fit (depth averaging and optical-flow smoothing widen it), not vessel geome
 fewer than two direction-consistent sections (until 2026-11-11 these fell back to averaging all sections regardless of sign;
 104 21S recordings, most grossly off their repeats).
 
-**Fractional discrepancy.**  Each measurement gets a calibrated fractional-discrepancy scale
-$$c_{e,\alpha}=c_0+c_p\,(1-p_{e,\alpha})+c_a\,(1-a_{e,\alpha}),$$
-where $p$ is the parabolicity — the mean over all cross-sections of the parabolic fit's $R^2$ clipped to $[0,1]$
-(sections without a fit count 0; since 2026-11-10, replacing the kept fraction $f$: the two rank recordings almost
-identically, Spearman 0.95–0.97, but $p$ predicts held-out junction imbalance better, tile-CV $\Delta$NLL −22 / −24 in
-21S / 27S, and $f$ adds nothing once $p$ is in; $p$ does not penalise slow vessels beyond $f$) — and $a$ is the speed-weighted $|\cos\theta|$ between the time-mean optical-flow vector and the centreline
-tangent within $\pm R$ (does the flow run along the traced vessel?).  The parameters are fitted by maximum
-likelihood on same-tile junction balance — at every junction whose incident segments were all measured in the
-same tile, the net flux $\sum_e s_e Q_e \sim \mathcal N(0, \sum_e Q_e^2 c_e^2 + \sigma_0^2)$ — giving
-21S $c_0 \approx 0.054$, $c_p \approx 0.42$, $c_a \approx 1.45$ (4,411 junctions; one $c_0$ for all tiles — per-tile terms did not improve
-held-out coverage, `scripts/dc_reconcile.py --tile-terms` reproduces the older model).  $c$ is the modelled
+**Fractional discrepancy (CV model, since 2026-11-18).**  Each measurement gets a calibrated fractional-discrepancy scale
+from the noise of its own flux trace,
+$$c_{e,\alpha}=c_0+c_{cv}\,\mathrm{CV}_{e,\alpha},\qquad
+\mathrm{CV}_{e,\alpha}=\frac{\mathrm{SD}\big[f_{e,\alpha}(t)-\text{mean}-\text{3 cardiac harmonics}\big]}{|\overline{f_{e,\alpha}}|},$$
+i.e. the unexplained temporal variability of the recording relative to its mean (`reconcile.reliability.temporal_cv`;
+harmonics by least squares at the tile heart rate).  The parameters are fitted by maximum likelihood on same-tile
+junction balance — at every junction whose incident segments were all measured in the same tile, the net flux
+$\sum_e s_e Q_e \sim \mathcal N(0, \sum_e Q_e^2 c_e^2 + \sigma_0^2)$ — giving 21S $c_0 = 0.29$, $c_{cv} = 0.154$ (4,562 junctions).
+CV can include genuine physiological fluctuation, so it is an empirical reliability proxy, not a standard error.
+Earlier image-based models — $c=c_0+c_p(1-p)+c_a(1-a)$ with parabolicity $p$ and directional alignment $a$ (until
+2026-11-17), and alignment only (2026-11-18) — reconstruct equally well (held-out recording error ×1.79 vs ×1.78 for CV) and
+are kept as sensitivity analyses (`PROFILE_TERM` "p" / "none").  Weightings fixed from the measured value (σ = c|Q̄|,
+repeat-recording SD, uniform) bias the field low and predict worse; the comparison is `scripts/dc_uncertainty_models.py`
+and [status_2026-11.md](status_2026-11.md) §3.  $c$ is the modelled
 fractional standard deviation of the measurement discrepancy ($\sigma_\epsilon \approx c\,|q|$, ignoring $\sigma_0$): $c = 0.3$
 means an error SD of about 30 % of the flux under the working model — not a bound or a confidence interval.  What the
 calibration establishes is that $c$ predicts the combined discrepancy at simultaneously imaged junctions, including on held-out

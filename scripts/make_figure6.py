@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 import matplotlib.colors as mcolors, matplotlib.cm as cm, matplotlib.patheffects, matplotlib.transforms
 import plexusflow.paths as P
-from plexusflow.reconcile.reliability import profile_coef, measurement_table, same_tile_junctions, c_of
+from plexusflow.reconcile.reliability import profile_coef, measurement_table, same_tile_junctions, c_of, FS_HZ
 from plexusflow.analyze.kloosterman import kloosterman_scalar, PRODUCTION_KW
 from plexusflow.analyze.centerline import _centerline_geometry
 from plexusflow.analyze.geometry import load_tile_geometry, graph_to_tile_batch
@@ -188,7 +188,7 @@ def main():
         res = kloosterman_scalar(np.asarray(ki["vfield_mean"], float), np.asarray(ki["cl_used"], float), float(ki["R_prior_px"]),
                                  mask=ki.get("ridge_mask_roi"), **KW)
         valid = np.asarray(res["valid_mask"], bool); m = M[(TILE, e)]
-        ex[e] = dict(ki=ki, valid=valid, f=m[profile_coef(mod)[0]], align=m["align"], c=c_of(mod, m))
+        ex[e] = dict(ki=ki, valid=valid, f=m[profile_coef(mod)[0]], align=m["align"], c=c_of(mod, m), cv=m.get("cv", np.nan))
         log(f"  {e}: kept {valid.sum()}/{len(valid)} (stored f {m['f']:.3f}), align {m['align']:.2f}, c {ex[e]['c']:.2f}")
 
     # ---------------------------------------------------------------- layout (7.5 in wide, PLOS max)
@@ -866,7 +866,7 @@ def main():
             axV.plot(*zip(*pts), color="0.6", lw=0.8, zorder=2)
         WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); ry = np.exp(WH["repeat"]["err"])
         axV.axhline(ry, color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1); axV.text(1.45, ry, "repeat\nrecordings", fontsize=7, color=MUTED, va="center", ha="left")
-        axV.set_xticks([0, 1]); axV.set_xticklabels(["constant\nuncertainty", "alignment-\ndependent"], fontsize=8); axV.set_xlim(-0.5, 1.4)
+        axV.set_xticks([0, 1]); axV.set_xticklabels(["constant\nuncertainty", "CV-\ndependent"], fontsize=8); axV.set_xlim(-0.5, 1.4)
         axV.set_ylabel("Median fold error,\nheld-out recordings", fontsize=9, labelpad=2); axV.tick_params(labelsize=8); axV.spines[["top", "right"]].set_visible(False)
         from matplotlib.lines import Line2D as _L2v
         axV.legend(handles=[_L2v([], [], ls="", marker="o", ms=5.5, mfc="white", mec=BLUE, mew=1.2, label="per-vessel average"),
@@ -877,7 +877,7 @@ def main():
     def draw_ablation(axA):
         A_ = json.loads((P.RESULTS / "dc_ablation.json").read_text()); V_ = {(v["hr"], v["weighting"], v["reconstruction"]): v for v in A_["variants"]}
         groups = [(False, "constant"), (True, "constant"), (False, "alignment"), (True, "alignment")]
-        labs = ["constant\nraw", "constant\nHR-norm.", "alignment\nraw", "alignment\nHR-norm."]
+        labs = ["constant\nraw", "constant\nHR-norm.", "CV\nraw", "CV\nHR-norm."]
         for g_, (hr, wl) in enumerate(groups):
             pts = []
             for dx, rec, mk, fc in ((-0.13, "average", "o", "white"), (0.13, "conservation", "o", BLUE)):
@@ -900,16 +900,48 @@ def main():
     figS = plt.figure(figsize=(7.2, 2.7), facecolor="white"); axS1 = figS.add_axes([0.08, 0.2, 0.25, 0.72]); axS2 = figS.add_axes([0.42, 0.2, 0.25, 0.72])
     draw_hr(axS1, axS2); axS3 = figS.add_axes([0.78, 0.2, 0.2, 0.72]); draw_norm_effect(axS3)
     plos_style.save(figS, OUT.parent / "fig6_S_hr_scaling"); log("wrote fig6_S_hr_scaling")
-    for k_, (e_, lab_, colr_) in enumerate(((HIGH, "well aligned", BLUE), (LOW, "poorly aligned", PINK))):
-        axX = fig.add_axes([0.03 + k_ * 0.115, yA + 0.3 / HF, 0.105, hA - 0.3 / HF]); x_ = ex[e_]; draw_measurement(axX, img, x_["ki"], colr_, x_["valid"])
-        axX.set_title(lab_, fontsize=8, color=colr_, pad=2)
-        axX.text(0.5, -0.04, f"a = {x_['align']:.2f}\nc = {x_['c']:.2f}", transform=axX.transAxes, ha="center", va="top", fontsize=8, color=colr_)
+    # a (left): two real recordings' flux traces Q(t)/mean — a clean and a noisy one (CV near the 10th / 90th percentile of
+    #    recordings with 0.15 < |Q| < 0.6 nL/s on the reconstruction network); grey = per-frame flux, colour = mean + 3 cardiac harmonics
+    _mg = {(int(m_["tile_id"]), (u_, v_)): m_ for u_, v_, d_ in G.edges(data=True) for m_ in (d_.get("measurements_piv") or [])}
+    _cand = sorted([(r_["cv"], k_) for k_, r_ in M.items() if 0.15 < abs(r_["Q"]) < 0.6 and k_[1] in eidx and k_ in _mg
+                    and _mg[k_].get("Q_t") is not None and (_mg[k_].get("harm") or {}).get("f0_hz")])
+    _cvs = np.array([c_ for c_, _ in _cand])
+    def _spiky(key):                                                        # one glitch dominating the residual → not representative
+        mg = _mg[key]; q = np.asarray(mg["Q_t"], float); t = np.arange(len(q)) / FS_HZ; w = 2 * np.pi * mg["harm"]["f0_hz"]
+        X = np.column_stack([np.ones(len(q))] + [g(k * w * t) for k in (1, 2, 3) for g in (np.cos, np.sin)]); r = q - X @ np.linalg.lstsq(X, q, rcond=None)[0]
+        return np.max(np.abs(r)) > 4.5 * np.std(r)
+    TRACE = []
+    for q_ in (0.1, 0.9):
+        for j_ in np.argsort(np.abs(_cvs - np.quantile(_cvs, q_))):
+            if not _spiky(_cand[j_][1]):
+                TRACE.append(_cand[j_][1]); break
+    def draw_trace(ax, key, colr, lab):
+        mg = _mg[key]; q = np.asarray(mg["Q_t"], float); f0 = mg["harm"]["f0_hz"]; t = np.arange(len(q)) / FS_HZ; w = 2 * np.pi * f0
+        X = np.column_stack([np.ones(len(q))] + [g(k * w * t) for k in (1, 2, 3) for g in (np.cos, np.sin)]); b = np.linalg.lstsq(X, q, rcond=None)[0]
+        mu = b[0]; sh = t <= 3.0 / f0                                                  # three beats
+        ax.plot(t[sh], q[sh] / mu, color="0.65", lw=0.6, zorder=2)
+        ax.plot(t[sh], (X @ b)[sh] / mu, color=colr, lw=1.4, zorder=3)
+        ax.axhline(1, color=INK, lw=0.6, ls=(0, (3, 2)), zorder=1); ax.axhline(0, color="0.85", lw=0.5, zorder=0)
+        r_ = M[key]; ax.text(0.99, 0.97, f"CV = {r_['cv']:.2f}   c = {c_of(mod, r_):.2f}", transform=ax.transAxes, ha="right", va="top", fontsize=7.5, color=colr,
+                             bbox=dict(fc="white", ec="none", pad=0.5, alpha=0.8))
+        ax.set_ylim(-0.6, 2.6); ax.set_yticks([0, 1, 2])
+        ax.set_title(lab, fontsize=8, color=colr, pad=2, loc="left"); ax.tick_params(labelsize=7); ax.spines[["top", "right"]].set_visible(False)
+        log(f"panel a trace {lab}: tile {key[0]} {key[1]} |Q| {abs(r_['Q']):.3f} CV {r_['cv']:.2f} c {c_of(mod, r_):.2f}")
+    _ha = (hA - 0.3 / HF) / 2
+    for k_, (key_, lab_, colr_) in enumerate(((TRACE[0], "clean recording", BLUE), (TRACE[1], "noisy recording", PINK))):
+        axX = fig.add_axes([0.06, yA + 0.42 / HF + (1 - k_) * (_ha + 0.12 / HF), 0.2, _ha - 0.06 / HF]); draw_trace(axX, key_, colr_, lab_)
+        if k_ == 1:
+            axX.set_xlabel("time (s)", fontsize=8, labelpad=1)
+        else:
+            axX.set_xticklabels([])
+    fig.text(0.012, yA + 0.42 / HF + _ha, "flux / mean", rotation=90, fontsize=8, ha="center", va="center")
+    fig.text(0.16, yA - 0.1 / HF, f"$c = {mod['c0']:.2f} + {mod.get('c_cv', 0):.2f}\\,\\mathrm{{CV}}$", fontsize=8.5, ha="center", va="center")
     axC2 = fig.add_axes([0.335, yA, 0.17, hA]); draw_calibration_cum(axC2)
     axVb = fig.add_axes([0.71, yA, 0.2, hA]); draw_validation(axVb)
     axC2.set_xlabel("Fraction of junctions\n(lowest error first)", fontsize=8.5, labelpad=2); axC2.set_ylabel("Cumulative squared\nimbalance", fontsize=8.5, labelpad=1)
     for t_ in list(axC2.texts): t_.remove()
     axC2.set_xticks([0, 0.5, 1]); axC2.set_xticklabels(["0", "0.5", "1"])
-    axC2.legend(handles=axC2.get_legend().legend_handles, labels=["calibrated", "constant", "alignment"], loc="upper left", frameon=False, fontsize=7, handlelength=1.5, borderaxespad=0.05)
+    axC2.legend(handles=axC2.get_legend().legend_handles, labels=["ideal", "constant", "CV-dependent"], loc="upper left", frameon=False, fontsize=7, handlelength=1.5, borderaxespad=0.05)
     figA = plt.figure(figsize=(5.0, 2.6), facecolor="white"); draw_ablation(figA.add_axes([0.15, 0.22, 0.6, 0.72]))   # SI
     plos_style.save(figA, OUT.parent / "fig6_S_ablation"); log("wrote fig6_S_ablation")
     T1, T2 = 6.0 / HF, 3.02 / HF
@@ -1251,9 +1283,10 @@ def main():
         ax = fs2.add_subplot(ga[k]); x = ex[e]; draw_measurement(ax, img, x["ki"], colr, x["valid"]); axA.append(ax)
         ax.set_title(lab, fontsize=8.5, color=colr, pad=2)
         ax.text(0.5, -0.04, f"c = {x['c']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=9, color=colr, fontweight="bold")
-        ax.text(0.5, -0.19, f"{profile_coef(mod)[0]} {x['f']:.2f}, align {x['align']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=8)
+        ax.text(0.5, -0.19, (f"CV {x['cv']:.2f}" if profile_coef(mod)[0] == "cv" else f"{profile_coef(mod)[0]} {x['f']:.2f}, align {x['align']:.2f}"), transform=ax.transAxes, ha="center", va="top", fontsize=8)
     pa0, pa1 = axA[0].get_position(), axA[1].get_position()
-    fs2.text((pa0.x0 + pa1.x1) / 2, 0.04, (r"$c = %.2f + %.2f\,(1 - " + profile_coef(mod)[0] + r") + %.2f\,(1 - \mathrm{align})$") % (c0_, profile_coef(mod)[1], mod["c_a"]), ha="center", fontsize=8.5)
+    fs2.text((pa0.x0 + pa1.x1) / 2, 0.04, ((r"$c = %.2f + %.2f\,\mathrm{CV}$" % (c0_, profile_coef(mod)[1])) if profile_coef(mod)[0] == "cv" else
+              (r"$c = %.2f + %.2f\,(1 - " + profile_coef(mod)[0] + r") + %.2f\,(1 - \mathrm{align})$") % (c0_, profile_coef(mod)[1], mod["c_a"])), ha="center", fontsize=8.5)
     axc = fs2.add_subplot(g2[1]); R_ = cal["rows"]; lo_, hi_ = R_[:, 0].min() / 1.6, R_[:, 0].max() * 1.6
     axc.plot([lo_, hi_], [lo_, hi_], color=GREY, lw=0.8, ls=(0, (3, 2)))
     axc.errorbar(R_[:, 0], R_[:, 1], yerr=[R_[:, 1] - R_[:, 2], R_[:, 3] - R_[:, 1]], fmt="o", ms=4, color=BLUE, mec="white", mew=0.5, ecolor=BLUE, capsize=0)
