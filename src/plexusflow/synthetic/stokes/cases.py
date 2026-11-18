@@ -116,12 +116,16 @@ def vessel_case(bundle, name, speeds, seed, nf=400, f0=2.9, tracer=TRACERS_VESSE
                 u = run_measurement(vid, cl, Rseg, f0, seg)
                 q = float(u.get("Q_kloosterman", np.nan)); fq = float(u.get("Q_kloosterman_valid_frac", 0.0)) if np.isfinite(q) else 0.0
                 rk = float(u.get("R_kloosterman", np.nan))
+                _psq = np.asarray(u.get("Q_kloosterman_per_slice", []), float); _psr = np.asarray(u.get("R_kloosterman_per_slice", []), float)
+                _ok = np.isfinite(_psq) & np.isfinite(_psr[:len(_psq)]) if len(_psr) >= len(_psq) else np.zeros(0, bool)
+                extra = dict(V_CL=float(u.get("V_CL_kloosterman", np.nan)), R_med=float(np.median(_psr[:len(_psq)][_ok])) if _ok.any() else np.nan,
+                             U_true=qt / (np.pi * a_m * (eps * a_m) / 2), R_seg=Rseg)
                 from ...analyze.mosaic_piv import _flow_quality
                 fl = _flow_quality(u.get("vfield_mean"), u.get("cl_used"), float(u.get("R_used", Rseg)))
                 fl["dip"] = central_dip(u.get("vfield_mean"), u.get("cl_used"), float(u.get("R_used", Rseg)))
             except Exception:
-                q, fq, rk, fl = np.nan, 0.0, np.nan, dict(align=np.nan)
-            out.append(dict(base, Q_kl=q, ratio=abs(q) / qt if np.isfinite(q) else np.nan, f=fq, R_kl_over_a=rk / a_m,
+                q, fq, rk, fl = np.nan, 0.0, np.nan, dict(align=np.nan); extra = {}
+            out.append(dict(base, **extra, Q_kl=q, ratio=abs(q) / qt if np.isfinite(q) else np.nan, f=fq, R_kl_over_a=rk / a_m,
                             align=fl.get("align", np.nan), dip=fl.get("dip", np.nan)))
             continue
         for dt in dts:

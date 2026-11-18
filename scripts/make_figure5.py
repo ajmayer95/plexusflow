@@ -49,7 +49,7 @@ def main():
             ax.add_collection(LineCollection(exc, colors=EXC, linewidths=1.8, alpha=0.95, zorder=3))
         if show_A:
             nL, nR = int(np.sum(side == "L")), int(np.sum(side == "R"))
-            for s_, lab, dx in (("L", r"$A_{\mathrm{L}}$", -1), ("R", r"$A_{\mathrm{R}}$", 1)):   # 21 / 14 individual cut nodes: caption
+            for s_, lab, dx in (("L", r"$A_{\mathrm{L}}$", -1), ("R", r"$A_{\mathrm{R}}$", 1)):   # individual cut nodes (21S, 11-17: 20 L / 13 R): caption
                 P_ = np.array([xy(n) for n, s in zip(inj, side) if s == s_])
                 ax.scatter(*P_.T, s=18, color=ART, edgecolor="white", linewidth=0.5, zorder=5)
                 ax.text(P_[:, 0].max() + 40 if dx < 0 else P_[:, 0].min() - 40, P_[:, 1].mean(), lab, ha="left" if dx < 0 else "right", va="center",
@@ -65,7 +65,14 @@ def main():
         L = sb_um / PX_UM; xe = ctr[0] + 0.92 * half; ya = ctr[1] + 0.88 * half
         ax.plot([xe - L, xe], [ya, ya], color="white", lw=2, solid_capstyle="butt", path_effects=[pe.withStroke(linewidth=3.2, foreground="black")])
         ax.text(xe, ya - 0.04 * half, f"{sb_um:g} µm", color="white", ha="right", va="bottom", fontsize=8, path_effects=[pe.withStroke(linewidth=1.6, foreground="black")])
-    da_stubs = [seg(e) for n in dom["DA"] for e in G.edges(n) if e not in keep and e[::-1] not in keep]
+    def smooth_line(P_, sigma_px=12.0):
+        """Display-only smoothing of a skeleton polyline: resample at 1 px along the arc, Gaussian-smooth, keep both ends."""
+        P_ = np.asarray(P_, float); d_ = np.r_[0, np.cumsum(np.hypot(*np.diff(P_, axis=0).T))]
+        if len(P_) < 3 or d_[-1] < 3 * sigma_px: return P_
+        t_ = np.linspace(0, d_[-1], int(d_[-1]) + 1); Q_ = np.column_stack([np.interp(t_, d_, P_[:, 0]), np.interp(t_, d_, P_[:, 1])])
+        S_ = ndi.gaussian_filter1d(Q_, sigma_px, axis=0, mode="nearest"); w_ = np.clip(np.minimum(t_, d_[-1] - t_) / (2 * sigma_px), 0, 1)[:, None]
+        return w_ * S_ + (1 - w_) * Q_                                 # blend back to the raw ends so the termini stay on their nodes
+    da_stubs = [smooth_line(seg(e)) for n in dom["DA"] for e in G.edges(n) if e not in keep and e[::-1] not in keep]
     def draw_da(ax):                                               # dorsal-aorta skeleton (excluded stubs) + termini, in arterial red
         ax.add_collection(LineCollection(da_stubs, colors=ART, linewidths=1.0, alpha=0.95, zorder=4))
         for n, lab, dx in zip(dom["DA"], (r"A$_{\mathrm{DA},1}$", r"A$_{\mathrm{DA},2}$"), (-1, 1)):

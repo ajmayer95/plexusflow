@@ -33,6 +33,7 @@ if [[ $VALIDATE == 1 ]]; then
   run scripts/dc_validate_weighting.py      # leave-one-recording-out validation       → dc_weighting_validation.json
   run scripts/dc_junction_calibration.py    # calibration on held-out tiles            → dc_junction_calibration.json
   run scripts/dc_withholding_curve.py       # whole-vessel withholding, 5–75 %         → dc_withholding.json
+  run scripts/dc_ablation.py                # paired ablation: weighting × conservation × HR normalisation → dc_ablation.json
 fi
 if [[ $AC == 1 ]]; then
   run scripts/ac_field.py                   # tile-synchronised harmonic field         → ac_field_v7.pkl

@@ -334,7 +334,7 @@ class EditMixin:
         c = counts(self.G)
         dirty = " (unsaved)" if self._radial_tags_dirty else ""
         self._radial_status_lbl.setText(
-            f"Tagged: {c['topology']} topology-uncertain, {c['open']} open-boundary{dirty}")
+            f"Tagged: {c['topology']} topology-uncertain, {c['open']} open arterial, {c['venous']} open venous{dirty}")
 
 
     def _on_click_to_tag_toggle(self, checked: bool):
@@ -546,7 +546,7 @@ class EditMixin:
             self._radial_tags_dirty = False
             self._refresh_radial_status()
             from ..reconcile.regions import counts
-            _c = counts(self.G); n = f"{_c['topology']} topology-uncertain + {_c['open']} open-boundary"
+            _c = counts(self.G); n = f"{_c['topology']} topology-uncertain + {_c['open']} open arterial + {_c['venous']} open venous"
             QMessageBox.information(
                 self.viewer.window._qt_window,
                 "Region tags saved",

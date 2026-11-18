@@ -53,3 +53,71 @@ def test_contradictory_sections_give_no_flux():
     r = kloosterman_scalar(flow, cl, R, **PRODUCTION_KW)
     assert r["reason"] == "too_few_consistent_slices" and np.isnan(r["Q_char"]) and r["Q_char_valid_frac"] == 0.0
     assert "ok" not in list(r["per_slice_reason"])
+
+
+def _straight_tube_with_side_branch(a=6, H=120, W=200):
+    """Horizontal tube of half-width a (rows 60 ± a) with a wide perpendicular branch at columns 95–125; path along row 60."""
+    m = np.zeros((H, W), bool); m[60 - a:60 + a + 1, 10:190] = True; m[:60, 95:126] = True
+    path = np.column_stack([np.arange(20, 181, 10, dtype=float), np.full(17, H - 60.0)])
+    return m, path
+
+
+def test_tube_interior_profile_excludes_junction_and_recovers_half_width():
+    from plexusflow.reconcile.radius import tube_interior_profile
+    m, path = _straight_tube_with_side_branch()
+    a, wl = tube_interior_profile(m, path)
+    cols = np.linspace(20, 180, len(a))
+    in_branch = (cols > 97) & (cols < 123)
+    assert not wl[in_branch].any()                               # the normal runs up the branch: not a tube section
+    assert wl[~in_branch].mean() > 0.9
+    assert abs(np.median(a[wl]) - 6.5) < 0.6                    # half-width to the first background pixel (6 px + ½ step)
+
+
+def test_tube_radii_resistance_compliance_and_fallback():
+    import networkx as nx
+    from plexusflow.reconcile.radius import tube_radii
+    m, path = _straight_tube_with_side_branch()
+    m[60 - 9:60 + 10, 150:181] = True                            # a wider stretch: a_C > median
+    G = nx.Graph(); G.add_edge(0, 1, path=path, radius=9.0); G.add_edge(2, 3, path=path[:1], radius=4.0)
+    T = tube_radii(G, [(0, 1), (2, 3)], m)
+    assert T["profiled"].tolist() == [True, False]
+    assert T["compliance"][0] > T["resistance"][0] and abs(T["resistance"][0] - 6.5) < 0.6
+    assert T["resistance"][1] == T["compliance"][1] == 4.0      # unprofiled: stored radius for both
+
+
+def test_kloosterman_operator_time_mean_equals_q_char():
+    """Per-frame flux from the frozen time-mean fit: its time mean equals Q_char of the time-mean field (linear operator)."""
+    from plexusflow.analyze.kloosterman import kloosterman_operator
+    rng = np.random.default_rng(0)
+    H, W, R = 60, 160, 6.0
+    yy, xx = np.mgrid[:H, :W].astype(float); rho = yy - 30
+    shape = np.where(np.abs(rho) <= R, 1 - (rho / R) ** 2, 0.0)
+    T = 40; s = 1 + 0.5 * np.sin(2 * np.pi * np.arange(T) / 13)
+    frames = np.zeros((T, H, W, 2))
+    frames[..., 0] = s[:, None, None] * shape[None] + 0.05 * rng.standard_normal((T, H, W))
+    frames[..., 1] = 0.05 * rng.standard_normal((T, H, W))
+    mean = frames.mean(axis=0)
+    cl = np.column_stack([np.full(120, 30.0), np.arange(20, 140, dtype=float)])
+    r = kloosterman_scalar(mean, cl, R, **PRODUCTION_KW)
+    assert np.isfinite(r["Q_char"])
+    w = kloosterman_operator(r, cl, mean.shape, slice_window=PRODUCTION_KW["slice_window"])
+    q_t = np.array([(w @ f.ravel())[0] for f in frames])
+    assert abs(q_t.mean() - r["Q_char"]) < 1e-9 * abs(r["Q_char"])
+    assert abs(np.corrcoef(q_t, s)[0, 1]) > 0.99                    # follows the waveform
+
+
+def test_motion_stats_regimes_and_scale_invariance():
+    from plexusflow.analyze.motion import motion_stats, regime
+    rng = np.random.default_rng(1); fs, f0, T = 250.0, 2.5, 2000
+    t = np.arange(T) / fs; noise = 0.05 * rng.standard_normal(T)
+    cases = {"steady": 1.0 + noise, "pulsatile": 1.0 + 0.4 * np.sin(2 * np.pi * f0 * t) + noise,
+             "oscillatory": 0.4 * np.sin(2 * np.pi * f0 * t) + noise, "unresolved": noise}
+    expect = {"steady": "steady", "pulsatile": "directed+cardiac", "oscillatory": "oscillatory", "unresolved": "unresolved"}
+    for k, v in cases.items():
+        ms = motion_stats(v, f0, fs)
+        assert regime(ms) == expect[k], (k, ms)
+        ms2 = motion_stats(-7.3 * v, f0, fs)                      # calibration / sign invariant
+        assert abs(ms2["z_dc"] - ms["z_dc"]) < 1e-6 * max(ms["z_dc"], 1) and abs(ms2["eta_osc"] - ms["eta_osc"]) < 1e-9
+    assert motion_stats(cases["oscillatory"], f0, fs)["eta_osc"] > 0.95 and motion_stats(cases["oscillatory"], f0, fs)["reversal"]
+    assert motion_stats(cases["pulsatile"], f0, fs)["reversal"] is False
+    assert abs(motion_stats(cases["pulsatile"], f0, fs)["eta_osc"] - 0.08 / 1.08) < 0.01

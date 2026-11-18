@@ -244,6 +244,16 @@ PROPERTY_DEFS = [
 PROPERTY_DEFS += [
     ('rec_dc_sd',     'DC uncertainty (ensemble SD / |Q\u2032|)', False, {('reconciled', 'Q')}),
     ('rec_gauge_sd',  'Tile time-gauge SD (deg)', False, {('reconciled', 'Q')}),
+    # The DC reconciliation's INPUT per vessel: recording-averaged Q̄ (what enters the projection), its fractional
+    # uncertainty c, and how far the reconciliation moved it (log10 |Q′|/|Q̄|; sign flips shown as ±1).
+    ('rec_input',         'Reconciliation input |Q̄| (nL/s)', False, {('reconciled', 'Q')}),
+    ('rec_input_signed',  'Reconciliation input Q̄ signed (edge orientation)', False, {('reconciled', 'Q')}),
+    ('rec_input_c',       'Reconciliation input c (σ = c|Q|)', False, {('reconciled', 'Q')}),
+    # Same reconciliation with the left share of arterial inflow forced to 50 % (computed on first use, cached).
+    ('rec_sym',           'Q\u2032 forced 50 % left |Q| (nL/s)', False, {('reconciled', 'Q')}),
+    ('rec_sym_signed',    'Q\u2032 forced 50 % left, signed (edge orientation)', False, {('reconciled', 'Q')}),
+    ('rec_symdiff_signed','\u0394|Q\u2032| forced 50 % \u2212 free (nL/s)', False, {('reconciled', 'Q')}),
+    ('rec_adjust_signed', 'Adjustment log10 |Q′|/|Q̄| (flip = ±1)', False, {('reconciled', 'Q')}),
 ]
 
 HARMONIC_KEYS = ['DC', 'H1', 'H2', 'H3']

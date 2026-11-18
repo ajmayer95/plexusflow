@@ -14,50 +14,61 @@ EPS_UNIMAGED = 1e-6     # relative weight of unmeasured edges in the projection
 def carved_domain(G, topology=True):
     """Carved network the reconstruction runs on (region classes: ``reconcile.regions``).
 
-    Open regions (``open_region`` / legacy ``radial_uncertain``) and the DA anchor stubs are removed; the nodes where the
-    remaining network meets them are boundary nodes whose exchange counts as inflow (``inj``, labelled L/R by x relative
-    to the mean DA-anchor x).  V anchors are the outflow boundary (``out``).
+    Arterial open regions (``open_region`` / legacy ``radial_uncertain``) and the DA anchor stubs are removed; the nodes
+    where the remaining network meets them are boundary nodes whose exchange counts as inflow (``inj``, labelled L/R by x
+    relative to the mean DA-anchor x).  Venous open regions (``venous_open``) are removed the same way, but their
+    interface nodes are outflow boundaries (``out``, listed in ``out_from_venous``) alongside the V anchors.  A node on
+    both kinds of interface stays inflow.
 
     Topology-uncertain regions (``topology_uncertain``; ignored when ``topology=False``) are also removed, but each
     connected region is a mass-conserving black box: its cut nodes are free boundary nodes (``topo_cut``; how flow is
     distributed around the region is unknown), and one extra conservation row per region (the sum of its cut-node rows,
     appended below the ``n_real`` node rows of B) forces its net exchange to zero.  A region touching an open region or
-    an anchor is 'leaky': it is fed through the open region, so it has no conservation row and its cut nodes join the
-    inflow boundary (``inj``, listed in ``inj_from_topology``) — accounted exactly as if the region were tagged open.  Without topology tags the domain is
+    an anchor is 'leaky': it exchanges through that region, so it has no conservation row and its cut nodes join the
+    inflow boundary (``inj``, listed in ``inj_from_topology``) — accounted exactly as if the region were tagged open —
+    or, if it touches only venous regions / V anchors, the outflow boundary (``out``, listed in ``out_from_topology``).  Without topology tags the domain is
     identical to the open-region-only carve."""
     from .carve import find_porous_and_outlets
-    from .regions import is_open, is_topology
+    from .regions import is_open, is_topology, is_venous
     _, _, _, A_anch, V_anch, _ = find_porous_and_outlets(G)
     edges = list(G.edges())
     topo = np.array([bool(topology and is_topology(G.edges[e])) for e in edges])
     opn = np.array([is_open(G.edges[e]) or e[0] in A_anch or e[1] in A_anch for e in edges]) & ~topo
-    carved = ~(opn | topo)
+    ven = np.array([is_venous(G.edges[e]) for e in edges]) & ~topo & ~opn
+    carved = ~(opn | topo | ven)
     touched = {n for e, k in zip(edges, opn) if k for n in e}
+    touched_v = {n for e, k in zip(edges, ven) if k for n in e}
     cnodes = {n for e, k in zip(edges, carved) if k for n in e}
     carve_bnd = sorted(n for n in cnodes if n in touched and n not in V_anch)
+    ven_bnd = sorted(n for n in cnodes if n in touched_v and n not in touched and n not in V_anch)
+    out_nodes = [n for n in sorted(V_anch) if n in cnodes] + ven_bnd
     sub = [e for e, k in zip(edges, carved) if k]
     nodes = sorted({n for e in sub for n in e}); ix = {n: i for i, n in enumerate(nodes)}; m_ = len(sub)
     B = sp.csr_matrix((np.r_[np.ones(m_), -np.ones(m_)], (np.r_[[ix[u] for u, v in sub], [ix[v] for u, v in sub]],
                                                        np.r_[np.arange(m_), np.arange(m_)])), shape=(len(nodes), m_))
     mid = float(np.mean([G.nodes[n]["x"] for n in A_anch]))
-    inj = np.array([ix[n] for n in carve_bnd]); out = np.array([ix[n] for n in sorted(V_anch) if n in ix])
-    side = np.array(["L" if G.nodes[n]["x"] < mid else "R" for n in carve_bnd])
-    side_out = np.array(["L" if G.nodes[n]["x"] < mid else "R" for n in sorted(V_anch) if n in ix])     # V nodes, same rule
-    dom = dict(name="carved", edges=sub, nodes=nodes, B=B, inj=inj, out=out, bnd=np.r_[inj, out], side=side, side_out=side_out,
-               V=[n for n in sorted(V_anch) if n in ix], DA=sorted(A_anch), n_real=len(nodes), topo_cut=np.array([], int), regions=[])
+    sideof = lambda ns: np.array(["L" if G.nodes[n]["x"] < mid else "R" for n in ns])
+    inj = np.array([ix[n] for n in carve_bnd], int); out = np.array([ix[n] for n in out_nodes], int)
+    dom = dict(name="carved", edges=sub, nodes=nodes, B=B, inj=inj, out=out, bnd=np.r_[inj, out], side=sideof(carve_bnd),
+               side_out=sideof(out_nodes), V=[n for n in sorted(V_anch) if n in ix], DA=sorted(A_anch), n_real=len(nodes),
+               topo_cut=np.array([], int), regions=[], out_from_venous=np.array([ix[n] for n in ven_bnd], int))
     if topo.any():
         import networkx as nx
         H = nx.Graph(); H.add_edges_from([e for e, k in zip(edges, topo) if k])
-        fixed = set(carve_bnd) | set(V_anch) | set(A_anch); rows, cut_all, leaky_cut = [], [], []
+        fixed = set(carve_bnd) | set(out_nodes) | set(V_anch) | set(A_anch); rows, cut_all, leaky_cut, drain_cut = [], [], [], []
         for comp in sorted(nx.connected_components(H), key=lambda c: -len(c)):
             cut = sorted(n for n in comp if n in cnodes and n not in fixed)
-            leaky = bool(comp & (touched | set(A_anch) | set(V_anch)))
+            art = bool(comp & (touched | set(A_anch))); vns = bool(comp & (touched_v | set(V_anch)))
+            leaky = art or vns
             vol = float(sum(np.pi * G.edges[e]["radius"] ** 2 * G.edges[e]["length"] for e in H.subgraph(comp).edges()))
-            reg = dict(n_edges=H.subgraph(comp).number_of_edges(), nodes=sorted(comp), cut=cut, leaky=leaky, row=None, volume_px3=vol)
+            reg = dict(n_edges=H.subgraph(comp).number_of_edges(), nodes=sorted(comp), cut=cut, leaky=leaky, row=None, volume_px3=vol,
+                       drains="inflow" if art else ("outflow" if vns else None))
             if cut and not leaky:
                 reg["row"] = len(nodes) + len(rows); rows.append(np.asarray(B[[ix[n] for n in cut]].sum(0)).ravel())
-            if leaky:                                  # fed through an open region: its interface exchange is inflow
+            if art:                                    # fed through an arterial open region: its interface exchange is inflow
                 leaky_cut += cut
+            elif vns:                                  # drains through a venous open region / V anchor: outflow
+                drain_cut += cut
             else:
                 cut_all += [ix[n] for n in cut]
             dom["regions"].append(reg)
@@ -68,6 +79,10 @@ def carved_domain(G, topology=True):
             dom["inj"] = inj = np.array([ix[n] for n in carve_bnd])
             dom["side"] = np.array(["L" if G.nodes[n]["x"] < mid else "R" for n in carve_bnd])
             dom["inj_from_topology"] = np.array([ix[n] for n in extra], int)
+        if drain_cut:
+            extra = sorted(set(drain_cut) - set(out_nodes)); out_nodes = out_nodes + extra
+            dom["out"] = out = np.array([ix[n] for n in out_nodes], int); dom["side_out"] = sideof(out_nodes)
+            dom["out_from_topology"] = np.array([ix[n] for n in extra], int)
         dom["topo_cut"] = np.array(sorted(set(cut_all)), int); dom["bnd"] = np.r_[inj, out, dom["topo_cut"]]
     return dom
 
@@ -170,6 +185,7 @@ def metrics(Qm, Qp, Qs, fb, dom, imaged):
     return dict(
         total_in=float(inj.sum()), inj_L=float(L), inj_R=float(Rr), LR=float(L / Rr) if Rr else np.nan,
         V=[float(x) for x in fb[dom["out"]]], n_withdraw=int(np.sum(inj < 0)),
+        out_L=float(fb[dom["out"]][np.asarray(dom["side_out"]) == "L"].sum()), out_R=float(fb[dom["out"]][np.asarray(dom["side_out"]) == "R"].sum()),
         corr_lin=float(np.corrcoef(a, b)[0, 1]), corr_log=float(np.corrcoef(np.log(a[ok]), np.log(b[ok]))[0, 1]),
         loop_share=float(np.linalg.norm(Qp - Qs) / np.linalg.norm(Qp)),
         move_p50=float(np.median(np.abs(Qp[imaged] - Qm[imaged]) / np.abs(Qm[imaged]))),

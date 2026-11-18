@@ -41,3 +41,25 @@ def test_single_c0_fit_recovers_constant():
     assert r.success
     est = np.exp(r.x[:3])
     assert abs(est[1] / cf - 1) < 0.25 and abs(est[2] / ca - 1) < 0.25 and est[0] < 0.3
+
+
+def test_hr_gain_recovers_exponent_and_normalises():
+    import numpy as np
+    from plexusflow.reconcile.gain import fit_hr_gain, apply_hr_gain
+    rng = np.random.default_rng(0); f0 = {t: f for t, f in zip(range(1, 9), np.linspace(1.5, 3.0, 8))}; beta = 2.4; M = {}
+    for k in range(300):
+        q = np.exp(rng.normal(-2, 1)); e = (k, k + 1)
+        for t in rng.choice(list(f0), 3, replace=False):
+            M[(int(t), e)] = dict(tile=int(t), Q=q * (f0[t] / 2.25) ** beta * np.exp(rng.normal(0, 0.2)), align=0.9)
+    fit = fit_hr_gain(M, f0)
+    assert abs(fit["beta"] - beta) < 0.15
+    Mc = apply_hr_gain(M, f0, fit)
+    by = {}
+    for (t, e), m in Mc.items(): by.setdefault(e, []).append(np.log(abs(m["Q"])))
+    assert np.median([np.std(v) for v in by.values()]) < 0.3            # repeats agree after correction
+
+
+def test_alignment_only_quality_model():
+    from plexusflow.reconcile.reliability import c_of
+    mod = dict(c_T={1: 0.2}, c0=0.2, profile_term="none", c_none=0.0, c_a=2.0, sigma0=1e-4)
+    assert abs(c_of(mod, dict(tile=1, align=0.9, p=0.1, none=1.0)) - 0.4) < 1e-12          # parabolicity ignored

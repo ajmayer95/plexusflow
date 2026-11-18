@@ -2,7 +2,7 @@
 
 Inputs: results/dc_reconciled_v2.pkl (scripts/dc_reconcile.py: reliability-weighted IRLS projection of the measured mean
 flows onto mass conservation on the carved network, emergent boundary fluxes f = BQ′) and the canonical graph.
-Passive model: conductance K = r⁴/ℓ (consensus radii), the emergent boundary fluxes imposed at every boundary vertex, and a
+Passive model: conductance K = r⁴/ℓ (model radii: tube-interior segmentation radius by default, results D['radius']), the emergent boundary fluxes imposed at every boundary vertex, and a
 soft equal-pressure penalty at the two vitelline-vein outlets (plexusflow.reconcile.venous_pressure_penalty, σ_P = 2 Pa;
 FIG7_SIGMA_P=inf renders the unpenalised variant).
 
@@ -11,7 +11,7 @@ FIG7_SIGMA_P=inf renders the unpenalised variant).
   b  Q_sim on the same vessels, arterial / venous boundary markers, the model's own divide
   c  local agreement log10(|Q_sim|/|Q′|) on resolved vessels (clipped ±1), direction mismatches marked
   d  measured vs predicted |Q| (log hexbin): r_log on all measured and on resolved vessels, direction agreement
-  e  radius controls: measured (consensus) vs uniform vs shuffled radii (r_log, all measured vessels)
+  e  radius controls: measured (model radius) vs uniform vs shuffled radii (r_log, all measured vessels)
 SI: fig7_S_boundary_distance, fig7_S_threshold (k = 0–3σ), fig7_S_forcing (arterial-inflow redistributions).
 Writes figures/fig7/; nothing to any graph.
 """
@@ -38,10 +38,13 @@ from plexusflow.reconcile import carved_domain, passive
 
 STAGE = _paths.STAGE
 MOSAIC_P = _paths.MOSAIC
-OUT_DIR = _paths.FIGURES / 'fig7'
+import os
+SYM = os.environ.get('FIG7_SYM', '0') == '1'   # sensitivity: reference field reconciled with equal left / right arterial inflow
+OUT_DIR = _paths.FIGURES / ('fig7_sym' if SYM else 'fig7')
 import os
 SIGMA_P = float(os.environ.get('FIG7_SIGMA_P', '2.0'))   # Pa; 'inf' = no pressure penalty (measured venous split)  #: soft equal-venous-pressure penalty (any σ_P ≲ 5 Pa gives the same split)
-SCHEME, RADIUS, N_SHUFFLE = 'irls', 'consensus', 200
+SCHEME, RADIUS, N_SHUFFLE = 'irls', 'tube', 200
+CUT_MIN = float(os.environ.get('FIG7_CUT_MIN', '0.02'))   # nL/s: arterial cuts with net inflow below this (incl. net withdrawals) are closed
 
 
 def main():
@@ -52,6 +55,23 @@ def main():
     dom = carved_domain(G)
     G.graph['boundary'] = dict(DA=dom['DA'], V=dom['V'])
     edges = dom['edges']; assert edges == D['edges']
+    if SYM:                                                   # same reconciliation + constraint Σ_L inflow = Σ_R inflow
+        import scipy.sparse as _sp
+        from plexusflow.reconcile import measurement_table, reconcile_dc
+        from plexusflow.reconcile.network import emergent
+        ds = carved_domain(G); ij, sd0 = np.asarray(ds['inj']), np.asarray(ds['side'])
+        row = np.asarray(0.5 * ds['B'][ij[sd0 == 'L']].sum(0) - 0.5 * ds['B'][ij[sd0 == 'R']].sum(0)).ravel()
+        ds['B'] = _sp.vstack([ds['B'], _sp.csr_matrix(row)]).tocsr()
+        Rs = reconcile_dc(G, D['model'], measurement_table(G, gain=D.get('gain')), dom=ds, n_starts=2, n_shuffle=0)
+        D['Qp'] = np.asarray(Rs['Qp'], float); D['fb'] = emergent(D['Qp'], dom)
+        print(f"[fig7] SYMMETRIC reference: inflow L {D['fb'][ij[sd0 == 'L']].sum():.2f} / R {D['fb'][ij[sd0 == 'R']].sum():.2f} nL/s")
+    # Close negligible arterial cuts: net withdrawals and inflows < CUT_MIN become ordinary junctions (f = 0; a degree-1 stub
+    # carries no flow, a degree-2 node is a pass-through); the veins absorb the difference (re-split below by the soft
+    # equal-pressure penalty).  Changes the passive agreement by < 0.01 (sandbox/fig7_closed_withdrawals.py).
+    fb_ = np.asarray(D['fb'], float).copy(); inj0 = np.asarray(dom['inj']); closed = inj0[fb_[inj0] < CUT_MIN]
+    print(f"[fig7] closed {len(closed)} arterial cuts with net inflow < {CUT_MIN} nL/s ({int((fb_[closed] < 0).sum())} withdrawals): "
+          f"Σ {fb_[closed].sum():+.3f} nL/s")
+    fb_[closed] = 0.0; vo = fb_[dom['out']]; fb_[dom['out']] = vo - fb_.sum() * vo / vo.sum(); D['fb'] = fb_
     idx = np.arange(len(edges)); em = np.ones(len(edges), bool)
     rec = dict(length=D['length'])
     Qp, Qs, fb, imaged, r = D['Qp'], D['Qs'], D['fb'], D['imaged'], D['radius']
@@ -92,6 +112,8 @@ def main():
     ART_S = lambda f: 4 + 60 * abs(f)                                       # marker area per nL/s of boundary inflow
     def markers(ax, sized=False):
         for i_ in dom['inj']:                               # Fig 5 convention: arterial cuts red, venous outlets blue
+            if D['fb'][i_] == 0:                            # closed cut (negligible inflow) — not a boundary in the model
+                continue
             if sized:                                       # area ∝ inflow of the reference field; hollow = net withdrawal
                 f_ = D['fb'][i_]
                 ax.scatter(*nxy[nodes[i_]], s=ART_S(f_), facecolor='#d40000' if f_ > 0 else 'white', edgecolor='#d40000' if f_ <= 0 else 'white',
@@ -162,7 +184,7 @@ def main():
         for sel, col in ((show & imaged, GREY_U), (show & ~imaged, GREY_N)):
             ax.add_collection(LineCollection([segs[c] for c in np.flatnonzero(sel)], colors=[col], linewidths=0.35, zorder=2))
     def field(ax, Q, mask_unresolved):
-        und = ~resolved if mask_unresolved else np.zeros(len(Q), bool)
+        und = (~resolved & imaged) if mask_unresolved else np.zeros(len(Q), bool)   # unmeasured vessels drawn with their Q′ (set by conservation)
         greys(ax, und)
         keep = np.flatnonzero(~und)
         ax.add_collection(LineCollection([segs[c] for c in keep], colors=[cAB(nAB(min(max(abs(Q[c]), vmin), vmax))) for c in keep],
@@ -189,7 +211,6 @@ def main():
     axA.text(0.5, 0.995, "reference Q′", transform=axA.transAxes, ha='center', va='top', fontsize=9)
     div_a = mark_divide(axA, Qp, "Q′", resolved, min_gap=400)
     axA.plot([], [], color=GREY_U[:3], lw=1.2, label='measured, |Q′| < 2σ')
-    axA.plot([], [], color=GREY_N[:3], lw=1.2, label='unmeasured')
     axA.plot([], [], 'D', ms=5, mfc='white', mec=INKC, mew=1.0, label='stagnation point')
     # middle column: the arterial cuts zoomed, each cut coloured by its inflow in Q′ (red log scale; white = net withdrawal)
     cxy_ = np.array([nxy[nodes[i_]] for i_ in np.r_[dom['inj'], dom['out']]]); pad_ = 110          # arterial cuts and venous outlets
@@ -202,6 +223,8 @@ def main():
     nCut = mcolors.LogNorm(vmin=0.01, vmax=max(fcut_.max(), 1.0))
     cCut = mcolors.LinearSegmentedColormap.from_list('rt', plt.get_cmap('Reds')(np.linspace(0.25, 1.0, 256)))
     for i_, f_ in zip(dom['inj'], fcut_):
+        if f_ == 0:                                                          # closed cut
+            continue
         if f_ > 0:
             axIn.scatter(*nxy[nodes[i_]], s=30, color=cCut(nCut(max(f_, 0.01))), edgecolor='black', linewidths=0.5, zorder=7)
         else:
@@ -220,7 +243,7 @@ def main():
     cbCut = axIn.inset_axes([0.05, -0.1, 0.9, 0.035])
     cb_ = plt.colorbar(plt.cm.ScalarMappable(norm=nCut, cmap=cCut), cax=cbCut, orientation='horizontal', ticks=[0.01, 0.1, 1.0])
     cb_.ax.set_xticklabels(['0.01', '0.1', '1']); cb_.ax.minorticks_off(); cb_.ax.tick_params(labelsize=8, length=2, pad=1); cb_.outline.set_linewidth(0.4)
-    cb_.set_label('arterial inflow (nL/s)\n○ withdrawal', fontsize=8, labelpad=2, linespacing=1.1)
+    cb_.set_label('arterial inflow (nL/s)', fontsize=8, labelpad=2, linespacing=1.1)
     f0_ = D['fb']; inj_, sd_ = f0_[dom['inj']], np.asarray(dom['side'])
     axIn.text(0.5, 1.085, f"arterial L {inj_[sd_ == 'L'].sum():.1f} · R {inj_[sd_ == 'R'].sum():.1f}", transform=axIn.transAxes, ha='center', va='bottom',
               fontsize=8, color='#a00000')

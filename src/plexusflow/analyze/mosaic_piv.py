@@ -494,34 +494,26 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
     Q_kl_n_valid = int(u.get("Q_kloosterman_n_valid", 0))
     Qt_ridge = np.asarray(u["Q_pois_t"]) * conv
     ridge_mean = float(np.nanmean(Qt_ridge))
-    # Use Q_kl (per-slice Poiseuille, R_fit for area, median across slices
-    # — Kloosterman 2014 convention) as the scale target.  Chosen after
-    # the 53-tile KCL sweep: Q_kl is citable (published method), robust to
-    # per-vessel R_fit blow-ups (per-slice median gates outliers), and
-    # kept its KCL residual essentially unchanged when the QC pass rate
-    # went from 47% → 58% (Q_pois_free worsened by 2.5 pp on the same
-    # sweep).  When Kloosterman couldn't fit enough slices, fall back to the
-    # BOUNDED mask-R Poiseuille (Q_seg) FIRST, and only then to the free-R fit
-    # (Q_pois_free) — free-R is railing-prone (can blow up on short/blunt
-    # vessels), so it must never be preferred over the mask-R estimate.
-    if np.isfinite(Q_kl):
-        Q_scale = Q_kl; best_key = "kl"
-    elif np.isfinite(Q_seg):
-        Q_scale = Q_seg; best_key = "pois_seg"
-    elif np.isfinite(Q_pois_free):
-        Q_scale = Q_pois_free; best_key = "pois_free"
+    # ONE flux estimator for mean and pulsatile flow (2026-11-17).  Q(t) is the Kloosterman fit of the time-mean field
+    # applied to every frame with its geometry frozen (accepted sections, fit bins, R_s, offsets; only the centreline
+    # speed refitted — analyze.kloosterman.kloosterman_operator), in physical units, signed A→B.  Its arithmetic time mean
+    # is Q_kl exactly, so the mean flux and the flow direction are Q_kl's.  Replaces the rescaling of a second, pooled
+    # fixed-radius series by |Q_kl| / mean(series), which diverged where that mean ≈ 0 (saturated or stagnant vessels:
+    # 21S had a +19.4 nL/s artefact from a 0.06 nL/s vessel, and 7 % of directions disagreed with Kloosterman's).
+    # Kloosterman failed → no flux and no Q(t) (the recording was already unused for mean and pulsatile flow);
+    # the other scalar estimators are kept below for comparison only.
+    Q_kl_t = np.asarray(u.get("Q_kl_t", []), float)
+    best_key = "kl"
+    if np.isfinite(Q_kl) and Q_kl_t.size >= 32:
+        Qt = Q_kl_t * conv
+        hr = pt["fit_harmonics"](Qt, pt["FRAME_DT_S"], f0,
+                                  K=pt["N_HARMONICS"], loss="huber",
+                                  include_dc=True)
+        mean_Q = float(Q_kl)                            # = arithmetic mean of Qt (exact); hr["a0"] is the Fourier DC
     else:
-        Q_scale = Q_seg; best_key = "pois_seg"
-    if not (np.isfinite(Q_scale) and np.isfinite(ridge_mean)) \
-            or abs(ridge_mean) < 1e-12:
-        return None
-    Qt = Qt_ridge * (abs(Q_scale) / abs(ridge_mean))
-    hr = pt["fit_harmonics"](Qt, pt["FRAME_DT_S"], f0,
-                              K=pt["N_HARMONICS"], loss="huber",
-                              include_dc=True)
-    mean_Q = float(hr.get("a0", Q_scale))
-    # Physical direction: sign of mean flow along the arc
-    if mean_Q >= 0:
+        Qt, hr, mean_Q, best_key = None, {}, float("nan"), "none"
+    # Physical direction: sign of the Kloosterman flux along the arc (A→B); arbitrary (A→B) without a flux
+    if not np.isfinite(mean_Q) or mean_Q >= 0:
         flow_from, flow_to = A, B
     else:
         flow_from, flow_to = B, A
@@ -553,7 +545,8 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
         "flow_from": flow_from, "flow_to": flow_to,
         "harm": {"mean_Q": abs(mean_Q), "f0_hz": f0,
                   "harmonics": hr.get("harmonics", []),
-                  "fit_success": True},
+                  "a0": (abs(float(hr["a0"])) * (1 if mean_Q >= 0 else -1) if "a0" in hr else float("nan")),   # Fourier DC, flow frame
+                  "fit_success": bool(hr)},
         "snr": {"dc_db": float(hr.get("snr_dc_fit_db", np.nan)),
                  "h1_db": float(hr.get("snr_ac_fit_db", np.nan))},
         "qc": qc,
@@ -574,7 +567,11 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
         "V_CL_kl_ums": V_CL_kl,
         "Q_kl_valid_frac": Q_kl_valid_frac,
         "Q_kl_n_valid": Q_kl_n_valid,
-        "Q_t": Qt.astype(np.float32),
+        "Q_t": (Qt.astype(np.float32) if Qt is not None else None),
+        # Motion diagnostics (analyze.motion), independent of the flux fit: from the vessel-aligned pooled streamwise
+        # velocity series v(t) (a fixed spatial average; stored float16 so a later f0 refit can recompute them).
+        "v_t": np.asarray(Qt_ridge, np.float16),
+        "motion": _motion(Qt_ridge, f0, 1.0 / pt["FRAME_DT_S"]),
         "prov": {"method": "plexusflow_vessel_merged_of",
                   "n_cross_sections": int(len(cl_rc)),
                   "R_free_um": float(u.get("R_fit_free", np.nan))
@@ -682,16 +679,26 @@ def _tile_qt_spectrum_peak(G: nx.Graph, tile: int, fs: float = 250.0,
     return float(f0) if np.isfinite(f0) else None
 
 
+def _motion(v, f0, fs):
+    from .motion import motion_stats
+    try:
+        return motion_stats(v, f0, fs)
+    except Exception:
+        return None
+
+
 def _refit_tile_harm(G: nx.Graph, tile: int, f0_hz: float,
                       fs: float = 250.0, n_h: int = 3) -> int:
     """Refit each of the tile's measurements' ``harm`` at a corrected f0 with
     the batch harmonic fitter (Huber IRLS), keeping the batch field layout
-    (mean_Q, f0_hz, harmonics, fit_success, sigma_DC, sigma_resid, dc_snr_db)
+    (mean_Q = arithmetic mean of Q(t), a0, f0_hz, harmonics, fit_success, sigma_DC, sigma_resid, dc_snr_db)
     and ``snr``.  Returns the number of measurements touched."""
     from .harmonic import fit_harmonics
     n = 0
     for _u, _v, d in G.edges(data=True):
         for m in (d.get("measurements_piv") or []):
+            if m.get("tile_id") == tile and m.get("v_t") is not None:     # motion diagnostics at the corrected f0
+                m["motion"] = _motion(np.asarray(m["v_t"], float), float(f0_hz), fs)
             if m.get("tile_id") != tile or m.get("Q_t") is None:
                 continue
             Qt = np.asarray(m["Q_t"], dtype=float)
@@ -701,7 +708,9 @@ def _refit_tile_harm(G: nx.Graph, tile: int, f0_hz: float,
             a0, s0 = float(hr["a0"]), float(hr["sigma_a0"])
             resid = np.asarray(hr["resid"], float); resid = resid[np.isfinite(resid)]
             dc_db = float(20 * np.log10(abs(a0) / s0)) if s0 > 0 and a0 != 0 else float("nan")
-            m["harm"] = dict(mean_Q=abs(a0), f0_hz=float(f0_hz), harmonics=hr["harmonics"], fit_success=True,
+            # mean flux stays the arithmetic mean of Q(t) (= Q_kl, independent of f0); a0 is the Fourier DC at this f0
+            mq = float(np.nanmean(Qt))
+            m["harm"] = dict(mean_Q=abs(mq), a0=abs(a0) * (1 if mq >= 0 else -1), f0_hz=float(f0_hz), harmonics=hr["harmonics"], fit_success=True,
                              sigma_DC=s0, sigma_resid=float(resid.std(ddof=2 * n_h + 1)) if resid.size > 2 * n_h + 1 else float("nan"),
                              dc_snr_db=dc_db)
             h1 = next((h for h in hr["harmonics"] if h["k"] == 1), {})
@@ -780,11 +789,16 @@ def analyze_stage(cfg: StageConfig,
                     dry_run: bool = False,
                     verbose: bool = True,
                     kl_sidecar_dir: Optional[Path] = None,
-                    out_path: Optional[Path] = None) -> Path:
+                    out_path: Optional[Path] = None,
+                    mask_path: Optional[Path] = None,
+                    local: bool = False) -> Path:
     """Run the batch analyzer.
 
     Reads: ``cfg.graph_vessels_path`` (make with `plexusflow condense`),
     ``cfg.positions_path``, per-tile raw videos.
+
+    ``local=True`` (refinement candidates, plexusflow.edit.refine): measure into ``out_path`` only — no stage-wide f0
+    sanity refit and no provenance stamp, so nothing outside the candidate's new vessels changes.
 
     Writes: measurements into edge ``measurements_piv`` and saves the
     graph incrementally after every tile to ``cfg.graph_piv_path``
@@ -870,11 +884,12 @@ def analyze_stage(cfg: StageConfig,
     # into the OF ridge-refinement gate.  If mask.tif isn't present,
     # refinement runs without avascular-noise suppression.
     fuse_mask = None
-    if cfg.mask_path.exists():
-        _mask_arr = tifffile.imread(cfg.mask_path)
+    _mpath = Path(mask_path) if mask_path is not None else cfg.mask_path      # override: a refinement candidate's mask
+    if _mpath.exists():
+        _mask_arr = tifffile.imread(_mpath)
         fuse_mask = (_mask_arr > 0)
         if verbose:
-            print(f'  loaded mask {cfg.mask_path.name} for OF ridge gating '
+            print(f'  loaded mask {_mpath.name} for OF ridge gating '
                   f'({fuse_mask.sum():,} true px)')
     if verbose:
         print(f'  mosaic geom: fuse {geom.fuse_shape}, '
@@ -1123,7 +1138,7 @@ def analyze_stage(cfg: StageConfig,
     # median (typical subharmonic mistake), reverifies via that tile's own
     # aggregated Q(t) spectrum, and — if the spectrum peak agrees with
     # neighbors — refits every measurement's `harm` at the corrected f0.
-    if not dry_run:
+    if not dry_run and not local:
         try:
             _n_fixed = _sanity_check_tile_f0(G, verbose=verbose, f_lo=F0_FMIN_HZ, f_hi=F0_FMAX_HZ)
             if verbose and _n_fixed:
@@ -1132,7 +1147,7 @@ def analyze_stage(cfg: StageConfig,
         except Exception as _e:
             print(f'[sanity] neighbor f0 sanity check skipped: {_e}')
 
-    if not dry_run:
+    if not dry_run and not local:
         cfg.write_provenance("graph_piv", extra={
             "source_graph": src.name,
             "output_graph": out.name,

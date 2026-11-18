@@ -485,6 +485,7 @@ def compute_of_profile_and_Q(
 
     vfield_sum = np.zeros((H, W, 2), dtype=np.float64)
     vfield_cnt = np.zeros((H, W), dtype=np.float64)
+    flow_in_t = np.zeros((n_pairs, len(rr_in), 2), dtype=np.float32)   # per-frame field on the vessel pixels (Q_kl_t)
 
     r_cut = R * fit_fraction
     _diag_t = (n_pairs // 2) if (return_diagnostics and n_pairs > 0) else -1
@@ -500,6 +501,8 @@ def compute_of_profile_and_Q(
         of_col = flow[rr_in, cc_in, 0] / dt
         v_axial = of_row * t_row_in + of_col * t_col_in
 
+        flow_in_t[t, :, 0] = flow[rr_in, cc_in, 0] / dt
+        flow_in_t[t, :, 1] = flow[rr_in, cc_in, 1] / dt
         vfield_sum[rr_in, cc_in, 0] += flow[rr_in, cc_in, 0] / dt
         vfield_sum[rr_in, cc_in, 1] += flow[rr_in, cc_in, 1] / dt
         vfield_cnt[rr_in, cc_in] += 1.0
@@ -518,12 +521,15 @@ def compute_of_profile_and_Q(
                 profile_sum[i_bin] += float(np.mean(finite)) * int(m.sum())
                 profile_cnt[i_bin] += int(m.sum())
 
-        # Per-frame R-fixed Poiseuille fit
+        # Per-frame R-fixed Poiseuille fit.  Every vessel pixel in every frame — NO per-frame speed threshold: the pooled
+        # amplitude v0(t) is proportional to the common waveform only if the pixel weights are fixed in time; a threshold
+        # drops slow near-wall pixels at the trough, inflating it and flattening the pulsatility (known-truth benchmark:
+        # |H1| recovery 0.930 → 0.947, slowest vessels 0.93 → 0.97; tile 36 +0.5 %; 2026-11-13).
         r_valid_t, v_valid_t = [], []
         for i_bin, in_bin in enumerate(bin_members):
             if abs(bin_centers[i_bin]) > r_cut:
                 continue
-            m = in_bin & active
+            m = in_bin
             vals = v_axial[m]
             finite = vals[np.isfinite(vals)]
             if len(finite) >= 2:
@@ -618,9 +624,26 @@ def compute_of_profile_and_Q(
                     R_char=float("nan"), Q_char_valid_frac=0.0,
                     n_slices=0, n_valid=0, reason=f"err:{_e}")
 
+    # ── 8. Per-frame flux from the same Kloosterman fit (2026-11-17) ─────────────────────────────────────────────────
+    # The time-mean fit's geometry (accepted sections, fit bins, R_s, offsets) is frozen and only the centreline speed is
+    # refitted per frame — a linear operator w on the field (kloosterman.kloosterman_operator).  vfield_mean is the plain
+    # mean of the per-frame fields on the vessel pixels (zero elsewhere), so mean_t Q_kl_t = Q_kloosterman exactly; no
+    # rescaling of a second estimator.
+    Q_kl_t = np.array([])
+    if np.isfinite(_kl.get("Q_char", np.nan)):
+        try:
+            from .kloosterman import kloosterman_operator
+            _w = kloosterman_operator(_kl, cl_used, vfield_mean.shape, mask=_ridge_mask_roi, slice_window=2)
+            if _w is not None:
+                _w = _w.toarray().ravel(); _ix = (np.asarray(rr_in) * W + np.asarray(cc_in)) * 2
+                Q_kl_t = flow_in_t[:, :, 0].astype(np.float64) @ _w[_ix] + flow_in_t[:, :, 1].astype(np.float64) @ _w[_ix + 1]
+        except Exception:
+            Q_kl_t = np.array([])
+
     return dict(
         Q_plug_t=Q_plug_t,
         Q_pois_t=Q_pois_t,
+        Q_kl_t=Q_kl_t,
         Q_plug_mean=Q_plug_mean,
         Q_pois_mean=Q_pois_mean,
         v0_fixed=v0_fixed,

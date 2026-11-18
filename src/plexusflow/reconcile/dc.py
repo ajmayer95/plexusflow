@@ -23,8 +23,11 @@
    Sensitivity: n_starts further solves from perturbed starts (data × (1 + 0.3 N(0, 1)), fixed seeds); Qp_sd = spread;
    `unstable` = a vessel whose direction or magnitude (> stable_rtol) depends on the start.
 3. Emergent boundary f = B Q'; passive comparison with K = r⁴/ℓ.  ``radius`` picks r (also handed to the AC model):
-   "consensus" = √(R_graph · median R_kl) (current default), "anatomical" = the calibrated segmentation radius
-   (reconcile/radius.py, results/anatomical_radius.pkl; per-vessel median of R(s)), or an array.
+   "tube" (default since 2026-11-17) = the uncalibrated tube-interior segmentation radius (reconcile/radius.tube_radii on
+   <stage>/mask/mask.tif): median walled half-width for resistance, volume-equivalent √⟨a²⟩ for compliance (returned as
+   ``radius_compliance`` for the AC model); "consensus" = √(R_graph · median R_kl) (sensitivity analysis; default before
+   2026-11-17); "anatomical" = the calibrated segmentation radius (results/anatomical_radius.pkl); or an array (used for
+   both).  The flux estimator is not affected: it keeps the free-radius Kloosterman fit.
 
 Before 2026-11-03 step 2 was a damped iteratively re-weighted projection whose iterates settle into a small limit cycle
 (21S, 27S); Q' was the average of the last 100 iterates over 8 perturbed runs.  Both estimators have the same
@@ -90,6 +93,24 @@ def anatomical_radius_array(edges, path=None):
     return np.array([A["median"][idx[e] if e in idx else idx[e[::-1]]] for e in edges], float)
 
 
+_TUBE_CACHE = {}
+
+
+def tube_radius_arrays(G, edges, mask=None):
+    """(resistance, compliance, profiled) tube-interior radii for ``edges``; mask defaults to <stage>/mask/mask.tif.
+    Cached per (graph object, edge list, mask) so repeated reconciliations (withholding folds) profile once."""
+    from .radius import tube_radii
+    key = (id(G), G.number_of_edges(), tuple(edges), None if mask is None else id(mask))
+    if key not in _TUBE_CACHE:
+        if mask is None:
+            import tifffile
+            from .. import paths
+            mask = tifffile.imread(str(paths.STAGE / "mask" / "mask.tif")) > 127
+        T = tube_radii(G, edges, mask); _TUBE_CACHE.clear(); _TUBE_CACHE[key] = T
+    T = _TUBE_CACHE[key]
+    return T["resistance"], T["compliance"], T["profiled"]
+
+
 def ql_objective(y, C, imaged, s0, m, eps=EPS_UNIMAGED):
     """Objective, gradient and (positive model, exact) diagonal Hessian of the DC quasi-likelihood (see module doc)."""
     c2 = C ** 2
@@ -127,7 +148,7 @@ def ql_solve(Q, y, C, imaged, s0, m, dom, tol=1e-10, max_iter=500):
 
 
 def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, n_shuffle=10, seed=0, n_starts=4, start_noise=0.3, stable_rtol=0.10,
-                 radius="consensus", per_vessel=PER_VESSEL):
+                 radius="tube", per_vessel=PER_VESSEL, mask=None):
     dom = dom or carved_domain(G, topology=topology)
     recs = {}
     for (t, e), m in M.items():
@@ -160,20 +181,24 @@ def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, 
         r = [m["R_kl_um"] / PX_UM for m in G.edges[e].get("measurements_piv") or [] if m.get("R_kl_um") and np.isfinite(m["R_kl_um"])]
         return float(np.median(r)) if r else np.nan
     rt = np.array([_median_rkl(e) for e in sub])
-    r_cons = np.sqrt(rg * np.where(np.isfinite(rt), rt, rg)); L = np.array([G.edges[e]["length"] for e in sub], float)
-    if isinstance(radius, str) and radius == "anatomical":
-        r = anatomical_radius_array(sub)
+    r_cons = np.sqrt(rg * np.where(np.isfinite(rt), rt, rg)); L = np.maximum(np.array([G.edges[e]["length"] for e in sub], float), 1.0)   # ≥ 1 px: zero-length splice artefacts
+    profiled = np.zeros(me, bool)
+    if isinstance(radius, str) and radius == "tube":
+        r, rc, profiled = tube_radius_arrays(G, sub, mask)
+    elif isinstance(radius, str) and radius == "anatomical":
+        r = anatomical_radius_array(sub); rc = r
     elif isinstance(radius, str):
-        assert radius == "consensus", radius; r = r_cons
+        assert radius == "consensus", radius; r = rc = r_cons
     else:
-        r = np.asarray(radius, float)
+        r = rc = np.asarray(radius, float)
     K = r ** 4 / L; Qs = passive(K, fb, dom)
     met = metrics(Qm, Qp, Qs, fb, dom, imaged)
     con = contract_short_unimaged(dom, imaged, L, r); short_unimaged = con.pop("short_unimaged"); met["contracted"] = con
     rng = np.random.default_rng(seed)
     shuf = np.mean([metrics(Qm, Qp, passive(rng.permutation(K), fb, dom), fb, dom, imaged)["corr_lin"] for _ in range(n_shuffle)])
     return dict(model=model, edges=sub, nodes=dom["nodes"], Qm=Qm, Qp=Qp, Qs=Qs, fb=fb,
-                sigma=np.sqrt(Cw ** 2 * Qp ** 2 + s0v ** 2), c=C, s_between=sb, s0_vessel=s0v, imaged=imaged, tile=tile_w, radius=r, length=L,
+                sigma=np.sqrt(Cw ** 2 * Qp ** 2 + s0v ** 2), c=C, s_between=sb, s0_vessel=s0v, imaged=imaged, tile=tile_w, radius=r, radius_compliance=rc,
+                radius_profiled=profiled, length=L,
                 inj=dom["inj"], out=dom["out"], side=dom["side"], metrics=met, shuffled_corr=shuf,
                 n_iter=n_it, sigma0_floor=s0, dom=dom, estimator="quasi-likelihood, projected Newton (2026-11-03)",
                 objective=info["objective"], objective_m=m, n_concave=info["n_concave"],

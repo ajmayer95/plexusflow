@@ -318,7 +318,7 @@ def main():
     rv_t = sorted([t_ for t_, y_ in xr_.items() if t_ in stitch and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
     # retained examples 3, 4: interior vessels (≥ 1 mm from the organ outline) whose recordings are far apart in time (43–45 min),
     # with typical D for that separation (sandbox/find_fig8_examples.py)
-    RV3 = (56890, 57078); RV3e = RV3 if RV3 in mall else RV3[::-1]; xr3_ = mall[RV3e]
+    RV3 = (103378, 57078); RV3e = RV3 if RV3 in mall else RV3[::-1]; xr3_ = mall[RV3e]
     rv3_t = sorted([t_ for t_, y_ in xr3_.items() if t_ in stitch and np.isfinite(y_["rho"]) and y_["rho"] >= 0.5], key=lambda t_: xs_a[ts.index(t_)])
     EXe = EXV if EXV in mall else EXV[::-1]
     def _trace(ax_, E_, t_, col_, lab_):
@@ -895,9 +895,15 @@ def main():
     for a_, b_, w_, k_ in zip(_L["a"], _L["b"], _L["w"], _L["kind"]):
         if k_ == "seam" and a_ in stitch and b_ in stitch and a_ != b_ and not Tg.has_edge(a_, b_):
             seam_[tuple(sorted((a_, b_)))] = seam_.get(tuple(sorted((a_, b_))), 0.0) + w_
-    TgA = Tg.copy(); TgA.add_edges_from(seam_)
+    # weak overlaps: same-vessel links the synchronisation uses (small κ weight) between tiles with no coherent shared vessel
+    # (ρ < 0.1 in one recording) — the only links joining the left lobe across the aorta; drawn dotted
+    weak_ = {}
+    for a_, b_, w_, k_ in zip(_L["a"], _L["b"], _L["w"], _L["kind"]):
+        if k_ == "vessel" and a_ in stitch and b_ in stitch and a_ != b_ and not Tg.has_edge(a_, b_) and tuple(sorted((a_, b_))) not in seam_:
+            weak_[tuple(sorted((a_, b_)))] = weak_.get(tuple(sorted((a_, b_))), 0.0) + w_
+    TgA = Tg.copy(); TgA.add_edges_from(seam_); TgA.add_edges_from(weak_)
     cotherA_ = [c_ for c_ in _nx.connected_components(TgA) if ref not in c_ and len(c_) > 1]
-    log(f"  (a) synchronisation graph: {Tg.number_of_edges()} overlap links + {len(seam_)} seam-only links; components besides the "
+    log(f"  (a) synchronisation graph: {Tg.number_of_edges()} overlap links + {len(seam_)} seam-only + {len(weak_)} weak-overlap links; components besides the "
         f"reference one: {[sorted(c_) for c_ in cotherA_]}")
     GCOL = {"main": "#2b5c8a", "side": "#E69F00"}
     # ---- b (Fig 8): the overlap network that turns pairwise clock differences into one clock per tile (nodes at tile centres)
@@ -906,6 +912,8 @@ def main():
 
     for a_, b_ in seam_:
         axN.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="0.65", lw=0.45, ls=(0, (2, 1.5)), zorder=1)
+    for a_, b_ in weak_:
+        axN.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="0.55", lw=0.45, ls=(0, (0.6, 1.4)), zorder=1)
     for a_, b_ in Tg.edges():
         hl_ = {a_, b_} == {ta, tb}
         axN.plot([cen[a_][0], cen[b_][0]], [cen[a_][1], cen[b_][1]], color="black" if hl_ else "0.65", lw=2.2 if hl_ else 0.45, zorder=2 if hl_ else 1)

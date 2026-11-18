@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 import matplotlib.colors as mcolors, matplotlib.cm as cm, matplotlib.patheffects, matplotlib.transforms
 import plexusflow.paths as P
-from plexusflow.reconcile.reliability import profile_coef, measurement_table, same_tile_junctions, c_of
+from plexusflow.reconcile.reliability import profile_coef, measurement_table, same_tile_junctions, c_of, FS_HZ
 from plexusflow.analyze.kloosterman import kloosterman_scalar, PRODUCTION_KW
 from plexusflow.analyze.centerline import _centerline_geometry
 from plexusflow.analyze.geometry import load_tile_geometry, graph_to_tile_batch
@@ -47,7 +47,7 @@ PATCH, PATCH_HOPS = 59219, 2                      # Fig 6c/d: 9 vessels each rec
 import os as _os
 EX_PATCH = int(_os.environ.get("FIG6_EX_PATCH", 19781))         # Fig 6c worked example: 9 vessels, Q′ above and below the means
 PATCH = int(_os.environ.get("FIG6_PATCH", PATCH)); PATCH_HOPS = int(_os.environ.get("FIG6_PATCH_HOPS", PATCH_HOPS))
-HIGH, LOW = (28304, 28329), (35992, 36030)
+HIGH, LOW = (28304, 28329), (35956, 35996)          # LOW replaced 11-17: (35992, 36030) removed by consolidation patch 0001
 PX_UM = 1.7
 SEED_FIG = 0                                       # bootstrap seed for figure bands
 KW = PRODUCTION_KW
@@ -188,7 +188,7 @@ def main():
         res = kloosterman_scalar(np.asarray(ki["vfield_mean"], float), np.asarray(ki["cl_used"], float), float(ki["R_prior_px"]),
                                  mask=ki.get("ridge_mask_roi"), **KW)
         valid = np.asarray(res["valid_mask"], bool); m = M[(TILE, e)]
-        ex[e] = dict(ki=ki, valid=valid, f=m[profile_coef(mod)[0]], align=m["align"], c=c_of(mod, m))
+        ex[e] = dict(ki=ki, valid=valid, f=m[profile_coef(mod)[0]], align=m["align"], c=c_of(mod, m), cv=m.get("cv", np.nan))
         log(f"  {e}: kept {valid.sum()}/{len(valid)} (stored f {m['f']:.3f}), align {m['align']:.2f}, c {ex[e]['c']:.2f}")
 
     # ---------------------------------------------------------------- layout (7.5 in wide, PLOS max)
@@ -396,7 +396,7 @@ def main():
     axS.spines[["top", "right"]].set_visible(False); axS.set_title("Conservation-consistent reference flows", fontsize=9, loc="left", pad=3)
     from matplotlib.lines import Line2D
     hs = [Line2D([], [], marker="s", ls="", ms=7, color=TCOL[t_], label=f"Tile {t_}") for t_ in ptiles]
-    hs += ([Line2D([], [], marker="o", ls="", ms=7, color="0.35", label="Recording"), Line2D([], [], color="0.6", lw=1.6, label="Weighted average")]
+    hs += ([Line2D([], [], marker="o", ls="", ms=7, color="0.35", label="Recorded flux"), Line2D([], [], color="0.6", lw=1.6, label="Weighted average")]
            if AVG else [Line2D([], [], marker="o", ls="", ms=7, color="0.35", label="Used"),
                         Line2D([], [], marker="o", ls="", ms=5, mfc="white", mec="0.35", mew=1.3, label="Not used")]) \
           + [Line2D([], [], color=INK, lw=3.2, label="Reconstructed")]
@@ -421,6 +421,48 @@ def main():
         axE.tick_params(labelsize=8); axE.spines[["top", "right"]].set_visible(False)
         axE.legend(loc="lower right", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
 
+    def draw_calibration_cum(axE, n_boot=500):
+        """unbinned calibration: junctions ranked by predicted relative error (production c_eff); cumulative S(m) = Σ_{j≤m} z_j² / N vs
+        m/N for both models (held-out z); a calibrated model follows the diagonal; 95 % tile-bootstrap bands"""
+        PJ = JC["per_junction"]; q = np.array(PJ["c_eff"]); t = np.array(PJ["tile"]); ut = np.unique(t); tix = {u: np.flatnonzero(t == u) for u in ut}
+        grid = np.linspace(0, 1, 201); rng_ = np.random.default_rng(SEED_FIG)
+        def cum(qq, z2):
+            o = np.argsort(qq, kind="stable"); N = len(z2); return np.r_[0, np.arange(1, N + 1) / N], np.r_[0, np.cumsum(z2[o]) / N]
+        axE.plot([0, 1], [0, 1], color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1, label="Expected under calibrated uncertainty")
+        for lab, colr, ls_, name in (("z_constant", GREY, (0, (3, 2)), "Constant relative uncertainty"), ("z_calibrated", BLUE, "-", "Quality-dependent relative uncertainty")):
+            z2 = np.array(PJ[lab]) ** 2; xs, ys = cum(q, z2); B = []
+            for _ in range(n_boot):
+                ix = np.concatenate([tix[u] for u in rng_.choice(ut, len(ut))]); xb, yb = cum(q[ix], z2[ix]); B.append(np.interp(grid, xb, yb))
+            lo, hi = np.percentile(B, [2.5, 97.5], axis=0); axE.fill_between(grid, lo, hi, color=colr, alpha=0.12 if lab == "z_constant" else 0.2, lw=0, zorder=2)
+            axE.plot(xs, ys, color=colr, lw=1.4, ls=ls_, zorder=3, label=name)
+            log(f"panel a cumulative ({lab}): S at 20/50/80/100 % = " + " ".join(f"{np.interp(f_, xs, ys):.2f}" for f_ in (0.2, 0.5, 0.8, 1.0)))
+        axE.set_xlim(0, 1); axE.set_ylim(0, max(1.15, axE.get_ylim()[1])); axE.set_aspect("auto"); axE.tick_params(labelsize=8)
+        axE.set_xlabel("Fraction of junctions (lowest predicted error first)", fontsize=9, labelpad=2)
+        axE.set_ylabel("Cumulative squared\nstandardized imbalance", fontsize=9, labelpad=2)
+        axE.text(0.98, 0.04, f"{len(q):,} junctions\nheld-out recordings (5-fold CV)", transform=axE.transAxes, fontsize=7.5, color=MUTED, ha="right", va="bottom")
+        axE.spines[["top", "right"]].set_visible(False); axE.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
+
+    def draw_calibration_bins(axE, nbin=5, n_boot=1000):
+        """held-out normalized junction imbalance, RMS z by quintile of predicted junction error (production c_eff ordering), constant
+        vs quality-dependent relative error side by side; 95 % tile-bootstrap intervals; ideal = 1"""
+        PJ = JC["per_junction"]; q = np.array(PJ["c_eff"]); t = np.array(PJ["tile"]); ut = np.unique(t); tix = {u: np.flatnonzero(t == u) for u in ut}
+        edges_ = np.quantile(q, np.linspace(0, 1, nbin + 1)); bi = np.clip(np.searchsorted(edges_, q, side="right") - 1, 0, nbin - 1)
+        rng_ = np.random.default_rng(SEED_FIG); xq = np.arange(1, nbin + 1)
+        for lab, colr, mk, dx, name in (("z_constant", GREY, "s", -0.13, "Constant relative error"), ("z_calibrated", BLUE, "o", 0.13, "Quality-dependent relative error")):
+            z2 = np.array(PJ[lab]) ** 2; rms = np.array([np.sqrt(z2[bi == b].mean()) for b in range(nbin)]); B = []
+            for _ in range(n_boot):
+                ix = np.concatenate([tix[u] for u in rng_.choice(ut, len(ut))]); B.append([np.sqrt(z2[ix][bi[ix] == b].mean()) for b in range(nbin)])
+            lo, hi = np.percentile(B, [2.5, 97.5], axis=0)
+            axE.errorbar(xq + dx, rms, yerr=[rms - lo, hi - rms], fmt=mk, ms=5.5 if mk == "o" else 5, color=colr, mfc=colr if mk == "o" else "white",
+                         mec=colr, mew=1.2, elinewidth=1.0, capsize=2, zorder=3, label=name)
+            log(f"panel a ({lab}): RMS z by quintile " + " ".join(f"{v:.2f}" for v in rms))
+        axE.axhline(1, color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1, label="Ideal calibration")
+        med_ = [np.median(q[bi == b]) for b in range(nbin)]
+        axE.set_xticks(xq); axE.set_xticklabels([f"{m_:.2f}" for m_ in med_]); axE.set_xlim(0.5, nbin + 0.5); axE.set_ylim(0, 1.75); axE.tick_params(labelsize=8)
+        axE.set_xlabel("Predicted relative measurement error\n(junction quintiles, median)", fontsize=9, labelpad=2)
+        axE.set_ylabel("RMS normalized\njunction imbalance", fontsize=9, labelpad=2)
+        axE.spines[["top", "right"]].set_visible(False); axE.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.4, borderaxespad=0.1)
+
     def draw_calibration_cont(axE, k=900, n_boot=300):
         """held-out standardized junction residuals, rolling RMS over the k junctions nearest in c_eff (flux-weighted effective
         discrepancy score of the production model, same ordering for both models); tile-bootstrap 95 % bands"""
@@ -429,7 +471,7 @@ def main():
             o = np.argsort(qq); qq, z2 = qq[o], z2[o]; cs = np.r_[0, np.cumsum(z2)]; st = max(k // 6, 20)
             a_ = np.arange(0, len(qq) - k + 1, st); return np.array([np.median(qq[i:i + k]) for i in a_]), np.sqrt((cs[a_ + k] - cs[a_]) / k)
         xs0, _ = roll(q, np.ones_like(q)); grid = np.geomspace(xs0[0], xs0[-1], 40); rng_ = np.random.default_rng(SEED_FIG)   # bands on the curve's own range
-        for lab, colr, ls_, name in (("z_constant", GREY, (0, (3, 2)), "Constant uncertainty"), ("z_calibrated", BLUE, "-", "Quality-dependent uncertainty")):
+        for lab, colr, ls_, name in (("z_constant", GREY, (0, (3, 2)), "Constant relative error"), ("z_calibrated", BLUE, "-", "Quality-dependent relative error")):
             z2 = np.array(PJ[lab]) ** 2; xs, ys = roll(q, z2)
             B = []
             for _ in range(n_boot):
@@ -437,13 +479,12 @@ def main():
             lo, hi = np.percentile(B, [2.5, 97.5], axis=0); axE.fill_between(grid, lo, hi, color=colr, alpha=0.12 if lab == "z_constant" else 0.2, lw=0, zorder=2)
             axE.plot(xs, ys, color=colr, lw=1.4, ls=ls_, zorder=3, label=name)
             log(f"panel a ({lab}): rolling RMS (k {k}) {ys.min():.2f}–{ys.max():.2f}")
-        axE.axhline(1, color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1, label="expected = 1")
+        axE.axhline(1, color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1, label="Ideal calibration")
         axE.set_xscale("log"); axE.set_xticks([0.2, 0.3, 0.5, 0.8]); axE.set_xticklabels(["0.2", "0.3", "0.5", "0.8"]); axE.minorticks_off()
         axE.set_xlim(grid[0] * 0.93, grid[-1] * 1.07); axE.set_ylim(0.25, 1.65); axE.tick_params(labelsize=8)
-        axE.set_xlabel("Effective fractional discrepancy $c_{j,\\mathrm{eff}}$", fontsize=9, labelpad=2)
-        axE.set_ylabel("RMS standardized\njunction imbalance", fontsize=9, labelpad=2)
-        axE.text(0.0, -0.2, "smaller discrepancy", transform=axE.transAxes, fontsize=8, color=MUTED, ha="left", va="top")
-        axE.text(1.0, -0.2, "larger discrepancy", transform=axE.transAxes, fontsize=8, color=MUTED, ha="right", va="top")
+        axE.set_xlabel("Predicted relative measurement error at the junction, $c_{j}$", fontsize=9, labelpad=2)
+        axE.set_ylabel("RMS normalized\njunction imbalance", fontsize=9, labelpad=2)
+        axE.text(0.98, 0.04, f"held-out recordings (5-fold CV)\n{len(q):,} junctions", transform=axE.transAxes, fontsize=7.5, color=MUTED, ha="right", va="bottom")
         axE.spines[["top", "right"]].set_visible(False); axE.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1)
 
     def draw_relative(axR):
@@ -481,16 +522,32 @@ def main():
         WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); cv = WH["curve"]; rp_ = WH["repeat"]
         x = np.array([100 * c_["frac"] for c_ in cv]); y = np.exp([c_["err"] for c_ in cv]); ci_ = np.exp(np.array([c_["err_ci"] for c_ in cv]))
         axW2.axhspan(*np.exp(rp_["err_ci"]), color=GREY, alpha=0.09, lw=0, zorder=1)
-        axW2.axhline(np.exp(rp_["err"]), color="0.65", lw=0.8, ls=(0, (3, 2)), zorder=2, label="Repeat-recording disagreement")
+        axW2.axhline(np.exp(rp_["err"]), color="0.65", lw=0.8, ls=(0, (1, 2)), zorder=2, label="Typical repeat-recording disagreement")
         axW2.fill_between(x, ci_[:, 0], ci_[:, 1], color=BLUE, alpha=0.18, lw=0, zorder=2)
-        axW2.plot(x, y, color=BLUE, lw=1.3, marker="D", ms=4.5, zorder=3, label="Reconstruction")
+        if WH.get("curve_constant"):                                         # same draws, constant relative uncertainty
+            cc_ = WH["curve_constant"]; yc = np.exp([c_["err"] for c_ in cc_]); cic = np.exp(np.array([c_["err_ci"] for c_ in cc_]))
+            axW2.fill_between(x, cic[:, 0], cic[:, 1], color=GREY, alpha=0.12, lw=0, zorder=2)
+            axW2.plot(x, yc, color=GREY, lw=1.2, ls=(0, (3, 2)), marker="s", ms=4, mfc="white", zorder=3, label="Constant relative uncertainty")
+        axW2.plot(x, y, color=BLUE, lw=1.3, marker="D", ms=4.5, zorder=3, label="Quality-dependent relative uncertainty")
         axW2.set_xlim(0, 78); axW2.set_ylim(1, 2.25); axW2.set_xticks([0, 25, 50, 75]); axW2.set_yticks([1, 1.25, 1.5, 1.75, 2, 2.25])
         axW2.set_yticklabels(["1", "1.25", "1.5", "1.75", "2", ""]); axW2.tick_params(labelsize=8)
-        axW2.set_xlabel("Vessel measurements withheld (%)", fontsize=9, labelpad=2)
-        axW2.set_ylabel("Median prediction\nerror (fold)", fontsize=9, labelpad=2)
+        axW2.set_xlabel("Vessels withheld (%)", fontsize=9, labelpad=2)
+        axW2.set_ylabel("Median fold error in\nwithheld-vessel flux", fontsize=9, labelpad=2)
         axW2.legend(loc="upper left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1); axW2.spines[["top", "right"]].set_visible(False)
         log(f"caption: direction agreement {100 * cv[0]['dir']:.0f} % → {100 * cv[-1]['dir']:.0f} %; repeat ×{np.exp(rp_['err']):.2f}; "
             + ", ".join(f"{100 * c_['frac']:.0f} %: ×{np.exp(c_['err']):.2f}" for c_ in cv))
+
+    def draw_withheld_dir(axW3):
+        """direction agreement of withheld vessels vs fraction withheld; repeat-recording reference"""
+        WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); cv = WH["curve"]; rp_ = WH["repeat"]
+        x = np.array([100 * c_["frac"] for c_ in cv]); y = 100 * np.array([c_["dir"] for c_ in cv]); ci_ = 100 * np.array([c_["dir_ci"] for c_ in cv])
+        axW3.axhspan(*(100 * np.array(rp_["dir_ci"])), color=GREY, alpha=0.09, lw=0, zorder=1)
+        axW3.axhline(100 * rp_["dir"], color="0.65", lw=0.8, ls=(0, (3, 2)), zorder=2, label="Repeat recordings")
+        axW3.fill_between(x, ci_[:, 0], ci_[:, 1], color=BLUE, alpha=0.18, lw=0, zorder=2)
+        axW3.plot(x, y, color=BLUE, lw=1.3, marker="D", ms=4.5, zorder=3, label="Withheld vessels")
+        axW3.set_xlim(0, 78); axW3.set_ylim(60, 101); axW3.set_xticks([0, 25, 50, 75]); axW3.tick_params(labelsize=8)
+        axW3.set_xlabel("Vessels withheld (%)", fontsize=9, labelpad=2); axW3.set_ylabel("Same flow direction\nas recorded (%)", fontsize=9, labelpad=2)
+        axW3.legend(loc="lower left", frameon=False, fontsize=8, handlelength=1.8, borderaxespad=0.1); axW3.spines[["top", "right"]].set_visible(False)
 
     def draw_withholding(axW2):
         """withheld-vessel error vs fraction of measured vessels withheld (dc_withholding_curve.py)"""
@@ -739,9 +796,159 @@ def main():
     # a (calibration plot, top right) and c (withheld validation, bottom)
     # ---- main figure, two panels: a calibration of the discrepancy model (with a same-tile junction inset), b prediction of
     #      withheld fluxes.  The reconstructed network itself is shown at organ scale in Fig 7 (pair: SI fig6_S_networks).
-    HF = 6.0; fig = plt.figure(figsize=(7.5, HF), facecolor="white"); T1 = 5.82 / HF; T2 = 2.95 / HF
-    axC2 = fig.add_axes([0.105, 3.85 / HF, 0.37, 1.95 / HF]); draw_calibration_cont(axC2)
-    axD2 = fig.add_axes([0.615, 3.85 / HF, 0.37, 1.95 / HF]); draw_withheld_fold(axD2)
+    # ---- main figure (11-18): a physiological variability (heart rate) · b measurement uncertainty (alignment) ·
+    #      c conservative reconstruction (worked example) · d predictive validation (ablation).  Withholding → SI.
+    def draw_hr(ax_t, ax_r):
+        from plexusflow.reconcile.gain import tile_heart_rates, fit_hr_gain
+        from plexusflow.io.acquisition import tile_acquisition_minutes
+        from plexusflow.config import StageConfig as _SC6
+        f0_ = tile_heart_rates(G); R0_ = measurement_table(G, gain=None); fit_ = fit_hr_gain(R0_, f0_); ts_ = sorted(f0_)
+        tq_ = tile_acquisition_minutes(ST, _SC6.load(ST), ts_)
+        xs_ = np.array([tq_[t] for t in ts_]) if tq_ else np.array(ts_, float)
+        ax_t.plot(xs_, [f0_[t] for t in ts_], "o", ms=3.2, color=BLUE, mec="white", mew=0.4)
+        ax_t.set_xlabel("Acquisition time (min)" if tq_ else "Recording (acquisition order)", fontsize=9, labelpad=2); ax_t.set_ylabel("Heart rate (Hz)", fontsize=9, labelpad=2)
+        ax_t.tick_params(labelsize=8); ax_t.spines[["top", "right"]].set_visible(False)
+        # the data the exponent is estimated from: pairs of recordings of the same vessel, log flux ratio vs log heart-rate ratio
+        by_ = {}
+        for (t, e), m in R0_.items():
+            if m["Q"] != 0: by_.setdefault(e, {})[t] = abs(m["Q"])
+        xr_, yr_ = [], []
+        for r in by_.values():
+            tt = sorted(r)
+            for i in range(len(tt)):
+                for j in range(i + 1, len(tt)):
+                    a_, b2_ = (tt[i], tt[j]) if f0_[tt[i]] >= f0_[tt[j]] else (tt[j], tt[i])
+                    xr_.append(f0_[a_] / f0_[b2_]); yr_.append(r[a_] / r[b2_])
+        xr_, yr_ = np.array(xr_), np.array(yr_)
+        ax_r.scatter(xr_, yr_, s=1.5, color="0.7", alpha=0.18, lw=0, rasterized=True, zorder=1)
+        edges_ = np.array([1.0, 1.03, 1.08, 1.15, 1.3, 1.6, 2.2, 3.5]); bc, bm, bl, bh, bn = [], [], [], [], []
+        for lo_, hi_ in zip(edges_[:-1], edges_[1:]):
+            m_ = (xr_ >= lo_) & (xr_ < hi_)
+            if m_.sum() >= 15:
+                bc.append(np.exp(np.median(np.log(xr_[m_])))); q_ = np.log(yr_[m_]); bm.append(np.exp(np.median(q_)))
+                bl.append(np.exp(np.percentile(q_, 25))); bh.append(np.exp(np.percentile(q_, 75))); bn.append(int(m_.sum()))
+        bc, bm, bl, bh = map(np.array, (bc, bm, bl, bh))
+        ax_r.errorbar(bc, bm, yerr=[bm - bl, bh - bm], fmt="o", ms=4.5, color=BLUE, mec="white", mew=0.5, ecolor=BLUE, elinewidth=1, capsize=0, zorder=4, label="binned median (IQR)")
+        xx_ = np.linspace(1, xr_.max(), 50); ax_r.plot(xx_, xx_ ** fit_["beta"], color=INK, lw=1.2, zorder=5, label=r"$Q \propto f^{\,%.1f}$" % fit_["beta"])
+        ax_r.axhline(1, color=MUTED, lw=0.6, ls=(0, (1, 2)), zorder=2)
+        ax_r.set_xscale("log"); ax_r.set_yscale("log"); ax_r.set_xlim(0.98, xr_.max() * 1.05); ax_r.set_ylim(0.1, 10)
+        ax_r.set_xticks([1, 1.5, 2, 3]); ax_r.set_xticklabels(["1", "1.5", "2", "3"]); ax_r.set_yticks([0.1, 1, 10]); ax_r.set_yticklabels(["0.1", "1", "10"]); ax_r.minorticks_off()
+        ax_r.set_xlabel("Heart-rate ratio, $f_2/f_1$", fontsize=9, labelpad=2); ax_r.set_ylabel("Flux ratio, $Q_2/Q_1$\n(same vessel)", fontsize=9, labelpad=2)
+        ax_r.tick_params(labelsize=8); ax_r.spines[["top", "right"]].set_visible(False); ax_r.legend(loc="lower right", frameon=False, fontsize=7.5, handletextpad=0.3, borderaxespad=0.1)
+        Vv, ok_ = list(by_), np.ones(1, bool)
+        log(f"panel a: {len(xr_)} repeat pairs; bins (n) {bn}")
+        log(f"panel a: β {fit_['beta']:.2f} (f_ref {fit_['f_ref']:.2f} Hz)")
+    def draw_norm_effect(axN):
+        """held-out prediction error without / with heart-rate normalisation (alignment weighting; dc_ablation.json)"""
+        A_ = json.loads((P.RESULTS / "dc_ablation.json").read_text()); V_ = {(v["hr"], v["weighting"], v["reconstruction"]): v for v in A_["variants"]}
+        for g_, (rec, lab) in enumerate((("average", "per-vessel\naverage"), ("conservation", "conservative\nreconstruction"))):
+            pts = []
+            for dx, hr, fc in ((-0.14, False, "white"), (0.14, True, BLUE)):
+                v = V_[(hr, "alignment", rec)]; y_ = v["fold_error"]; lo_, hi_ = v["fold_error_ci"]; pts.append((g_ + dx, y_))
+                axN.errorbar(g_ + dx, y_, yerr=[[y_ - lo_], [hi_ - y_]], fmt="o", ms=5.5, mfc=fc, mec=BLUE, mew=1.2, ecolor=BLUE, elinewidth=1, capsize=0, zorder=4)
+            axN.plot(*zip(*pts), color="0.6", lw=0.8, zorder=2)
+        axN.set_xticks([0, 1]); axN.set_xticklabels(["average\nonly", "conser-\nvation"], fontsize=8); axN.set_xlim(-0.5, 1.5)
+        axN.set_ylabel("Median fold error,\nheld-out recordings", fontsize=9, labelpad=2); axN.tick_params(labelsize=8); axN.spines[["top", "right"]].set_visible(False)
+        from matplotlib.lines import Line2D as _L2n
+        axN.legend(handles=[_L2n([], [], ls="", marker="o", ms=5.5, mfc="white", mec=BLUE, mew=1.2, label="raw"),
+                            _L2n([], [], ls="", marker="o", ms=5.5, mfc=BLUE, mec=BLUE, label="HR-normalised")],
+                   loc="upper right", frameon=False, fontsize=7.5, handletextpad=0.2, borderaxespad=0.0, bbox_to_anchor=(1.12, 1.08))
+
+    def draw_validation(axV):
+        """held-out prediction (no heart-rate normalisation): constant vs alignment-dependent uncertainty, each as per-vessel
+        average only (open) and conservative reconstruction (filled); dc_ablation.json"""
+        A_ = json.loads((P.RESULTS / "dc_ablation.json").read_text()); V_ = {(v["hr"], v["weighting"], v["reconstruction"]): v for v in A_["variants"]}
+        for g_, wl in enumerate(("constant", "alignment")):
+            pts = []
+            for dx, rec, fc in ((-0.14, "average", "white"), (0.14, "conservation", BLUE)):
+                v = V_[(False, wl, rec)]; y_ = v["fold_error"]; lo_, hi_ = v["fold_error_ci"]; pts.append((g_ + dx, y_))
+                axV.errorbar(g_ + dx, y_, yerr=[[y_ - lo_], [hi_ - y_]], fmt="o", ms=5.5, mfc=fc, mec=BLUE, mew=1.2, ecolor=BLUE, elinewidth=1, capsize=0, zorder=4)
+            axV.plot(*zip(*pts), color="0.6", lw=0.8, zorder=2)
+        WH = json.loads((P.RESULTS / "dc_withholding.json").read_text()); ry = np.exp(WH["repeat"]["err"])
+        axV.axhline(ry, color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1); axV.text(1.45, ry, "repeat\nrecordings", fontsize=7, color=MUTED, va="center", ha="left")
+        axV.set_xticks([0, 1]); axV.set_xticklabels(["constant\nuncertainty", "CV-\ndependent"], fontsize=8); axV.set_xlim(-0.5, 1.4)
+        axV.set_ylabel("Median fold error,\nheld-out recordings", fontsize=9, labelpad=2); axV.tick_params(labelsize=8); axV.spines[["top", "right"]].set_visible(False)
+        from matplotlib.lines import Line2D as _L2v
+        axV.legend(handles=[_L2v([], [], ls="", marker="o", ms=5.5, mfc="white", mec=BLUE, mew=1.2, label="per-vessel average"),
+                            _L2v([], [], ls="", marker="o", ms=5.5, mfc=BLUE, mec=BLUE, label="conservative reconstruction")],
+                   loc="upper right", frameon=False, fontsize=7.5, handletextpad=0.2, borderaxespad=0.0, bbox_to_anchor=(1.05, 1.1))
+        log("panel b: " + "; ".join(f"{wl} {rec}: ×{V_[(False, wl, rec)]['fold_error']:.3f}" for wl in ("constant", "alignment") for rec in ("average", "conservation")))
+
+    def draw_ablation(axA):
+        A_ = json.loads((P.RESULTS / "dc_ablation.json").read_text()); V_ = {(v["hr"], v["weighting"], v["reconstruction"]): v for v in A_["variants"]}
+        groups = [(False, "constant"), (True, "constant"), (False, "alignment"), (True, "alignment")]
+        labs = ["constant\nraw", "constant\nHR-norm.", "CV\nraw", "CV\nHR-norm."]
+        for g_, (hr, wl) in enumerate(groups):
+            pts = []
+            for dx, rec, mk, fc in ((-0.13, "average", "o", "white"), (0.13, "conservation", "o", BLUE)):
+                v = V_[(hr, wl, rec)]; y_ = v["fold_error"]; lo_, hi_ = v["fold_error_ci"]; pts.append((g_ + dx, y_))
+                axA.errorbar(g_ + dx, y_, yerr=[[y_ - lo_], [hi_ - y_]], fmt=mk, ms=6, mfc=fc, mec=BLUE, mew=1.2, ecolor=BLUE, elinewidth=1, capsize=0, zorder=4)
+            axA.plot(*zip(*pts), color="0.6", lw=0.8, zorder=2)
+        WH = json.loads((P.RESULTS / "dc_withholding.json").read_text())
+        axA.axhline(np.exp(WH["repeat"]["err"]), color=MUTED, lw=0.8, ls=(0, (1, 2)), zorder=1)
+        axA.text(3.45, np.exp(WH["repeat"]["err"]), "repeat\nrecordings", fontsize=7.5, color=MUTED, va="center", ha="left")
+        axA.set_xticks(range(4)); axA.set_xticklabels(labs, fontsize=8); axA.set_xlim(-0.5, 3.4)
+        axA.set_ylabel("Median fold error,\nheld-out recordings", fontsize=9, labelpad=2); axA.tick_params(labelsize=8); axA.spines[["top", "right"]].set_visible(False)
+        from matplotlib.lines import Line2D as _L2a
+        axA.legend(handles=[_L2a([], [], ls="", marker="o", ms=6, mfc="white", mec=BLUE, mew=1.2, label="per-vessel average only"),
+                            _L2a([], [], ls="", marker="o", ms=6, mfc=BLUE, mec=BLUE, label="conservative reconstruction")],
+                   loc="upper right", frameon=False, fontsize=8, handletextpad=0.3, borderaxespad=0.1, bbox_to_anchor=(1.0, 1.02))
+        log(f"panel d: {A_['n_heldout']} held-out recordings ({A_['n_tiles']} tiles); " + "; ".join(f"{k}: ×{V_[k]['fold_error']:.3f}" for k in V_))
+    HF = 6.2; fig = plt.figure(figsize=(7.5, HF), facecolor="white")
+    yA = 4.05 / HF; hA = 1.75 / HF
+    # SI (sensitivity, not applied): heart rate over acquisition + pairwise flux / heart-rate ratios; normalisation effect
+    figS = plt.figure(figsize=(7.2, 2.7), facecolor="white"); axS1 = figS.add_axes([0.08, 0.2, 0.25, 0.72]); axS2 = figS.add_axes([0.42, 0.2, 0.25, 0.72])
+    draw_hr(axS1, axS2); axS3 = figS.add_axes([0.78, 0.2, 0.2, 0.72]); draw_norm_effect(axS3)
+    plos_style.save(figS, OUT.parent / "fig6_S_hr_scaling"); log("wrote fig6_S_hr_scaling")
+    # a (left): two real recordings' flux traces Q(t)/mean — a clean and a noisy one (CV near the 10th / 90th percentile of
+    #    recordings with 0.15 < |Q| < 0.6 nL/s on the reconstruction network); grey = per-frame flux, colour = mean + 3 cardiac harmonics
+    _mg = {(int(m_["tile_id"]), (u_, v_)): m_ for u_, v_, d_ in G.edges(data=True) for m_ in (d_.get("measurements_piv") or [])}
+    _cand = sorted([(r_["cv"], k_) for k_, r_ in M.items() if 0.15 < abs(r_["Q"]) < 0.6 and k_[1] in eidx and k_ in _mg
+                    and _mg[k_].get("Q_t") is not None and (_mg[k_].get("harm") or {}).get("f0_hz")])
+    _cvs = np.array([c_ for c_, _ in _cand])
+    def _spiky(key):                                                        # one glitch dominating the residual → not representative
+        mg = _mg[key]; q = np.asarray(mg["Q_t"], float); t = np.arange(len(q)) / FS_HZ; w = 2 * np.pi * mg["harm"]["f0_hz"]
+        X = np.column_stack([np.ones(len(q))] + [g(k * w * t) for k in (1, 2, 3) for g in (np.cos, np.sin)]); r = q - X @ np.linalg.lstsq(X, q, rcond=None)[0]
+        return np.max(np.abs(r)) > 4.5 * np.std(r)
+    TRACE = []
+    for q_ in (0.1, 0.9):
+        for j_ in np.argsort(np.abs(_cvs - np.quantile(_cvs, q_))):
+            if not _spiky(_cand[j_][1]):
+                TRACE.append(_cand[j_][1]); break
+    def draw_trace(ax, key, colr, lab):
+        mg = _mg[key]; q = np.asarray(mg["Q_t"], float); f0 = mg["harm"]["f0_hz"]; t = np.arange(len(q)) / FS_HZ; w = 2 * np.pi * f0
+        X = np.column_stack([np.ones(len(q))] + [g(k * w * t) for k in (1, 2, 3) for g in (np.cos, np.sin)]); b = np.linalg.lstsq(X, q, rcond=None)[0]
+        mu = b[0]; sh = t <= 3.0 / f0                                                  # three beats
+        ax.plot(t[sh], q[sh] / mu, color="0.65", lw=0.6, zorder=2)
+        ax.plot(t[sh], (X @ b)[sh] / mu, color=colr, lw=1.4, zorder=3)
+        ax.axhline(1, color=INK, lw=0.6, ls=(0, (3, 2)), zorder=1); ax.axhline(0, color="0.85", lw=0.5, zorder=0)
+        r_ = M[key]; ax.text(0.99, 0.97, f"CV = {r_['cv']:.2f}   c = {c_of(mod, r_):.2f}", transform=ax.transAxes, ha="right", va="top", fontsize=7.5, color=colr,
+                             bbox=dict(fc="white", ec="none", pad=0.5, alpha=0.8))
+        ax.set_ylim(-0.6, 2.6); ax.set_yticks([0, 1, 2])
+        ax.set_title(lab, fontsize=8, color=colr, pad=2, loc="left"); ax.tick_params(labelsize=7); ax.spines[["top", "right"]].set_visible(False)
+        log(f"panel a trace {lab}: tile {key[0]} {key[1]} |Q| {abs(r_['Q']):.3f} CV {r_['cv']:.2f} c {c_of(mod, r_):.2f}")
+    _ha = (hA - 0.3 / HF) / 2
+    for k_, (key_, lab_, colr_) in enumerate(((TRACE[0], "clean recording", BLUE), (TRACE[1], "noisy recording", PINK))):
+        axX = fig.add_axes([0.06, yA + 0.42 / HF + (1 - k_) * (_ha + 0.12 / HF), 0.2, _ha - 0.06 / HF]); draw_trace(axX, key_, colr_, lab_)
+        if k_ == 1:
+            axX.set_xlabel("time (s)", fontsize=8, labelpad=1)
+        else:
+            axX.set_xticklabels([])
+    fig.text(0.012, yA + 0.42 / HF + _ha, "flux / mean", rotation=90, fontsize=8, ha="center", va="center")
+    fig.text(0.16, yA - 0.1 / HF, f"$c = {mod['c0']:.2f} + {mod.get('c_cv', 0):.2f}\\,\\mathrm{{CV}}$", fontsize=8.5, ha="center", va="center")
+    axC2 = fig.add_axes([0.335, yA, 0.17, hA]); draw_calibration_cum(axC2)
+    axVb = fig.add_axes([0.71, yA, 0.2, hA]); draw_validation(axVb)
+    axC2.set_xlabel("Fraction of junctions\n(lowest error first)", fontsize=8.5, labelpad=2); axC2.set_ylabel("Cumulative squared\nimbalance", fontsize=8.5, labelpad=1)
+    for t_ in list(axC2.texts): t_.remove()
+    axC2.set_xticks([0, 0.5, 1]); axC2.set_xticklabels(["0", "0.5", "1"])
+    axC2.legend(handles=axC2.get_legend().legend_handles, labels=["ideal", "constant", "CV-dependent"], loc="upper left", frameon=False, fontsize=7, handlelength=1.5, borderaxespad=0.05)
+    figA = plt.figure(figsize=(5.0, 2.6), facecolor="white"); draw_ablation(figA.add_axes([0.15, 0.22, 0.6, 0.72]))   # SI
+    plos_style.save(figA, OUT.parent / "fig6_S_ablation"); log("wrote fig6_S_ablation")
+    T1, T2 = 6.0 / HF, 3.02 / HF
+    figW = plt.figure(figsize=(3.75, 2.6), facecolor="white"); draw_withheld_fold(figW.add_axes([0.2, 0.2, 0.75, 0.72]))           # SI
+    plos_style.save(figW, OUT.parent / "fig6_S_withholding"); log("wrote fig6_S_withholding")
+    figDir = plt.figure(figsize=(3.6, 2.6), facecolor="white"); draw_withheld_dir(figDir.add_axes([0.2, 0.2, 0.75, 0.72]))   # SI
+    plos_style.save(figDir, OUT.parent / "fig6_S_direction"); log("wrote fig6_S_direction")
     # c: worked example — the nine-vessel patch at the tile 22/26/27 overlap: every recording (tile colour), the 1/c²-weighted
     #    aggregate (diamond) and the full-network reconciled flux Q′ (bar), signed along each vessel's reconstructed flow direction
     _saved = (pidx, recs, ptiles, TCOL, order, num)                   # the worked example has its own patch (EX_PATCH): a mixed one
@@ -811,7 +1018,7 @@ def main():
     axCB = fig.add_axes([0.05, 0.42 / HF, 0.215, 0.07 / HF])
     cb_ = fig.colorbar(matplotlib.cm.ScalarMappable(norm=CNORM, cmap=CCMAP), cax=axCB, orientation="horizontal")
     cb_.set_ticks([0.2, 0.3, 0.5, 0.8]); cb_.set_ticklabels(["0.2", "0.3", "0.5", "0.8"]); cb_.minorticks_off(); axCB.tick_params(labelsize=8, length=2, pad=1)
-    cb_.outline.set_linewidth(0.5); axCB.set_xlabel("Calibrated fractional discrepancy, $c_k$", fontsize=8, labelpad=1)
+    cb_.outline.set_linewidth(0.5); axCB.set_xlabel("Estimated relative measurement error, $c_k$", fontsize=8, labelpad=1)
     log("panel c vessel c_eff: " + ", ".join(f"{num[i]}: {D['c'][i]:.2f}" for i in order))
     L_ = 50 / PX_UM; xb_, yb_ = cx_ + hh - 8 - L_, cy_ + hh - 8
     axP.plot([xb_, xb_ + L_], [yb_, yb_], color=INK, lw=2, solid_capstyle="butt", zorder=6); axP.text(xb_ + L_ / 2, yb_ - 4, "50 µm", fontsize=8, ha="center", va="bottom")
@@ -824,12 +1031,23 @@ def main():
         axQ.plot([o_ * Qm[i], o_ * Qp[i]], [yrow, yrow], color="0.55", lw=0.7, zorder=2.5)   # adjustment: weighted mean → Q′
     axQ.axvline(0, color="0.8", lw=0.6, zorder=1); axQ.set_yticks(range(1, len(order) + 1)); axQ.set_yticklabels([str(num[i]) for i in order[::-1]], fontsize=8)
     axQ.set_ylim(0.4, len(order) + 0.6); axQ.set_xlim(left=min(0, axQ.get_xlim()[0])); axQ.tick_params(labelsize=8)
-    axQ.set_ylabel("Vessel", fontsize=9, labelpad=2); axQ.set_xlabel("Mean flux along the reconstructed flow direction (nL/s)", fontsize=9, labelpad=2)
+    axQ.set_ylabel("Vessel", fontsize=9, labelpad=2); axQ.set_xlabel("Mean flux (nL/s)", fontsize=9, labelpad=2)
     axQ.spines[["top", "right"]].set_visible(False)
     from matplotlib.lines import Line2D as _L2c
-    hq = [_L2c([], [], ls="", marker="o", ms=5, mfc="white", mec="0.6", mew=1.0, label="Recording"),
+    hq = [_L2c([], [], ls="", marker="o", ms=5, mfc="white", mec="0.6", mew=1.0, label="Recorded flux"),
           _L2c([], [], ls="", marker="D", ms=5, color=BLUE, label="Quality-weighted average"), _L2c([], [], color=INK, lw=2.4, label="Reconciled flux Q′")]
     axQ.legend(handles=hq, loc="best", frameon=False, fontsize=8, handletextpad=0.3, labelspacing=0.3, borderaxespad=0.1)
+    from collections import Counter as _Cn                                   # highlight one junction of the patch: conservation before / after
+    _cnt = _Cn(n for i in pidx for n in E[i]); _jn = [n for n, k in _cnt.items() if k >= 3]
+    if _jn:
+        _inc = lambda n: [i for i in pidx if n in E[i]]
+        n_ = max(_jn, key=lambda n: sum(abs(Qp[i]) for i in _inc(n)))
+        into = lambda i, q: (E[i][1] == n_) == (q > 0)                    # flow along E[i] (u→v) enters n_
+        ins = [i for i in _inc(n_) if into(i, Qp[i])]; outs = [i for i in _inc(n_) if not into(i, Qp[i])]
+        o_ = lambda i: np.sign(Qp[i]) * Qm[i]                                # weighted average along the reconciled direction
+        fmt = lambda L_, f_: " + ".join(f"{f_(i):.3f}" for i in L_)
+        ltx = lambda L_: " + ".join(f"$Q_{{{num[i]}}}$" for i in L_)
+        log(f"panel b junction {n_}: in {[num[i] for i in ins]} out {[num[i] for i in outs]}; averages {fmt(ins, o_)} vs {fmt(outs, o_)}; reconciled {fmt(ins, lambda i: abs(Qp[i]))} = {fmt(outs, lambda i: abs(Qp[i]))}")
     log("panel c: " + "; ".join(f"{num[i]}: recs " + "/".join(f"{np.sign(Qp[i]) * s_ * q_:+.3f}" for (_, q_, _, s_) in sorted(recs[i]))
                                  + f", mean {np.sign(Qp[i]) * Qm[i]:+.3f}, Q′ {abs(Qp[i]):.3f}" for i in order))
     pidx, recs, ptiles, TCOL, order, num = _saved
@@ -932,7 +1150,7 @@ def main():
     plos_style.save(figJ, OUT.parent / "fig6_S_junction"); log("wrote fig6_S_junction (example same-tile junction)")
     log(f"caption: junction in {sum(yin_):.3f} ({' + '.join(f'{v_:.3f}' for v_ in yin_)}), out {sum(yout_):.3f}, |r_j| {abs(rj):.3f} ({100 * abs(rj) / qin_:.0f} %)")
     log(f"panel a formula (caption): c = {c0f:.2f} + {cff:.2f}(1 − {pterm}) + {caf:.2f}(1 − a) = {cx:.2f}; p = {np.mean(r2x):.3f} (stored {mx.get('p', float('nan')):.3f})")
-    for x_, y_, l_ in ((0.0, T1, "a"), (0.51, T1, "b"), (0.0, T2, "c")):  # panel letters only; the caption names the results
+    for x_, y_, l_ in ((0.0, T1, "a"), (0.6, T1, "b"), (0.0, T2, "c")):  # panel letters only
         fig.text(x_, y_ - 0.004, l_, **LET)
     plos_style.save(fig, OUT)
     figD = plt.figure(figsize=(3.6, 3.2), facecolor="white"); draw_obs_pred(figD.add_axes([0.2, 0.17, 0.75, 0.75]))   # SI: diagonal calibration
@@ -1065,9 +1283,10 @@ def main():
         ax = fs2.add_subplot(ga[k]); x = ex[e]; draw_measurement(ax, img, x["ki"], colr, x["valid"]); axA.append(ax)
         ax.set_title(lab, fontsize=8.5, color=colr, pad=2)
         ax.text(0.5, -0.04, f"c = {x['c']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=9, color=colr, fontweight="bold")
-        ax.text(0.5, -0.19, f"{profile_coef(mod)[0]} {x['f']:.2f}, align {x['align']:.2f}", transform=ax.transAxes, ha="center", va="top", fontsize=8)
+        ax.text(0.5, -0.19, (f"CV {x['cv']:.2f}" if profile_coef(mod)[0] == "cv" else f"{profile_coef(mod)[0]} {x['f']:.2f}, align {x['align']:.2f}"), transform=ax.transAxes, ha="center", va="top", fontsize=8)
     pa0, pa1 = axA[0].get_position(), axA[1].get_position()
-    fs2.text((pa0.x0 + pa1.x1) / 2, 0.04, (r"$c = %.2f + %.2f\,(1 - " + profile_coef(mod)[0] + r") + %.2f\,(1 - \mathrm{align})$") % (c0_, profile_coef(mod)[1], mod["c_a"]), ha="center", fontsize=8.5)
+    fs2.text((pa0.x0 + pa1.x1) / 2, 0.04, ((r"$c = %.2f + %.2f\,\mathrm{CV}$" % (c0_, profile_coef(mod)[1])) if profile_coef(mod)[0] == "cv" else
+              (r"$c = %.2f + %.2f\,(1 - " + profile_coef(mod)[0] + r") + %.2f\,(1 - \mathrm{align})$") % (c0_, profile_coef(mod)[1], mod["c_a"])), ha="center", fontsize=8.5)
     axc = fs2.add_subplot(g2[1]); R_ = cal["rows"]; lo_, hi_ = R_[:, 0].min() / 1.6, R_[:, 0].max() * 1.6
     axc.plot([lo_, hi_], [lo_, hi_], color=GREY, lw=0.8, ls=(0, (3, 2)))
     axc.errorbar(R_[:, 0], R_[:, 1], yerr=[R_[:, 1] - R_[:, 2], R_[:, 3] - R_[:, 1]], fmt="o", ms=4, color=BLUE, mec="white", mew=0.5, ecolor=BLUE, capsize=0)

@@ -369,6 +369,19 @@ def analyze(stage_root: Path = typer.Argument(...),
                     kl_sidecar_dir=side, out_path=out)
 
 
+@app.command('refine-eval')
+def refine_eval_cmd(stage_root: Path = typer.Argument(...),
+                    pending: Path = typer.Argument(..., help="graph/patches/pending/<stamp> candidate folder"),
+                    no_measure: bool = typer.Option(False, "--no-measure", help="skip measuring the new vessels"),
+                    workers: int = typer.Option(None, help="joblib workers for the measurement")) -> None:
+    """Evaluate a refinement candidate (workbench Refine panel): measure its new vessels into the candidate only,
+    refit current vs candidate, write result.json / result.pkl next to it.  Writes nothing else."""
+    import os
+    os.environ.setdefault("PLEXUSFLOW_STAGE", str(stage_root))
+    from .edit.refine import evaluate
+    evaluate(stage_root, pending, measure=not no_measure, workers=workers, log=lambda s: typer.echo(s))
+
+
 @app.command('carry-measurements')
 def carry_measurements_cmd(stage_root: Path = typer.Argument(...),
                            tol_px: float = typer.Option(1.0, help='Centreline match tolerance (px).')) -> None:
