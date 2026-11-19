@@ -2618,6 +2618,12 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._plot_qt_btn.setEnabled(False)
         self._plot_qt_btn.clicked.connect(self._plot_selected_qt)
         inspect_lay.addWidget(self._plot_qt_btn)
+        self._aligned_norm_chk = QCheckBox("Aligned-waveform window: shape only, (Q − Q̄)/|H1|, instead of Q/Q̄")
+        self._aligned_norm_chk.setToolTip(
+            "Only with Tile filter = All tiles and no video: the extra window that puts every recording\n"
+            "on a common cardiac phase.  Off (default): Q/Q̄ (pulsatility visible).  On: (Q − Q̄)/|H1| (shape only).")
+        self._aligned_norm_chk.toggled.connect(lambda c: setattr(self, '_aligned_norm_mean', not c))
+        inspect_lay.addWidget(self._aligned_norm_chk)
         # ── Overlay: compare current source with a second source ────────
         _cmp_row = QHBoxLayout()
         _cmp_row.addWidget(QLabel("Compare current source with:"))

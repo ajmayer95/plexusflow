@@ -1213,6 +1213,123 @@ class TimeseriesMixin:
             _place_figure_top_right(fig)
         except Exception:
             pass
+        # With no focus tile (no tile filter, no video), also compare the
+        # recordings' waveforms after phase/frequency alignment.
+        if focus_tid is None:
+            try:
+                self._plot_selected_qt_aligned(u, v, meas_ranked)
+            except Exception as e:
+                print(f"[aligned waveforms] edge ({u}, {v}): {e}")
+
+
+    def _plot_selected_qt_aligned(self, u, v, meas_ranked, n_bins: int = 40,
+                                  peak_at: float = 0.4):
+        """Compare every recording of an edge on a common cardiac-phase axis
+        (see ``plexusflow.analyze.waveform_shape``).
+
+        (a) folded waveform in nL/s, each recording on its own f0 with H1 peaks matched;
+        (b) Q/Q-bar (default), or shape only, (Q - DC)/|H1|, when the Inspect-panel checkbox is ticked;
+        (c) shape similarity: upper triangle = noise-corrected correlation r / sqrt(R_a R_b),
+            lower triangle = small-sample-corrected F test of the harmonic shape (H2, H3 relative to H1),
+            diagonal = split-half reliability R of each recording.
+        """
+        from ..analyze.waveform_shape import align_recording, compare
+        rows = []
+        for m in meas_ranked:
+            mv = MeasurementView(m)
+            if mv.Q_t is None:
+                continue
+            a = align_recording(mv.Q_t, float(mv.harm.f0_hz or np.nan), n_bins=n_bins, peak_at=peak_at)
+            if a is None:
+                continue
+            a.update(tile=mv.tile_id, usable=_measurement_usable(m))
+            rows.append(a)
+        if len(rows) < 2:
+            return
+        import matplotlib.pyplot as plt
+        n = len(rows)
+        by_mean = bool(getattr(self, '_aligned_norm_mean', True))
+        with np.errstate(all='ignore'):
+            if by_mean:
+                Sd = np.array([r['fold'] / r['a0'] if abs(r['a0']) > 1e-9
+                               else np.full(n_bins, np.nan) for r in rows])
+            else:
+                Sd = np.array([(r['fold'] - r['a0']) / r['amp1'] for r in rows])
+            cons = np.nanmedian(Sd, axis=0)
+        C = np.full((n, n), np.nan)
+        P = np.full((n, n), np.nan)
+        for i in range(n):
+            C[i, i] = rows[i]['R']
+            for j in range(i + 1, n):
+                cp = compare(rows[i], rows[j])
+                C[i, j] = cp['r_corr']
+                C[j, i] = cp['F']
+                P[j, i] = cp['p_F']
+
+        fig = plt.figure(figsize=(14, 5.0), facecolor='white')
+        gs = fig.add_gridspec(1, 3, width_ratios=[1.25, 1.25, 0.9], wspace=0.32)
+        axA, axB, axC = (fig.add_subplot(gs[0, k]) for k in range(3))
+        x = (np.arange(2 * n_bins) + 0.5) / n_bins           # two cycles
+        for i, r in enumerate(rows):
+            col = f'C{i % 10}'
+            ls = '-' if r['usable'] else '--'
+            lw = 1.4 if r['usable'] else 0.9
+            axA.plot(x, np.tile(r['fold'], 2), color=col, ls=ls, lw=lw,
+                     label=(f"{'✓' if r['usable'] else '✗'} tile {r['tile']}  f₀={r['f0']:.2f} Hz  "
+                            f"DC={r['a0']:.3f}  ({r['n_cycles']:.0f} cyc)"))
+            axB.plot(x, np.tile(Sd[i], 2), color=col, ls=ls, lw=lw,
+                     label=(f"tile {r['tile']}  "
+                            + (f"PI={2 * r['amp1'] / abs(r['a0']):.2f}  " if by_mean and r['a0'] else '')
+                            + f"H2/H1={r['h21']:.2f}  Θ₂₁={r['th21_deg']:+.0f}°  "
+                            + f"R={r['R']:.2f}"))
+        axB.plot(x, np.tile(cons, 2), color='k', lw=2.4, alpha=0.35, label='median')
+        for ax in (axA, axB):
+            ax.axvline(1.0, color='0.75', lw=0.6)
+            ax.set_xlim(0, 2); ax.grid(alpha=0.3)
+            ax.set_xlabel(f'cardiac phase (cycles; H1 peak at {peak_at:g})')
+            ax.legend(fontsize=7, loc='upper right', framealpha=0.85)
+        axA.axhline(0, color='0.6', lw=0.6)
+        axA.set_ylabel('phase-averaged Q (nL/s)')
+        axA.set_title('(a) aligned: each recording on its own f₀, H1 peaks matched', fontsize=10)
+        if by_mean:
+            axB.axhline(1, color='0.6', lw=0.6, ls=':')
+            axB.set_ylabel('Q / Q̄')
+            axB.set_title('(b) mean-normalised (Q̄ = 1; PI = 2|H1|/Q̄)', fontsize=10)
+        else:
+            axB.axhline(0, color='0.6', lw=0.6)
+            axB.set_ylabel('(Q − DC) / |H1|')
+            axB.set_title('(b) shape only (DC removed, H1 amplitude = 1)', fontsize=10)
+        # (c) upper: noise-corrected r (colour); lower: chi2/dof (text); diagonal: R
+        up = np.where(np.triu(np.ones((n, n), bool), 1), C, np.nan)
+        im = axC.imshow(up, vmin=0, vmax=1.2, cmap='viridis')
+        labs = [str(r['tile']) for r in rows]
+        axC.set_xticks(range(n)); axC.set_xticklabels(labs, fontsize=7, rotation=90)
+        axC.set_yticks(range(n)); axC.set_yticklabels(labs, fontsize=7)
+        fs = 7 if n <= 8 else 5
+        for i in range(n):
+            for j in range(n):
+                if not np.isfinite(C[i, j]):
+                    continue
+                if i < j:
+                    axC.text(j, i, f'{C[i, j]:.2f}', ha='center', va='center', fontsize=fs,
+                             color='k' if C[i, j] > 0.7 else 'w')
+                elif i == j:
+                    axC.text(j, i, f'R {C[i, j]:.2f}', ha='center', va='center', fontsize=fs, color='0.3')
+                else:
+                    axC.text(j, i, f'{C[i, j]:.1f}', ha='center', va='center', fontsize=fs,
+                             color='#b03030' if P[i, j] < 0.01 else '0.2')
+        iu = np.triu_indices(n, 1)
+        med_rc = np.nanmedian(C[iu]) if np.isfinite(C[iu]).any() else np.nan
+        med_x2 = np.nanmedian(C[(iu[1], iu[0])]) if np.isfinite(C[(iu[1], iu[0])]).any() else np.nan
+        axC.set_title('(c) upper: r / √(RₐR_b)  (≈ 1: agree within noise)\n'
+                      'lower: shape F of H2, H3 (≈ 1: noise; red: p < 0.01)\n'
+                      f'median r_corr = {med_rc:.2f},  median F = {med_x2:.1f}   (r_corr blank if R < 0.3)', fontsize=9)
+        fig.colorbar(im, ax=axC, fraction=0.046, pad=0.04, label='noise-corrected r')
+        fig.suptitle(f'Edge ({u}, {v}): {n} recordings, phase/frequency aligned '
+                     '(sign flipped to positive mean; dashed = not usable; R = split-half reliability)',
+                     fontsize=11)
+        fig.subplots_adjust(left=0.05, right=0.97, top=0.80, bottom=0.13)
+        plt.show(block=False)
 
 
     def _plot_selected_reconciled_qt(self):
