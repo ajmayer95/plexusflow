@@ -20,6 +20,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
+import matplotlib.ticker
+import matplotlib.lines
 from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
 from matplotlib.patches import Rectangle
@@ -149,11 +151,13 @@ def main():
         _, cy0, cy1, cx0, cx1 = best
         print(f"[fig2] auto crop inside tile {args.tile}: rows {cy0}:{cy1}, cols {cx0}:{cx1} (tile vs fused 1 − r = {best[0]:.2f})")
         inside = [k for k, s_ in enumerate(segs) if ((s_[:, 0] > cx0) & (s_[:, 0] < cx1) & (s_[:, 1] > cy0) & (s_[:, 1] < cy1)).any()]
-    ys, xs = np.nonzero(organ); pad = 40
-    ox0, ox1, oy0, oy1 = max(xs.min() - pad, 0), min(xs.max() + pad, Wm), max(ys.min() - pad, 0), min(ys.max() + pad, Hm)
+    from mosaic_display import load_mosaic, show_mosaic
+    MOS = load_mosaic(P)                                       # the Fig 1c image and field of view (shared helper)
+    ox0, ox1, oy1, oy0 = MOS["extent"]
+    tissue = ~MOS["outside"]
 
-    fig = plt.figure(figsize=(5.2, 3.9))                       # PLOS text-column width
-    gs = fig.add_gridspec(2, 4, height_ratios=[0.72, 1.0], hspace=0.12, wspace=0.1, left=0.03, right=0.9, top=0.93, bottom=0.02)
+    fig = plt.figure(figsize=(5.2, 4.45))                      # PLOS text-column width
+    gs = fig.add_gridspec(2, 4, height_ratios=[0.62, 1.0], hspace=0.3, wspace=0.16, left=0.03, right=0.9, top=0.94, bottom=0.02)
     letter = lambda ax, l, dx=0.0: ax.text(dx, 1.03, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
     def frame(ax, on):
         ax.set_xticks([]); ax.set_yticks([])
@@ -168,23 +172,21 @@ def main():
     for k, ttl in enumerate(("Stitched mosaic", "Probability", "Mask", "Graph")):
         ax = fig.add_subplot(gs[0, k]); top.append(ax)
         if k == 0:
-            ax.imshow(np.ma.masked_where(~organ, mm), cmap="gray", vmin=vmm[0], vmax=vmm[1], interpolation="antialiased")
-        elif k == 1:
-            ax.imshow(np.ma.masked_where(~organ, prob), cmap="magma", vmin=vpr[0], vmax=vpr[1], interpolation="antialiased")
+            show_mosaic(ax, MOS)
+        elif k == 1:                                          # ilastik vessel probability, 0 (black) … 1; white = outside the tissue
+            pcm = plt.cm.magma.copy(); pcm.set_bad("white")
+            ax.imshow(np.ma.masked_where(~tissue, prob), cmap=pcm, vmin=0, vmax=1, interpolation="antialiased")
         elif k == 2:
             ax.imshow(np.where(mask, 0.25, 1.0), cmap="gray", vmin=0, vmax=1, interpolation="antialiased")
         else:
             ax.add_collection(LineCollection(segs, colors=rcol(rad_um), linewidths=lw_of(rad_um) * 0.45))
             ax.plot(tcx, tcy, color="#e0a800", lw=1.0, zorder=6)
         ax.set_xlim(ox0, ox1); ax.set_ylim(oy1, oy0); ax.set_aspect("equal"); frame(ax, False)
-        ax.set_title(ttl, fontsize=8, pad=2)
-        if k < 3:
-            ax.annotate("", xy=(1.06, 0.5), xytext=(1.0, 0.5), xycoords="axes fraction", arrowprops=dict(arrowstyle="-|>", lw=0.7, color=INK, mutation_scale=6))
-    fig.canvas.draw(); pG = top[3].get_position()                      # compact radius colorbar right of the whole-organ graph
-    cax = fig.add_axes([pG.x1 + 0.012, pG.y0 + 0.12 * pG.height, 0.014, 0.76 * pG.height])
-    cb = fig.colorbar(plt.cm.ScalarMappable(norm=rnorm, cmap=rcmap), cax=cax, ticks=[10, 20, 30, 40])
-    cb.set_label("Radius (µm)", labelpad=1); cb.outline.set_linewidth(0.5)
-    scalebar(top[0], 1000, PX_UM, x_frac=0.22, y_frac=1.0, color=INK, halo=False)
+        ax._ttl = ttl
+    fig.canvas.draw()
+    for ax in top:
+        ax.apply_aspect()
+    TOPROW = dict(ar=top[0].get_position().height / top[0].get_position().width)   # placed at the end (needs the bottom row)
 
     # bottom row: b graph close-up (radius bars) · c mosaic space around the tile · A⁻¹ · d the tile's own frame
     gB = gs[1, :].subgridspec(1, 4, width_ratios=[0.0001, 1.15, 0.3, 1.05], wspace=0.05)
@@ -224,13 +226,13 @@ def main():
     axm.plot(tcx[0], tcy[0], "o", ms=4, color="#ffd23f", zorder=7)                         # tile origin corner, to read the rotation
     axm.set_xlim(c0, c1); axm.set_ylim(r1, r0); axm.set_aspect("equal"); frame(axm, False)
     landmarks(axm, [m_[1] for m_ in marks])
-    axm.set_title("Mosaic coordinates (X, Y)", fontsize=8, pad=2); scalebar(axm, 200, PX_UM)
+    axm._ttl = "Mosaic coordinates (X, Y)"; scalebar(axm, 200, PX_UM)
 
     # arrow: the inverse of the tile's registration
     axa = fig.add_subplot(gB[2]); axa.axis("off"); axa.set_xlim(0, 1); axa.set_ylim(0, 1)
     axa.annotate("", xy=(0.97, 0.5), xytext=(0.03, 0.5), arrowprops=dict(arrowstyle="-|>", lw=1.4, color=INK, mutation_scale=12))
-    axa.text(0.5, 0.56, f"$T_{{{args.tile}}}^{{-1}}$", ha="center", va="bottom", fontsize=9)
-    axa.text(0.5, 0.44, "inverse\nregistration", ha="center", va="top", fontsize=8, linespacing=1.0, color="0.25")
+    axa.text(0.5, 0.56, f"$T_{{{args.tile}}}^{{-1}}$", ha="center", va="bottom", fontsize=11, math_fontfamily="cm")
+    axa.text(0.5, 0.44, "inverse\nregistration\n(rotation,\nscale, shift)", ha="center", va="top", fontsize=8, linespacing=1.0, color="0.25")
 
     # d: the tile's own frame (its recorded movie's projection) with the graph mapped in
     axC = fig.add_subplot(gB[3])
@@ -252,15 +254,52 @@ def main():
     axC.plot([0, Wt, Wt, 0, 0], [0, 0, Ht, Ht, 0], color="#ffd23f", lw=0.9, zorder=6, clip_on=False)
     axC.plot(0, 0, "o", ms=4, color="#ffd23f", zorder=7, clip_on=False)
     axC.set_xlim(0, Wt); axC.set_ylim(Ht, 0); axC.set_aspect("equal"); frame(axC, False)
-    axC.set_title(f"Tile {args.tile} recording (x, y)", fontsize=8, pad=2); scalebar(axC, 200, PX_UM)
+    axC._ttl = f"Tile {args.tile} recording (x, y)"; scalebar(axC, 200, PX_UM)
     print(f"[fig2] tile {args.tile}: {len(loc)} edges mapped into its frame")
-    # panel letters on a grid: a above b in one column, b and c on one baseline (above their titles)
-    fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv_ = fig.transFigure.inverted()
-    tb = lambda ax_: inv_.transform(ax_.get_tightbbox(rr_))
-    xl = min(tb(top[0])[0, 0], tb(axm)[0, 0]) - 0.005; yb = max(tb(axm)[1, 1], tb(axC)[1, 1]) + 0.004
-    fig.text(xl, min(tb(top[0])[1, 1] + 0.004, 0.99), "a", fontsize=12, fontweight="bold", va="bottom", ha="left")
-    fig.text(xl, yb, "b", fontsize=12, fontweight="bold", va="bottom", ha="left")
-    fig.text(tb(axC)[0, 0] - 0.005, yb, "c", fontsize=12, fontweight="bold", va="bottom", ha="left")
+    # ---- final layout.  Bottom row from the grid; top row placed explicitly above it: four equal panels with small
+    #      arrows, horizontal colour bars (and the 1 mm bar) on one line under their panels; every title on one baseline
+    #      with its panel letter.
+    fig.canvas.draw()
+    for ax in (axm, axC):
+        ax.apply_aspect()
+    pm, pc = axm.get_position(), axC.get_position()
+    y_ttl_B = max(pm.y1, pc.y1) + 0.012                                   # bottom-row title baseline
+    W_, H_ = fig.get_size_inches(); xL, xR, g = 0.04, 0.985, 0.022
+    w = (xR - xL - 3 * g) / 4; h = w * TOPROW["ar"]
+    y_cb = y_ttl_B + 0.105                                                # colour-bar line (ticks + label below it)
+    y0 = y_cb + 0.03; xs_ = [xL + k * (w + g) for k in range(4)]
+    for ax, x_ in zip(top, xs_):
+        ax.set_position([x_, y0, w, h]); ax.set_anchor("S")
+    fig.canvas.draw()
+    for ax in top:
+        ax.apply_aspect()
+    pp = [ax.get_position() for ax in top]
+    y_ttl_A = max(p_.y1 for p_ in pp) + 0.006
+    for k in range(3):                                                    # small stage arrows in the gaps
+        ym = pp[k].y0 + pp[k].height / 2
+        fig.add_artist(matplotlib.patches.FancyArrowPatch((pp[k].x1 + 0.002, ym), (pp[k + 1].x0 - 0.002, ym), transform=fig.transFigure,
+                       arrowstyle="-|>", mutation_scale=5, lw=0.5, color=INK))
+    def hbar(p_, norm_, cmap_, ticks, label):
+        cw = 0.72 * p_.width; cax_ = fig.add_axes([p_.x0 + (p_.width - cw) / 2, y_cb - 0.006, cw, 0.012])
+        cb_ = fig.colorbar(plt.cm.ScalarMappable(norm=norm_, cmap=cmap_), cax=cax_, orientation="horizontal", ticks=ticks)
+        cb_.ax.tick_params(labelsize=8, length=2, pad=1); cb_.outline.set_linewidth(0.5); cb_.set_label(label, fontsize=8, labelpad=1)
+        cb_.ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+    hbar(pp[1], Normalize(0, 1), plt.cm.magma, [0, 0.5, 1], "Vessel probability")
+    hbar(pp[3], rnorm, rcmap, [10, 20, 30, 40], "Radius (µm)")
+    # 1 mm scale bar under the mosaic, on the colour-bar line, label above and centred
+    L_fig = (1000 / PX_UM) / (top[0].get_xlim()[1] - top[0].get_xlim()[0]) * pp[0].width
+    xm = pp[0].x0 + pp[0].width / 2
+    fig.add_artist(matplotlib.lines.Line2D([xm - L_fig / 2, xm + L_fig / 2], [y_cb, y_cb], transform=fig.transFigure, color=INK, lw=2,
+                                           solid_capstyle="butt"))
+    fig.text(xm, y_cb + 0.012, "1 mm", ha="center", va="bottom", fontsize=8)
+    # titles and panel letters on shared baselines
+    for ax, p_ in zip(top, pp):
+        fig.text(p_.x0 + p_.width / 2, y_ttl_A, ax._ttl, ha="center", va="baseline", fontsize=9)
+    for ax, p_ in ((axm, pm), (axC, pc)):
+        fig.text(p_.x0 + p_.width / 2, y_ttl_B, ax._ttl, ha="center", va="baseline", fontsize=9)
+    L_ = dict(fontsize=12, fontweight="bold", va="baseline", ha="left")
+    fig.text(0.008, y_ttl_A, "a", **L_); fig.text(0.008, y_ttl_B, "b", **L_); fig.text(pc.x0 - 0.04, y_ttl_B, "c", **L_)
+    print(f"[fig2] top row panel {w * W_:.2f} × {h * H_:.2f} in; title baselines a {y_ttl_A:.3f}, b/c {y_ttl_B:.3f}")
     plos_style.save(fig, _paths.FIGURES / "fig2" / args.out_name)
 
 

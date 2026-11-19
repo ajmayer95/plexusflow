@@ -4,6 +4,7 @@
      BioRender.com); the yolk-sac plexus is recorded one overlapping field of view at a time
   b  one 250 fps movie per tile (stacks; tile 36 in front) → per-tile image used for registration: temporal max − median
      projection (tiles/maxmed) → background-filtered (minus a σ = 80 px Gaussian, percentile-normalised)
+  (b) colours: magenta = the tile being registered, green = its fixed neighbours, white = where they agree.
   c  stitching one tile: tile 15 in its own frame (top left) and placed by its stored affine A_15 over the rigid anchor
      tiles (yellow); arrows decompose A_15 relative to the anchors' rotation (green: stretch along rows, magenta:
      contraction along columns, yellow: shear, blue: rotation); stars = the same three vessel landmarks before/after
@@ -337,28 +338,21 @@ def order_panel(fig, ax, mos, positions):
     pos = load_tile_positions(str(positions))
     A = {t: np.asarray(e["affine_matrix"], float) for t, e in pos.items() if e.get("affine_matrix") is not None}
     tids = sorted(A); C = np.array([352.0, 320.0])                 # full-res tile centre (H/2, W/2)
-    from scipy import ndimage as _ndi
-    outside = ~_ndi.binary_fill_holes(mos > 0)                     # mask only the exterior
-    # display only: saturated (255) blobs and zero-valued holes inside the organ are filled by a masked Gaussian average of the
-    # surrounding tissue (normalised convolution, σ = 6 px) — stated in the caption
-    bad = ~outside & ((mos >= mos.max()) | (mos <= 0)); bad = _ndi.binary_dilation(bad, iterations=1) & ~outside
-    good = (~bad & ~outside).astype(float); num = gaussian_filter(mos * good, 6.0); den = gaussian_filter(good, 6.0)
-    disp = np.where(bad, num / np.maximum(den, 1e-6), mos)
-    print(f"[fig1] mosaic display fill: {100 * bad.sum() / (~outside).sum():.1f}% of organ pixels (saturated or empty)")
-    ok = ~outside & ~bad
-    ax.imshow(np.ma.masked_where(outside, disp), cmap="gray", vmin=np.percentile(disp[ok], 1), vmax=np.percentile(disp[ok], 99.5),
-              interpolation="antialiased")
+    from mosaic_display import load_mosaic, show_mosaic
+    M = load_mosaic(_paths.STAGE)                                  # shared with Fig 2a (same image and field of view)
+    print(f"[fig1] mosaic display fill: {100 * M['fill_fraction']:.1f}% of organ pixels (saturated or empty)")
+    show_mosaic(ax, M)
     for t in tids:
         q = (np.array([[0, 0], [0, 640], [704, 640], [704, 0], [0, 0]], float) @ A[t][:2, :2].T + A[t][:2, 2])[:, [1, 0]]
         ax.plot(*q.T, color="#e8c85a", lw=0.3, alpha=0.35)
     pts = np.array([(A[t][:2, :2] @ C + A[t][:2, 2])[[1, 0]] for t in tids]); norm = Normalize(tids[0], tids[-1]); cmap = plt.cm.plasma
-    lc = LineCollection(np.stack([pts[:-1], pts[1:]], 1), colors=cmap(norm(np.array(tids[:-1]))), linewidths=1.1, zorder=4)
+    lc = LineCollection(np.stack([pts[:-1], pts[1:]], 1), colors=cmap(norm(np.array(tids[:-1]))), linewidths=1.76, zorder=4)
     ax.add_collection(lc)
     for i in range(2, len(tids) - 1, 6):                        # a few direction arrowheads only
-        ax.add_patch(FancyArrowPatch(pts[i], (pts[i] + pts[i + 1]) / 2, arrowstyle="-|>", mutation_scale=8, lw=0, color=cmap(norm(tids[i])), zorder=5))
-    ax.scatter(*pts.T, c=tids, cmap=cmap, norm=norm, s=5, zorder=5, edgecolor="white", linewidth=0.25)
-    ax.scatter(*pts[0], s=40, facecolor="none", edgecolor="white", linewidth=1.0, zorder=6)
-    ax.set_xlim(0, mos.shape[1]); ax.set_ylim(mos.shape[0], 0); ax.set_aspect("equal"); ax.axis("off")
+        ax.add_patch(FancyArrowPatch(pts[i], (pts[i] + pts[i + 1]) / 2, arrowstyle="-|>", mutation_scale=26, lw=0, color=cmap(norm(tids[i])), zorder=5))
+    ax.scatter(*pts.T, c=tids, cmap=cmap, norm=norm, s=20, zorder=5, edgecolor="white", linewidth=0.5)
+    ax.scatter(*pts[0], s=110, facecolor="none", edgecolor="white", linewidth=1.4, zorder=6)
+    ax.axis("off")
     return norm, cmap, len(tids)
 
 
@@ -377,9 +371,9 @@ def main():
     st = tifffile.imread(str(vids[args.tile])).astype(np.float32); T = st.shape[0]
     mm = tifffile.imread(str(P / "tiles" / "maxmed" / f"vid{args.tile}_maxmed.tif")).astype(float); mm = mm.mean(-1) if mm.ndim == 3 else mm
 
-    fig = plt.figure(figsize=(7.5, 4.4))
-    gs = fig.add_gridspec(1, 2, width_ratios=[1.0, 1.08], wspace=0.06, left=0.01, right=0.9, top=0.965, bottom=0.02)
-    gL = gs[0].subgridspec(2, 1, height_ratios=[0.9, 1.0], hspace=0.08)
+    fig = plt.figure(figsize=(7.5, 4.6))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.12, 1.18], wspace=0.03, left=0.01, right=0.925, top=0.975, bottom=0.01)
+    gL = gs[0].subgridspec(2, 1, height_ratios=[0.9, 1.0], hspace=0.02)
     letter = lambda ax, l, dx=0.0, dy=1.01: ax.text(dx, dy, l, transform=ax.transAxes, fontsize=12, fontweight="bold", va="bottom", ha="left")
 
     # a: setup → one tile's movie → projection
@@ -419,9 +413,9 @@ def main():
                      arrowprops=dict(arrowstyle="-|>", lw=0.9, color=INK, mutation_scale=8))
         xmax = ox + fw + (n_show - 1) * dx
     for q in range(3):                                            # "more tiles" ellipsis
-        xd = (len(ACQ_TILES) - 1) * pitch + fw + (n_show - 1) * dx + 0.1 + q * 0.11
-        axB.plot(xd, ytop + 0.5 * fh, "o", ms=3.2, color=INK, zorder=50)
-        axB.plot(xd, 0.5 * fh2, "o", ms=3.2, color=INK, zorder=50)
+        xd = (len(ACQ_TILES) - 1) * pitch + fw + (n_show - 1) * dx + 0.12 + q * 0.13
+        axB.plot(xd, ytop + 0.5 * fh, "o", ms=1.8, color=INK, zorder=50)
+        axB.plot(xd, 0.5 * fh2, "o", ms=1.8, color=INK, zorder=50)
     axB.text(-0.06, ytop + 0.5 * (fh + (n_show - 1) * dy), "Movie", rotation=90, ha="right", va="center", fontsize=8)
     axB.text(0.5 * (fw + (n_show - 1) * dx), ytop + fh + (n_show - 1) * dy + 0.05, "250 fps · ~3 s", ha="center", va="bottom", fontsize=8)
     axB.text(-0.06, fh2 / 2, "Projection", rotation=90, ha="right", va="center", fontsize=8)
@@ -444,8 +438,23 @@ def main():
     axD.annotate("1 mm", (x0_ + Lm / 2, y0_), xytext=(0, 2), textcoords="offset points", ha="center", va="bottom", fontsize=8)
     fig.canvas.draw(); pD = axD.get_position()
     fig.text(pD.x0, pD.y1 - 0.01, "c", fontsize=12, fontweight="bold", va="bottom", ha="left")
-    cax = fig.add_axes([pD.x1 + 0.012, pD.y0 + 0.25 * pD.height, 0.012, 0.5 * pD.height])
+    cax = fig.add_axes([pD.x1 + 0.008, pD.y0, 0.011, pD.height])                 # colour bar = image height
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax); cb.set_label("Acquisition order", labelpad=2); cb.outline.set_linewidth(0.5)
+    # b: footprint panel as tall as the two zoom rows; then close 35 % of the gap between a and b
+    fig.canvas.draw()
+    zs = [z for row in axZ for z in row]
+    for z in zs + [axF, axA, axB]:
+        z.apply_aspect()
+    ytop = max(z.get_position().y1 for z in zs); ybot = min(z.get_position().y0 for z in zs)
+    pF = axF.get_position(); ar = pF.width / pF.height; h = ytop - ybot; w = h * ar
+    xz = min(z.get_position().x0 for z in zs)
+    x0 = max(0.01, min(pF.x0, xz - 0.03 - w))
+    axF.set_position([x0, ybot, w, h]); axF.set_anchor("SW")
+    a_bot = min(axA.get_position().y0, axB.get_position().y0)
+    shift = 0.35 * max(a_bot - ytop - 0.04, 0.0)          # 0.04 ≈ room for panel letter b
+    for z in zs + [axF]:
+        q = z.get_position(); z.set_position([q.x0, q.y0 + shift, q.width, q.height])
+    print(f"[fig1] b footprint {w:.3f}×{h:.3f} (fig fraction); a–b gap reduced by {shift:.3f}")
     plos_style.save(fig, out / args.out_name)
 
 

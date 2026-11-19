@@ -488,6 +488,7 @@ def main():
         ax_, title_ = LETTERS[k]; y_ = yT_ if k in 'ab' else yB_
         xl_ = 0.005 if k in 'ac' else tb_(ax_)[0, 0] - 0.005
         if shown:
+            shown = chr(ord(shown) + int(os.environ.get('FIG7_LETTER_OFFSET', '0')))   # e.g. 3 → d–g when used as part of a larger figure
             fig.text(xl_, y_, shown, fontsize=12, fontweight='bold', va='baseline', ha='left')
         fig.text(xl_ + (0.028 if shown else 0.0), y_, title_, fontsize=9, va='baseline', ha='left')
     plos_style.save(fig, OUT_DIR / ('fig7' if np.isfinite(SIGMA_P) else 'fig7_no_vein_penalty')); plos_style.save(figF, OUT_DIR / 'fig7_S_boundary_distance')
