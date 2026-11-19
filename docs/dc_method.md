@@ -1,6 +1,8 @@
 # Mean flow (DC): conservative reconciliation and passive-geometry comparison
 
-*Method frozen 2026-11-12; uncertainty model switched to CV 2026-11-18.  Numbers are 21S production (`results/dc_reconciled_v2.pkl`); some later sections still quote the earlier (alignment / parabolicity) run — see [status_2026-11.md](status_2026-11.md) for current values.*
+*Estimator replaced 2026-11-19: static inverse-variance fusion + constrained weighted least squares (below), replacing the
+quasi-likelihood (2026-11-03 … 11-18, still available as `reconcile_dc(..., estimator="ql")`).  Numbers in "Result" are 21S
+production of 2026-11-19 (`results/dc_reconciled_v2.pkl`); later sections still quote earlier runs.*
 
 ## Measured flux per vessel
 Each vessel segment $e$ is imaged by one or more tiles $\alpha$, each giving a flux time series
@@ -57,29 +59,42 @@ mass-conserving black boxes).  21S: 8,969 segments (7,713 vessels after contract
 Mass is conserved at every other vertex and over each closed topology region.
 
 ## Conservative field and emergent boundary
-The measured field does not conserve mass.  We take the conservative field that best fits the measurements under the
-reliability model, as a quasi-likelihood with the measurement variance evaluated at the reconciled flow,
-$$Q'=\arg\min_Q \sum_{e\ \rm imaged}\int_{Q^{\rm meas}_e}^{Q_e}\frac{u-Q^{\rm meas}_e}{c_e^2u^2+\sigma_0^2}\,du
-\;+\;\frac{\varepsilon}{2}\sum_{e\ \rm unimaged}Q_e^2\quad\text{s.t.}\quad B_{\mathcal I}Q=0,$$
-with $B$ the signed incidence matrix ($+1$ at the tail, $-1$ at the head) restricted to interior
-vertices $\mathcal I$ ($\sigma_0$ = 1 % of the median measured flux, a floor only).  Near the data each term is the
-weighted square $(Q_e-Q^{\rm meas}_e)^2/2\sigma_e^2$ with $\sigma_e^2=c_e^2Q_e^2+\sigma_0^2$; setting σ from the
-reconciled rather than the measured flux means segments that happen to read low are not given spurious confidence.
-Unimaged segments are filled by the constraint; the weak ridge ε only fixes circulations that conservation cannot
-determine (loops of unimaged segments: the null space of $[B_{\mathcal I};M]$, dimension 44 in 21S, 170 vessels).
-Most unimaged segments are not vessels in their own right: 68 % (21S; 27S similar) are shorter than two radii and lie inside a
-junction's lumen, where vectorisation split one crossing into two nearby nodes.  Contracting them is exact for the
-reconstruction (the segment's flow only links its two node balances), so reported counts use the contracted network
-(`network.contract_short_unimaged`, stored as `metrics["contracted"]`): 21S 8146 vessels, 92 % imaged (653 unimaged);
-27S 11469 vessels, 92 % imaged (885 unimaged).
-The objective is not convex, so the start is part of the method: the uniform-weight conservative projection of the data,
-followed by projected-Newton descent (each step one weighted projection, Armijo line search) to a constrained stationary
-point.  Sensitivity to the start is reported (`unstable`, `Qp_sd`: four further solves from starts with the data perturbed by
-30 %).  21S: median start-to-start SD 1.6 % of the flux (trusted vessels 0.8 %, 90th percentile 5 %); 4.5 % of segments,
-mostly small or unimaged and carrying 0.65 % of Σ|Q′|, have an SD larger than their flux (direction not determined by the
-data).  The stricter `unstable` flag (any run differing by > 10 % or in direction) marks 33 %.  The boundary
-fluxes are an output, not a fit: $f=BQ'$ is non-zero only on $\mathcal B$.  No left/right symmetry
-is imposed (imposing it changes the agreement below by < 0.05 and is reported as a check).
+The measured field does not conserve mass.  We combine the recordings by inverse-variance weighting and take the
+conservative field closest to them (`plexusflow.reconcile.dc`, `ESTIMATOR = "fixed"`, `VARIANCE = "block"`).
+
+**Variance of each recording's mean.**  For recording $r$ with flux trace $q_r(t)$ (250 Hz) at its heart rate $f_0$ (tile
+$f_0$ if missing), fit $a+\sum_{k=1}^{3}[b_k\sin 2\pi kf_0t+c_k\cos 2\pi kf_0t]$ by ordinary least squares and take the
+residual.  Split it into complete 1-beat and 2-beat blocks (≥ 80 % finite samples) and, for each block size with $B\ge3$
+blocks, $v_b=\operatorname{var}(\text{block means})/B$; $v_r$ is the larger, floored at $10^{-16}$; unavailable values are
+replaced by the median valid $v$.  $v_r$ estimates the variance of the recording mean including residual autocorrelation.
+
+**Fusion per vessel.**  $\mu_e=\sum_r y_r/v_r\big/\sum_r 1/v_r$ and $V_e=1/\sum_r 1/v_r$, with $y_r$ the recording's
+time-mean flux signed along the edge.  No between-recording term and no tile gains.
+
+**Network reconciliation.**
+$$Q'=\arg\min_Q\ \tfrac12\sum_{e\ \rm measured}\frac{(Q_e-\mu_e)^2}{V_e}\quad\text{s.t.}\quad B_{\mathcal I}Q=0,$$
+with $B$ the signed incidence matrix ($+1$ at the tail, $-1$ at the head) restricted to interior vertices $\mathcal I$.
+Unmeasured segments carry a vanishing weight (1e-6 of a typical measured weight), i.e. the minimum-norm fill of flows the
+constraint does not determine.  One weighted projection (KKT system); no iteration, no start dependence.  The boundary
+fluxes are an output: $f=BQ'$ is non-zero only on $\mathcal B$.  Sensitivity: `--symmetric` adds
+$\sum_L f=\sum_R f$ (total left arterial inflow = total right; `results/dc_reconciled_v2_sym.pkl`).
+
+**Caveats.**  (i) With ≈ 3 s recordings the median recording yields 4 heartbeat blocks, so single $v_r$ scatter by ≈ ×10;
+weights reach 1.6·10⁴ × the median.  A pooled alternative, $v_r=\kappa s_r^2/N_r$ ($s_r$ residual SD, $N_r$ frames, one
+$\kappa$ = 2.36 from the median block/white-noise ratio; `variance="pooled"`), fits held-out recordings better (×1.85 vs ×2.04)
+and gives 5.18 nL/s, 40 % left — reported as a sensitivity analysis.  (ii) $V_e$ is not a usable uncertainty: the median
+vessel SD of the mean is 0.0009 nL/s while repeat recordings disagree by a median factor ≈ 1.8 (between-recording gain,
+heart-rate effects); only relative weights matter for $Q'$.  (iii) On held-out repeat recordings the conservative field is
+not more accurate than the vessel's weighted mean of its other recordings; its value is a mass-consistent field and the fill
+of unmeasured vessels.
+
+Most unmeasured segments are not vessels in their own right: 68 % (21S) are shorter than two radii and lie inside a
+junction's lumen.  Reported counts use the contracted network (`network.contract_short_unimaged`): 21S 7492 vessels,
+7009 imaged (94 %), 483 unimaged.
+
+*Before 2026-11-19 (quasi-likelihood):* $\min_Q\sum\int_{Q^{\rm meas}}^{Q}(u-Q^{\rm meas})/(c^2u^2+\sigma_0^2)\,du$ with a
+relative error model $c$ and the variance evaluated at the reconciled flow; it inflated weak readings into long
+high-flux routes ("shortcuts", 95 in 21S) and was replaced.
 
 ## Passive-geometry comparison
 We ask how much of the reconciled flow the vessel calibres alone explain by driving a passive
@@ -99,13 +114,14 @@ randomly permuting the radii across segments.
 ## Result
 | | |
 |---|---|
-| total inflow through the carve boundary (L / R) | 6.32 nL/s (2.27 / 4.05) |
-| vitelline-vein outflow V1 / V2 | 2.08 / 4.23 nL/s |
-| boundary nodes withdrawing flow | 9 |
-| corr(\|Q′\|, \|Q^sim\|), linear / log (7,120 imaged vessels) | 0.918 / 0.771 |
-| same, radii shuffled across segments | 0.47 |
-| imaged segments whose direction the reconciliation reverses | 4.1 % |
-| median relative change of a measured flux | 24 % |
+| total inflow through the carve boundary (L / R) | 3.75 nL/s (1.67 / 2.08; 44.5 % left) |
+| same, total left = total right imposed | 3.90 nL/s (1.95 / 1.95) |
+| vitelline-vein outflow V1 / V2 | 1.58 / 2.17 nL/s |
+| boundary nodes withdrawing flow | 12 |
+| corr(\|Q′\|, \|Q^sim\|), linear / log (7,009 measured vessels) | 0.886 / 0.696 |
+| same, radii shuffled across segments | 0.46 |
+| measured segments whose direction the reconciliation reverses | 11.6 % (almost all \|Q\| < 0.03 nL/s) |
+| median relative change of a measured flux | 45 % |
 
 (`results/dc_reconciled_v2.pkl` → `metrics`; passive flow without the venous-pressure penalty.  Paper Fig 7 adds the soft
 equal-venous-pressure penalty, `plexusflow.reconcile.venous_pressure_penalty`, σ_P = 2 Pa.)

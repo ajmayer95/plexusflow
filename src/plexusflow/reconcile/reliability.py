@@ -46,6 +46,13 @@ def temporal_cv(m, f0_default=np.nan):
     return float(np.std(q - X @ b) / max(abs(b[0]), 1e-12))
 
 
+def _n_frames(m):
+    """Number of finite frames of the measurement's flux trace Q(t) (NaN if absent): the length entering the variance of
+    the recording mean (reconcile.dc.recording_variance)."""
+    q = m.get("Q_t")
+    return float(np.isfinite(np.asarray(q, float)).sum()) if q is not None else np.nan
+
+
 def _term(model):
     return model.get("profile_term", "f")
 
@@ -67,12 +74,17 @@ def measurement_table(G, gain="default"):
             a = q.get("align")
             M[(int(m["tile_id"]), (u, v))] = dict(tile=int(m["tile_id"]), Q=float(Q), f=float(q["f"]), p=float(q["p"]) if np.isfinite(q.get("p", np.nan)) else float(q["f"]),   # p missing (no cached inputs): f
                                                    align=float(a) if a is not None and np.isfinite(a) else np.nan,
-                                                   R_kl_um=m.get("R_kl_um"), none=1.0, cv=temporal_cv(m))
+                                                   R_kl_um=m.get("R_kl_um"), none=1.0, cv=temporal_cv(m), n_frames=_n_frames(m))
     cvs = [r["cv"] for r in M.values() if np.isfinite(r["cv"])]
     cv_fill = float(np.median(cvs)) if cvs else 1.0
     for r in M.values():                                   # no Q(t) (rare): the median recording
         if not np.isfinite(r["cv"]):
             r["cv"] = cv_fill
+    nfs = [r["n_frames"] for r in M.values() if np.isfinite(r["n_frames"])]
+    n_fill = float(np.median(nfs)) if nfs else 750.0
+    for r in M.values():
+        if not np.isfinite(r["n_frames"]) or r["n_frames"] < 2:
+            r["n_frames"] = n_fill
     from . import gain as _g
     kind = _g.DEFAULT if gain == "default" else gain
     if kind == "hr":

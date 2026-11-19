@@ -1,4 +1,23 @@
-"""Full DC reconciliation on the carved network (final method, frozen 2026-11-12).
+"""Full DC reconciliation on the carved network.
+
+PRODUCTION SINCE 2026-11-19 (ESTIMATOR = "fixed"): static inverse-variance fusion + constrained weighted least squares.
+
+  a. Each recording r has the variance of its MEAN flux.  VARIANCE = "block" (production, the collaborators' recipe of
+     2026-11-19 exactly): v_r from heartbeat blocks of the residual of a mean + three-cardiac-harmonic OLS fit at the
+     recording's f0 (tile f0 if missing): v_b = var(block means, ddof=1)/B for 1- and 2-beat blocks (complete blocks with
+     ≥ 80 % finite samples, B ≥ 3), the larger; floored at 1e-16; unavailable → median of the valid v in the fitted data.
+     VARIANCE = "pooled" (alternative): v_r = κ s_r²/N_r with s_r the residual SD (floored at its 1st percentile), N_r
+     frames and κ the median block/white-noise ratio (21S 2.36).  Caveat of "block": with ≈ 3 s recordings the median
+     recording has 4 blocks, so single v_r scatter ≈ ×10 (21S: weights up to 1.6·10⁴× the median; held-out error +9 %
+     vs "pooled").
+  b. Per vessel: μ_e = Σ y_r/v_r / Σ 1/v_r,  V_e = 1/Σ 1/v_r  (independent, unbiased estimates of one mean).
+  c. Q' = argmin ½ Σ_measured (Q_e − μ_e)²/V_e  s.t.  B_I Q = 0  (unmeasured vessels: weight ε → minimum-norm fill);
+     optional symmetric=True adds Σ_L f = Σ_R f (total left arterial inflow = total right; sensitivity analysis).
+  s_r is residual temporal variability, not a calibrated error: systematic recording differences (gain) are not modelled.
+
+The quasi-likelihood estimator below (ESTIMATOR = "ql", production 2026-11-03 … 11-18) is kept for comparison.
+
+QUASI-LIKELIHOOD (frozen 2026-11-12; superseded 2026-11-19):
 
 0. Network: network.carved_domain — open-boundary regions removed with free inflow boundaries, topology-uncertain regions
    removed as mass-conserving black boxes (one conservation row per region; reconcile.regions).  Both are graph tags set
@@ -43,6 +62,80 @@ PX_UM = 1.7
 
 
 PER_VESSEL = "average"      # since 2026-11-10 (was "winner"): see vessel_input
+ESTIMATOR = "fixed"         # since 2026-11-19 (was "ql"): static inverse-variance fusion + constrained weighted least squares
+VARIANCE = "block"          # "block" (per-recording heartbeat-block variance, the handoff recipe) | "pooled" (κ s²/N)
+FS_HZ = 250.0
+
+
+def block_variance(q, f0, fs=FS_HZ):
+    """Variance of a recording's mean flux from heartbeat blocks of its harmonic-fit residual (1- and 2-beat blocks,
+    var(block means, ddof=1)/B, the larger; ≥ 3 blocks).  Used only to estimate the pooled factor κ.  NaN if unavailable."""
+    q = np.asarray(q, float); N = len(q); t = np.arange(N) / fs; ok = np.isfinite(q)
+    if not np.isfinite(f0) or f0 <= 0 or f0 >= fs / 6 or ok.sum() < 20:
+        return np.nan
+    w = 2 * np.pi * f0 * t
+    X = np.column_stack([np.ones(N)] + [g(k * w) for k in (1, 2, 3) for g in (np.sin, np.cos)])
+    beta, _, rank, _ = np.linalg.lstsq(X[ok], q[ok], rcond=None)
+    if rank < 7:
+        return np.nan
+    r = q - X @ beta; best = np.nan
+    for b in (1, 2):
+        width = b / f0; means = []
+        for j in range(int((N / fs) // width)):
+            m = (t >= j * width) & (t < (j + 1) * width); fin = m & ok
+            if m.sum() and fin.sum() >= max(2, 0.8 * m.sum()):
+                means.append(r[fin].mean())
+        if len(means) >= 3:
+            v = np.var(means, ddof=1) / len(means)
+            best = v if not np.isfinite(best) else max(best, v)
+    return best
+
+
+def autocorrelation_factor(G, M):
+    """κ = median over recordings of block_variance / (s_r²/N_r): how much residual autocorrelation inflates the variance
+    of the mean relative to white noise (21S ≈ 2.4).  A common factor: it scales every V_e and leaves Q' unchanged."""
+    ratios = []
+    for (t, e), m in M.items():
+        mm = next((x for x in G.edges[e].get("measurements_piv") or [] if int(x.get("tile_id", -1)) == t), None)
+        if mm is None or mm.get("Q_t") is None:
+            continue
+        f0 = (mm.get("harm") or {}).get("f0_hz"); s2 = (m["cv"] * m["Q"]) ** 2 / m["n_frames"]
+        vb = block_variance(mm["Q_t"], float(f0) if f0 else np.nan)
+        if np.isfinite(vb) and s2 > 0:
+            ratios.append(vb / s2)
+    return float(np.median(ratios)) if ratios else 1.0
+
+
+def recording_sd(M):
+    """{key: s_r} residual temporal SD of each recording's flux (nL/s), floored at the 1st percentile over recordings."""
+    s = {k: abs(m["cv"] * m["Q"]) for k, m in M.items()}
+    fl = float(np.percentile([v for v in s.values() if np.isfinite(v) and v > 0], 1))
+    return {k: max(v, fl) if np.isfinite(v) else np.nan for k, v in s.items()}, fl
+
+
+def recording_block_variances(G, M):
+    """{key: v_r} per the handoff recipe: block_variance of each recording's Q(t) at its f0 (tile f0 fallback); nonpositive /
+    unavailable → median of the valid ones in M; floored at 1e-16.  Also returns the number of unavailable recordings."""
+    from .gain import tile_heart_rates
+    tf0 = tile_heart_rates(G); v = {}
+    for (t, e), m in M.items():
+        mm = next((x for x in G.edges[e].get("measurements_piv") or [] if int(x.get("tile_id", -1)) == t), None)
+        f0 = (mm.get("harm") or {}).get("f0_hz") if mm else None
+        f0 = float(f0) if f0 and np.isfinite(f0) else tf0.get(t, np.nan)
+        v[(t, e)] = block_variance(mm["Q_t"], f0) if mm is not None and mm.get("Q_t") is not None else np.nan
+    good = [x for x in v.values() if np.isfinite(x) and x > 0]
+    if not good:
+        raise RuntimeError("no valid recording variance")
+    med = float(np.median(good)); n_bad = sum(1 for x in v.values() if not (np.isfinite(x) and x > 0))
+    return {k: max(x if np.isfinite(x) and x > 0 else med, 1e-16) for k, x in v.items()}, n_bad
+
+
+def symmetric_domain(dom):
+    """dom with one extra conservation row: total left arterial inflow = total right (Σ_L f − Σ_R f = 0)."""
+    import scipy.sparse as sp
+    d = dict(dom); B = d["B"]; L = d["inj"][d["side"] == "L"]; R = d["inj"][d["side"] == "R"]
+    d["B"] = sp.vstack([B, sp.csr_matrix(np.asarray(B[L].sum(0) - B[R].sum(0)).ravel())]).tocsr()
+    return d
 
 
 def vessel_input(recs, per_vessel=PER_VESSEL):
@@ -148,7 +241,10 @@ def ql_solve(Q, y, C, imaged, s0, m, dom, tol=1e-10, max_iter=500):
 
 
 def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, n_shuffle=10, seed=0, n_starts=4, start_noise=0.3, stable_rtol=0.10,
-                 radius="tube", per_vessel=PER_VESSEL, mask=None):
+                 radius="tube", per_vessel=PER_VESSEL, mask=None, estimator=None, symmetric=False, kappa=None, variance=None):
+    """estimator: "fixed" (production since 2026-11-19; module docstring a–c) or "ql" (quasi-likelihood, before).
+    symmetric: add total left = total right arterial inflow.  kappa: pooled autocorrelation factor (None → estimated)."""
+    estimator = estimator or ESTIMATOR
     dom = dom or carved_domain(G, topology=topology)
     recs = {}
     for (t, e), m in M.items():
@@ -161,15 +257,44 @@ def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, 
             tile_w[i] = min(recs[e], key=lambda x: x[1])[0]["tile"]                  # best recording's tile (labels / figures)
     s0 = 0.01 * np.median(np.abs(Qm[imaged])); Cw = np.where(imaged, C, 1.0)
     s0v = np.sqrt(s0 ** 2 + sb ** 2)                                                # per-vessel floor: σ0 + between-recording spread
-    start = lambda q: project(q, np.where(imaged, 1.0, EPS_UNIMAGED), dom)          # uniform-weight conservative projection
-    Q0 = start(Qm); m = float(np.median(1 / (Cw[imaged] ** 2 * Q0[imaged] ** 2 + s0 ** 2)))
-    Qp, info = ql_solve(Q0, Qm, Cw, imaged, s0v, m, dom, tol=tol, max_iter=max_iter)
-    rng = np.random.default_rng(seed); runs = [Qp]
-    for k in range(n_starts):
-        runs.append(ql_solve(start(Qm * (1 + start_noise * rng.standard_normal(me))), Qm, Cw, imaged, s0v, m, dom, tol=tol, max_iter=max_iter)[0])
-    E = np.array(runs); Qp_sd = E.std(axis=0) if n_starts else np.zeros(me)
-    unstable = ((np.any(E > 0, axis=0) & np.any(E < 0, axis=0)) | ((E.max(0) - E.min(0)) > stable_rtol * np.maximum(np.abs(Qp), 1e-12))) \
-        if n_starts else np.zeros(me, bool)
+    dom_fit = symmetric_domain(dom) if symmetric else dom
+    fixed = None
+    if estimator == "fixed":
+        variance = variance or VARIANCE
+        if variance == "block":
+            vr, n_bad = recording_block_variances(G, M); kap, s_floor, sr = np.nan, np.nan, None
+        else:
+            assert variance == "pooled", variance
+            sr, s_floor = recording_sd(M); n_bad = 0
+            kap = autocorrelation_factor(G, M) if kappa is None else float(kappa)
+            vr = {k: kap * sr[k] ** 2 / M[k]["n_frames"] for k in M}
+        mu = np.zeros(me); Ve = np.full(me, np.nan); nrec = np.zeros(me, int)
+        sgn = {}
+        for (t, e), mrow in M.items():
+            sgn.setdefault(e, []).append((mrow["Q"], vr[(t, e)]))
+        for i, e in enumerate(sub):
+            r = sgn.get(e)
+            if r:
+                v = np.array([b for _, b in r]); y = np.array([a_ for a_, _ in r]); w = 1 / v
+                mu[i] = w @ y / w.sum(); Ve[i] = 1 / w.sum(); nrec[i] = len(r)
+        Qm = np.where(imaged, mu, Qm)                                               # vessel input = inverse-variance mean
+        W = np.where(imaged, 1 / np.where(imaged, Ve, 1.0), 0.0); wm = float(np.median(W[imaged]))
+        Qp = project(Qm, np.where(imaged, W / wm, EPS_UNIMAGED), dom_fit)
+        obj = float(0.5 * np.sum((Qp[imaged] - Qm[imaged]) ** 2 / Ve[imaged]))
+        info = dict(n_iter=1, converged=True, objective=obj, n_concave=0); m = wm
+        Qp_sd = np.zeros(me); unstable = np.zeros(me, bool)
+        fixed = dict(variance=variance, kappa=kap, s_floor=s_floor, V=Ve, v_rec=vr, n_variance_unavailable=n_bad)
+    else:
+        assert estimator == "ql", estimator
+        start = lambda q: project(q, np.where(imaged, 1.0, EPS_UNIMAGED), dom_fit)  # uniform-weight conservative projection
+        Q0 = start(Qm); m = float(np.median(1 / (Cw[imaged] ** 2 * Q0[imaged] ** 2 + s0 ** 2)))
+        Qp, info = ql_solve(Q0, Qm, Cw, imaged, s0v, m, dom_fit, tol=tol, max_iter=max_iter)
+        rng = np.random.default_rng(seed); runs = [Qp]
+        for k in range(n_starts):
+            runs.append(ql_solve(start(Qm * (1 + start_noise * rng.standard_normal(me))), Qm, Cw, imaged, s0v, m, dom_fit, tol=tol, max_iter=max_iter)[0])
+        E = np.array(runs); Qp_sd = E.std(axis=0) if n_starts else np.zeros(me)
+        unstable = ((np.any(E > 0, axis=0) & np.any(E < 0, axis=0)) | ((E.max(0) - E.min(0)) > stable_rtol * np.maximum(np.abs(Qp), 1e-12))) \
+            if n_starts else np.zeros(me, bool)
     n_it, converged = info["n_iter"], info["converged"]
     fb = emergent(Qp, dom)
     f_all = dom["B"] @ Qp; nix = {n: k for k, n in enumerate(dom["nodes"])}
@@ -197,10 +322,12 @@ def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, 
     rng = np.random.default_rng(seed)
     shuf = np.mean([metrics(Qm, Qp, passive(rng.permutation(K), fb, dom), fb, dom, imaged)["corr_lin"] for _ in range(n_shuffle)])
     return dict(model=model, edges=sub, nodes=dom["nodes"], Qm=Qm, Qp=Qp, Qs=Qs, fb=fb,
-                sigma=np.sqrt(Cw ** 2 * Qp ** 2 + s0v ** 2), c=C, s_between=sb, s0_vessel=s0v, imaged=imaged, tile=tile_w, radius=r, radius_compliance=rc,
+                sigma=(np.sqrt(np.where(imaged, fixed["V"], np.nan)) if fixed else np.sqrt(Cw ** 2 * Qp ** 2 + s0v ** 2)), c=C, s_between=sb, s0_vessel=s0v, imaged=imaged, tile=tile_w, radius=r, radius_compliance=rc,
                 radius_profiled=profiled, length=L,
                 inj=dom["inj"], out=dom["out"], side=dom["side"], metrics=met, shuffled_corr=shuf,
-                n_iter=n_it, sigma0_floor=s0, dom=dom, estimator="quasi-likelihood, projected Newton (2026-11-03)",
+                n_iter=n_it, sigma0_floor=s0, dom=dom,
+                estimator=("fixed inverse-variance fusion + constrained WLS (2026-11-19)" if fixed else "quasi-likelihood, projected Newton (2026-11-03)"),
+                estimator_key=estimator, symmetric=bool(symmetric), fixed=fixed,
                 objective=info["objective"], objective_m=m, n_concave=info["n_concave"],
                 converged=converged, Qp_sd=Qp_sd, unstable=unstable, n_starts=n_starts, short_unimaged=short_unimaged,
                 radius_model=radius if isinstance(radius, str) else "given", radius_consensus=r_cons, per_vessel=per_vessel, n_rec=n_rec,

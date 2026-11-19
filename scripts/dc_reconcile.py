@@ -1,4 +1,12 @@
-"""Mean-flow (DC) reconstruction of one stage from its measured graph (final method, frozen 2026-11-12).
+"""Mean-flow (DC) reconstruction of one stage from its measured graph.
+
+PRODUCTION SINCE 2026-11-19: per recording the variance of its mean, v = κ s²/N (s = residual temporal SD about a mean +
+3-harmonic fit, N frames, κ pooled heartbeat-block autocorrelation factor); per vessel the inverse-variance mean; constrained
+weighted least squares under interior conservation (plexusflow.reconcile.dc, ESTIMATOR = "fixed").  --estimator ql reproduces
+the quasi-likelihood method below (production 2026-11-03 … 11-18); the reliability model c is still fitted and stored for it.
+--symmetric adds total left = total right arterial inflow (sensitivity; writes dc_reconciled_v2_sym.pkl).
+
+Quasi-likelihood method (before 2026-11-19):
 
 0. (Sensitivity only, off by default) heart-rate normalisation of recording fluxes, plexusflow.reconcile.gain.
 1. Reliability scale c = c0 + c_a(1 − align) (alignment only since 2026-11-18), ML-fitted on same-tile junction balance of
@@ -29,6 +37,8 @@ def main():
                          "for resistance, √⟨a²⟩ for compliance; default), consensus √(R_graph·R_kl) (sensitivity), or the "
                          "calibrated segmentation radius (scripts/anatomical_radius.py)")
     ap.add_argument("--no-topology", action="store_true", help="ignore topology-uncertain region tags (open-region carve only)")
+    ap.add_argument("--estimator", default=None, choices=("fixed", "ql"), help="fixed (production) or ql (quasi-likelihood, before 2026-11-19)")
+    ap.add_argument("--symmetric", action="store_true", help="add total left = total right arterial inflow (sensitivity)")
     a = ap.parse_args()
     G = paths.load_graph()
     M = measurement_table(G)
@@ -42,7 +52,7 @@ def main():
     print(f"[1] reliability fit: {model['n_junctions']} junctions, {len(cT)} tiles:  {model['formula'].split(';')[0]}:  c_a {model['c_a']:.2f}  "
           f"σ0 {model['sigma0']:.4f}  " + (f"c0 {model['c0']:.3f}" if 'c0' in model else
           f"c_T median {np.median(cT):.2f} [IQR {np.percentile(cT, 25):.2f}–{np.percentile(cT, 75):.2f}]"))
-    D = reconcile_dc(G, model, M, radius=a.radius, topology=not a.no_topology)
+    D = reconcile_dc(G, model, M, radius=a.radius, topology=not a.no_topology, estimator=a.estimator, symmetric=a.symmetric)
     D["gain"] = gfit
     if a.radius == "tube":
         pr = D["radius_profiled"]
@@ -63,7 +73,14 @@ def main():
     V = np.array(met["V"])
     v_txt = (f"V1/V2 {V[0]:+.2f}/{V[1]:+.2f} (L {100 * V[0] / V.sum():.1f}%)" if len(V) == 2 else
              f"{len(V)} V nodes: total {V.sum():+.2f} nL/s ({np.sum(V < 0)} withdrawing, {np.sum(V > 0)} injecting)")
-    print(f"[3] quasi-likelihood: {D['n_iter']} projected-Newton steps, objective {D['objective']:.4f};  inflow {met['total_in']:.2f} nL/s (L {met['inj_L']:.2f} / R {met['inj_R']:.2f}, "
+    if D.get("fixed"):
+        fx = D["fixed"]; Ve = fx["V"][im]
+        vtxt = (f"per-recording heartbeat-block variance ({fx['n_variance_unavailable']} unavailable → median)" if fx["variance"] == "block"
+                else f"pooled κ = {fx['kappa']:.2f}, s floor {fx['s_floor']:.4f} nL/s")
+        print(f"[3] fixed inverse-variance fusion + constrained WLS{' (SYMMETRIC: total L = total R)' if D['symmetric'] else ''}: "
+              f"{vtxt}; vessel SD of the mean median "
+              f"{np.median(np.sqrt(Ve)):.4f} nL/s [IQR {np.percentile(np.sqrt(Ve), 25):.4f}–{np.percentile(np.sqrt(Ve), 75):.4f}]")
+    print(f"    {D['estimator']}: objective {D['objective']:.4f};  inflow {met['total_in']:.2f} nL/s (L {met['inj_L']:.2f} / R {met['inj_R']:.2f}, "
           f"withdrawing carve nodes {met['n_withdraw']});  {v_txt}")
     un = D["unstable"]
     print(f"    {'converged' if D['converged'] else 'NOT converged'}; start-dependent vessels ({D['n_starts']} perturbed starts) {un.sum()} of {len(un)} "
@@ -72,8 +89,9 @@ def main():
           f"(log {met['corr_log']:.3f}, {a.radius} radii), shuffled radii {D['shuffled_corr']:.3f};  loop share {met['loop_share']:.2f}")
     paths.RESULTS.mkdir(parents=True, exist_ok=True)
     (paths.RESULTS / "reliability_model_v1.json").write_text(json.dumps(model, indent=1))
-    (paths.RESULTS / "dc_reconciled_v2.pkl").write_bytes(pickle.dumps(D, protocol=4))
-    print(f"wrote {paths.RESULTS / 'reliability_model_v1.json'}, {paths.RESULTS / 'dc_reconciled_v2.pkl'}")
+    out = paths.RESULTS / ("dc_reconciled_v2_sym.pkl" if a.symmetric else "dc_reconciled_v2.pkl")
+    out.write_bytes(pickle.dumps(D, protocol=4))
+    print(f"wrote {paths.RESULTS / 'reliability_model_v1.json'}, {out}")
 
 
 if __name__ == "__main__":
