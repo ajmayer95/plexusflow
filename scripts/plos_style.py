@@ -25,7 +25,8 @@ def apply():
     plt.rcParams.update({
         "font.family": "Arial", "font.size": LABEL, "axes.titlesize": LABEL, "axes.labelsize": LABEL,
         "xtick.labelsize": TICK, "ytick.labelsize": TICK, "legend.fontsize": TICK,
-        "mathtext.fontset": "custom", "mathtext.rm": "Arial", "mathtext.it": "Arial:italic", "mathtext.bf": "Arial:bold",
+        "mathtext.fontset": "cm",                    # all mathematics in LaTeX Computer Modern (Alex, 2026-11-19); text stays Arial
+        "mathtext.default": "normal",                # LaTeX behaviour: italic letters, upright digits
         "axes.linewidth": LW, "xtick.major.width": LW, "ytick.major.width": LW, "xtick.minor.width": 0.6, "ytick.minor.width": 0.6,
         "xtick.major.size": 3.0, "ytick.major.size": 3.0, "xtick.direction": "out", "ytick.direction": "out",
         "lines.linewidth": 1.2, "figure.facecolor": "white", "axes.facecolor": "white", "savefig.facecolor": "white",
@@ -38,7 +39,8 @@ def _is_letter(t):
 
 
 def finalize(fig, letter=LETTER):
-    """Raise text to the house sizes (never shrinks anything except panel letters, which are set to exactly `letter`)."""
+    """All mathematics is LaTeX Computer Modern (rcParams can't be overridden per script: checked here).
+    Raise text to the house sizes (never shrinks anything except panel letters, which are set to exactly `letter`)."""
     for ax in fig.axes:
         for lab in (ax.xaxis.label, ax.yaxis.label, ax.title, ax._left_title, ax._right_title):
             if lab.get_text() and lab.get_fontsize() < LABEL:
@@ -47,6 +49,8 @@ def finalize(fig, letter=LETTER):
         for sp in ax.spines.values():
             if sp.get_visible() and sp.get_linewidth() < LW:
                 sp.set_linewidth(LW)
+    if plt.rcParams["mathtext.fontset"] != "cm" or plt.rcParams["mathtext.default"] == "regular":
+        raise RuntimeError("figure math must be LaTeX Computer Modern: do not override mathtext.fontset / mathtext.default")
     for t in fig.findobj(matplotlib.text.Text):
         if not t.get_text():
             continue

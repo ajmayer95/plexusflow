@@ -24,6 +24,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from matplotlib.collections import LineCollection
 import matplotlib.patheffects as pe
 from matplotlib.lines import Line2D
 from plexusflow.io.measurement_view import MeasurementView
@@ -38,7 +39,7 @@ PX_UM = 1.7
 INK, MUTED = "#1a1a1a", "#6b6b6b"
 plt.rcParams.update({"font.family": "Arial", "font.size": 8, "axes.titlesize": 9, "axes.labelsize": 8, "xtick.labelsize": 8,
                      "ytick.labelsize": 8, "legend.fontsize": 8, "axes.spines.top": False, "axes.spines.right": False,
-                     "mathtext.default": "regular", "axes.linewidth": 0.8})
+                     "axes.linewidth": 0.8})
 T0 = time.time()
 
 
@@ -251,112 +252,144 @@ for name, d in (("weighted means", before), ("reconstructed", after)):
 
 import plos_style as ps
 ps.apply()
-W_IN, H_IN = 7.5, 2.75
+BOT = 3.3                                                   # bottom row (d–f) height; the a–c strip sits above it
+W_IN, H_IN = 7.5, 2.75 + BOT
 fig = plt.figure(figsize=(W_IN, H_IN))
-ax_at = lambda x, y, w, h: fig.add_axes([x / W_IN, y / H_IN, w / W_IN, h / H_IN])     # positions in inches
+ax_at = lambda x, y, w, h: fig.add_axes([x / W_IN, (y + BOT) / H_IN, w / W_IN, h / H_IN])     # strip positions (inches above BOT)
+ax_abs = lambda x, y, w, h: fig.add_axes([x / W_IN, y / H_IN, w / W_IN, h / H_IN])
 LETTER = dict(fontsize=12, fontweight="bold", ha="left", va="top")
 TOP = H_IN - 0.05
-fig.text(0.03 / W_IN, TOP / H_IN, "a", **LETTER); fig.text(2.42 / W_IN, TOP / H_IN, "b", **LETTER); fig.text(4.6 / W_IN, TOP / H_IN, "c", **LETTER)
+fig.text(0.03 / W_IN, TOP / H_IN, "a", **LETTER); fig.text(3.15 / W_IN, TOP / H_IN, "b", **LETTER)
 MEANC, RECC = "0.6", INK
 
-# a: local network (wider view), nine vessels numbered, vessel 3 marked
-axM = ax_at(0.2, 0.12, 2.2, 2.5)
-allp = np.vstack([pth[i] for i in pidx]); ctr = (allp.min(0) + allp.max(0)) / 2
-hx = 0.5 * (allp.max(0) - allp.min(0)).max() + 45; hy = hx * 2.5 / 2.2
+# a: the vessel of panel b (highlighted) in its surroundings
+HL6 = "#C2185B"
+axM = ax_at(0.2, 0.12, 2.75, 2.5)
+q9 = pth[AV]; tail = toimg(np.array([[G.nodes[E[AV][0]]["x"], G.nodes[E[AV][0]]["y"]]]))[0]
+if np.linalg.norm(q9[0] - tail) > np.linalg.norm(q9[-1] - tail):
+    q9 = q9[::-1]
+ctr = 0.5 * (q9.min(0) + q9.max(0)); hx = max(0.5 * np.ptp(q9, axis=0).max() * 1.9, 70); hy = hx * 2.5 / 2.75
 c0, c1, r0, r1 = ctr[0] - hx, ctr[0] + hx, ctr[1] - hy, ctr[1] + hy
 crop = mos[int(max(r0, 0)):int(r1), int(max(c0, 0)):int(c1)]; lo, hi = np.percentile(crop[crop > 0], (1, 99.5))
-axM.imshow(mos, cmap="gray", vmin=lo - 0.45 * (hi - lo), vmax=hi + 0.15 * (hi - lo), interpolation="bicubic")
+axM.imshow(mos, cmap="gray", vmin=lo - 0.3 * (hi - lo), vmax=hi + 0.1 * (hi - lo), interpolation="bicubic")
 axM.set_xlim(c0, c1); axM.set_ylim(r1, r0); axM.set_xticks([]); axM.set_yticks([])
 for s_ in axM.spines.values():
     s_.set_linewidth(0.6); s_.set_color("0.6")
-placed = []
-for i in pidx:
-    q = pth[i]; tail = toimg(np.array([[G.nodes[E[i][0]]["x"], G.nodes[E[i][0]]["y"]]]))[0]
-    if np.linalg.norm(q[0] - tail) > np.linalg.norm(q[-1] - tail):
-        q = q[::-1]
-    if len(q) > 7:
-        q = np.column_stack([np.convolve(np.pad(q[:, d], 2, mode="edge"), np.ones(5) / 5, "valid") for d in (0, 1)])
-    lw = 1.6 if i == AV else 1.0
-    axM.plot(q[:, 0], q[:, 1], color="white", lw=lw + 1.4, zorder=4, solid_capstyle="round")
-    axM.plot(q[:, 0], q[:, 1], color=INK, lw=lw, zorder=5, solid_capstyle="round")
-    cum = np.r_[0, np.cumsum(np.linalg.norm(np.diff(q, axis=0), axis=1))]
-    a0, a1 = np.searchsorted(cum, 0.42 * cum[-1]), min(np.searchsorted(cum, 0.62 * cum[-1]), len(q) - 1)
-    p0, p1 = (q[a0], q[a1]) if Qp[i] >= 0 else (q[a1], q[a0])
-    axM.annotate("", xy=p1, xytext=p0, arrowprops=dict(arrowstyle="-|>", color=INK, lw=0.8, mutation_scale=7), zorder=6)
-    d = q[a1] - q[a0]; d = d / max(np.linalg.norm(d), 1e-9); nrm = np.array([-d[1], d[0]]); m_ = q[len(q) // 2]
-    lab = max([m_ + 11 * nrm, m_ - 11 * nrm], key=lambda c: min([np.linalg.norm(c - o) for o in placed] + [1e9])); placed.append(lab)
-    axM.text(*lab, str(num[i]), ha="center", va="center", fontsize=8, color="white" if i == AV else INK, zorder=8,
-             fontweight="bold" if i == AV else "normal",
-             bbox=dict(boxstyle="circle,pad=0.15", fc=INK if i == AV else "white", ec=INK, lw=0.6))
-# tile footprints (mosaic row/column), outlined in tile colours
-from plexusflow.analyze.geometry import load_tile_geometry
-from plexusflow.config import StageConfig
-geom = load_tile_geometry(StageConfig.load(ST))
-from matplotlib.patches import Polygon as _Poly
-for t_ in ptiles:
-    tg = geom.tiles[int(t_)]
-    Hv, Wv = tg.video_shape if tg.video_shape else tifffile.imread(str(ST / "tiles" / "maxmed" / f"vid{t_}_maxmed.tif")).shape[:2]
-    fp = np.array([[0, 0, 1], [0, Wv, 1], [Hv, Wv, 1], [Hv, 0, 1]], float) @ tg.A_full.T
-    fp = fp[:, :2] / geom.downsample - [geom.y0, geom.x0]                         # (row, column) in the mosaic
-    xy_ = np.column_stack([fp[:, 1], fp[:, 0]])
-    FPXY = globals().setdefault("FPXY", {}); FPXY[t_] = xy_
-    log(f"  tile {t_} footprint x {xy_[:, 0].min():.0f}–{xy_[:, 0].max():.0f}, y {xy_[:, 1].min():.0f}–{xy_[:, 1].max():.0f}; view x {c0:.0f}–{c1:.0f} y {r0:.0f}–{r1:.0f}")
+if len(q9) > 7:
+    q9 = np.column_stack([np.convolve(np.pad(q9[:, d], 2, mode="edge"), np.ones(5) / 5, "valid") for d in (0, 1)])
+axM.plot(q9[:, 0], q9[:, 1], color="white", lw=4.2, zorder=4, solid_capstyle="round")
+axM.plot(q9[:, 0], q9[:, 1], color=HL6, lw=2.6, zorder=5, solid_capstyle="round")
+cum = np.r_[0, np.cumsum(np.linalg.norm(np.diff(q9, axis=0), axis=1))]
+a0, a1 = np.searchsorted(cum, 0.12 * cum[-1]), min(np.searchsorted(cum, 0.88 * cum[-1]), len(q9) - 1)
+p0, p1 = (q9[a0], q9[a1]) if Qp[AV] >= 0 else (q9[a1], q9[a0])
+dv = p1 - p0; nv = np.array([-dv[1], dv[0]]) / max(np.linalg.norm(dv), 1e-9)
+axM.annotate("", xy=p1 + 16 * nv, xytext=p0 + 16 * nv, arrowprops=dict(arrowstyle="-|>", color=HL6, lw=2.0, mutation_scale=16), zorder=6)
 L = 50 / PX_UM; xb, yb = c1 - 8 - L, r1 - 8
 axM.plot([xb, xb + L], [yb, yb], color="white", lw=2.0, solid_capstyle="butt", zorder=8)
 axM.text(xb + L / 2, yb - 4, "50 µm", color="white", fontsize=8, ha="center", va="bottom", zorder=8)
-# overview inset: the tiles' footprints and the zoomed view
-axI = axM.inset_axes([0.0, 0.66, 0.34, 0.34]); axI.set_facecolor("0.15")
-allfp = np.vstack(list(FPXY.values())); ic = (allfp.min(0) + allfp.max(0)) / 2; ih = 0.5 * (allfp.max(0) - allfp.min(0)).max() * 1.05
-axI.imshow(mos, cmap="gray", vmin=lo - 0.45 * (hi - lo), vmax=hi + 0.15 * (hi - lo), interpolation="antialiased")
+# inset: the three recording tiles overlapping (outlines in the panel-b colours) and the area shown (white box)
+from plexusflow.analyze.geometry import load_tile_geometry
+from plexusflow.config import StageConfig
+from matplotlib.patches import Polygon as _Poly, Rectangle as _Rect
+geom6 = load_tile_geometry(StageConfig.load(ST)); FPXY = {}
+for t_ in sorted({x["tile"] for x in EXA}):
+    tg = geom6.tiles[int(t_)]
+    Hv, Wv = tg.video_shape if tg.video_shape else tifffile.imread(str(ST / "tiles" / "maxmed" / f"vid{t_}_maxmed.tif")).shape[:2]
+    fp = np.array([[0, 0, 1], [0, Wv, 1], [Hv, Wv, 1], [Hv, 0, 1]], float) @ tg.A_full.T
+    fp = fp[:, :2] / geom6.downsample - [geom6.y0, geom6.x0]; FPXY[t_] = np.column_stack([fp[:, 1], fp[:, 0]])
+axI = axM.inset_axes([0.0, 0.62, 0.38, 0.38])
+allfp = np.vstack(list(FPXY.values())); ic = 0.5 * (allfp.min(0) + allfp.max(0)); ih = 0.5 * np.ptp(allfp, axis=0).max() * 1.04
+axI.imshow(mos, cmap="gray", vmin=lo - 0.3 * (hi - lo), vmax=hi + 0.1 * (hi - lo), interpolation="antialiased")
 axI.set_xlim(ic[0] - ih, ic[0] + ih); axI.set_ylim(ic[1] + ih, ic[1] - ih); axI.set_xticks([]); axI.set_yticks([])
 for t_, xy_ in FPXY.items():
-    axI.add_patch(_Poly(xy_, closed=True, fc="none", ec=TCOL[t_], lw=1.1, zorder=3))
-axI.add_patch(matplotlib.patches.Rectangle((c0, r0), c1 - c0, r1 - r0, fc="white", alpha=0.35, ec="white", lw=1.0, zorder=5))
+    axI.add_patch(_Poly(xy_, closed=True, fc="none", ec=TCOL[t_], lw=1.2, zorder=3))
+axI.add_patch(_Rect((c0, r0), c1 - c0, r1 - r0, fill=False, ec="white", lw=1.2, zorder=5))
 for s_ in axI.spines.values():
     s_.set_color("white"); s_.set_linewidth(1.0)
-
-# b: vessel 3 recorded in two tiles
-nb = len(EXA); hb = (2.12 - 0.12 * (nb - 1)) / nb
-axs = [ax_at(2.95, 0.5 + (nb - 1 - k) * (hb + 0.12), 1.45, hb) for k in range(nb)]
-tmax = 3.0 / min(e["f0"] for e in EXA)
-ylo_ = min(np.percentile(x["q"][x["t"] <= tmax], 1) for x in EXA); yhi_ = max(np.percentile(x["q"][x["t"] <= tmax], 99.5) for x in EXA)
-pad_ = 0.12 * (yhi_ - ylo_); ylo_, yhi_ = ylo_ - pad_, yhi_ + 2.2 * pad_
-for ax, x in zip(axs, EXA):
+# b: the vessel's three recordings overlaid on one axis, as tall as a
+axB6 = ax_at(3.75, 0.12, 3.3, 2.5)                          # same vertical extent as a
+tmax = min(e["t"][-1] for e in EXA)                           # the whole recording (all beats)
+for x in EXA:
     col = TCOL[x["tile"]]; sel = x["t"] <= tmax
-    ax.fill_between(x["t"][sel], (x["fit"] - x["s"])[sel], (x["fit"] + x["s"])[sel], color=col, alpha=0.22, lw=0, zorder=1)
-    ax.plot(x["t"][sel], x["q"][sel], color=col, lw=0.45, alpha=0.5, zorder=2)
-    ax.plot(x["t"][sel], x["fit"][sel], color=col, lw=1.3)
-    ax.axhline(x["mean"], color=INK, lw=0.8, ls=(0, (3, 2)))
-    ax.set_xlim(0, tmax); ax.set_ylim(ylo_, yhi_); ax.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(3))
-    ax.spines[["top", "right"]].set_visible(False)
-    ax.text(0.02, 0.99, f"tile {x['tile']}", transform=ax.transAxes, ha="left", va="top", color=col, fontsize=8)
-    ax.text(0.99, 0.99, f"±s = {x['s']:.3f} nL/s", transform=ax.transAxes, ha="right", va="top", color=INK, fontsize=8)
-for ax in axs[:-1]:
-    ax.tick_params(labelbottom=False)
-axs[-1].set_xlabel("time (s)")
-fig.text(2.52 / W_IN, 1.56 / H_IN, f"vessel {num[AV]} flux (nL/s)", rotation=90, ha="center", va="center", fontsize=9)
+    axB6.fill_between(x["t"][sel], (x["fit"] - x["s"])[sel], (x["fit"] + x["s"])[sel], color=col, alpha=0.18, lw=0, zorder=1)
+    axB6.plot(x["t"][sel], x["fit"][sel], color=col, lw=1.6, zorder=3, label=f"tile {x['tile']}")
+    axB6.axhline(x["mean"], color=col, lw=0.9, ls=(0, (3, 2)), zorder=2)
+    axB6.text(1.01, x["mean"], rf"${x['mean']:.3f}$", transform=axB6.get_yaxis_transform(), ha="left", va="center",
+              fontsize=8, color=col)
+lo_b = min((x["fit"] - x["s"]).min() for x in EXA); hi_b = max((x["fit"] + x["s"]).max() for x in EXA)
+axB6.set_xlim(0, tmax); axB6.set_ylim(min(0.0, lo_b), hi_b + 0.1 * (hi_b - lo_b))
+axB6.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(4)); axB6.spines[["top", "right"]].set_visible(False)
+axB6.set_xlabel("Time (s)"); axB6.set_ylabel("Flux (nL/s)")
+axB6.legend(loc="upper right", ncol=3, frameon=False, fontsize=8, handlelength=1.4, columnspacing=1.0, borderaxespad=0.1)
 
-# c: all nine vessels — recordings (± s), weighted mean (grey), reconstructed (black)
-axS = ax_at(5.0, 0.5, 2.42, 2.12)
-for k, i in enumerate(order):
-    yk = len(order) - k; sg = np.sign(Qp[i]) or 1.0; rs = sorted(recs[i])
-    offs = np.linspace(-0.2, 0.2, len(rs)) if len(rs) > 1 else [0.0]
-    for (t_, q, s), dy in zip(rs, offs):
-        axS.errorbar(sg * q, yk + dy, xerr=s, fmt="o", ms=2.8, color=TCOL[t_], alpha=0.8, mec="none", elinewidth=0.8, capsize=0, zorder=3)
-    axS.plot([sg * ybar[i], abs(Qp[i])], [yk, yk], color=MEANC, lw=0.7, zorder=2)
-    axS.plot([sg * ybar[i]] * 2, [yk - 0.32, yk + 0.32], color=MEANC, lw=1.8, zorder=2.5, solid_capstyle="butt")
-    axS.plot([abs(Qp[i])] * 2, [yk - 0.36, yk + 0.36], color=RECC, lw=2.0, zorder=4, solid_capstyle="butt")
-axS.set_yticks(range(1, len(order) + 1)); axS.set_yticklabels([str(num[order[len(order) - y]]) for y in range(1, len(order) + 1)])
-for tl in axS.get_yticklabels():
-    if tl.get_text() == str(num[AV]):
-        tl.set_fontweight("bold")
-xmax_ = max(abs(r[1]) + r[2] for i in order for r in recs[i]) * 1.45
-axS.set_ylim(0.4, len(order) + 0.6); axS.set_xlim(-0.01 * xmax_, xmax_); axS.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(4))
-axS.set_ylabel("vessel", labelpad=1); axS.set_xlabel("mean flux (nL/s)"); axS.spines[["top", "right"]].set_visible(False)
-hs = [Line2D([], [], marker="o", ls="-", lw=0.8, ms=3, alpha=0.85, color=TCOL[t_], label=f"tile {t_}") for t_ in ptiles]
-hs += [Line2D([], [], color=MEANC, lw=1.8, label="weighted mean"), Line2D([], [], color=RECC, lw=2.0, label="reconstructed")]
-axS.legend(handles=hs, loc="upper right", frameon=False, fontsize=8, handlelength=1.2, handletextpad=0.4, labelspacing=0.15,
-           borderaxespad=0.1)
+# ---- d–f: the whole network.  d reconciled mean flow Q′, e passive Poiseuille prediction Q_sim (K = r⁴/ℓ, the emergent boundary
+#      fluxes of d imposed, negligible arterial cuts closed and a soft equal-pressure penalty at the two vein outlets — as the
+#      former whole-organ figure, scripts/make_figure7.py), f vessel-level agreement on measured vessels
+from plexusflow.reconcile import passive, venous_pressure_penalty
+CUT_MIN = 0.02
+fb_ = np.asarray(_D["fb"], float).copy(); inj0 = np.asarray(dom["inj"]); closed = inj0[fb_[inj0] < CUT_MIN]
+fb_[closed] = 0.0; vo = fb_[dom["out"]]; fb_[dom["out"]] = vo - fb_.sum() * vo / vo.sum()
+rr_, LL_ = np.asarray(_D["radius"], float), np.asarray(_D["length"], float)
+fb_, _vp = venous_pressure_penalty(fb_, dom, rr_, LL_, np.asarray(_D["sigma"], float), sigma_P=2.0)
+Qsim = passive(rr_ ** 4 / LL_, fb_, dom)
+segs_all = [toimg(np.asarray(G.edges[e]["path"], float)) if G.edges[e].get("path") is not None else
+            toimg(np.array([[G.nodes[n]["x"], G.nodes[n]["y"]] for n in e])) for e in E]
+qa_ = np.abs(np.r_[Qp[IM], Qsim[IM]]); nQ = mcolors.LogNorm(max(np.percentile(qa_, 2), 1e-4), np.percentile(qa_, 98))
+cQ = plt.cm.viridis
+from mosaic_display import load_mosaic
+MOS6 = load_mosaic(P.STAGE)
+def netmap(ax, Q, title, let):
+    ax.imshow(np.ma.masked_where(MOS6["outside"], MOS6["disp"]), cmap="gray", vmin=MOS6["vmin"], vmax=MOS6["vmax"], alpha=0.35,
+              interpolation="antialiased")
+    o = np.argsort(np.abs(Q))
+    ax.add_collection(LineCollection([segs_all[i] for i in o], colors=cQ(nQ(np.clip(np.abs(Q[o]), nQ.vmin, nQ.vmax))),
+                                     linewidths=0.25 + 1.3 * np.clip(np.log10(np.abs(Q[o]) / nQ.vmin) / np.log10(nQ.vmax / nQ.vmin), 0, 1)))
+    x0, x1, y1, y0 = MOS6["extent"]; ax.set_xlim(x0, x1); ax.set_ylim(y1, y0); ax.set_aspect("equal"); ax.axis("off")
+    ax.set_title(title, fontsize=9, pad=3)
+    return ax
+mapH = 2.25; mapW = mapH * (MOS6["extent"][1] / MOS6["extent"][2])
+axD6 = netmap(ax_abs(0.08, 0.3, mapW, mapH), Qp, r"Reconciled $Q'$", "d")
+axE6 = netmap(ax_abs(0.08 + mapW + 0.06, 0.3, mapW, mapH), Qsim, r"Passive $Q_{\mathrm{sim}}$ ($K \propto r^4/\ell$)", "e")
+fig.canvas.draw(); [a_.apply_aspect() for a_ in (axD6, axE6)]
+pd_, pe_ = axD6.get_position(), axE6.get_position(); cw_ = 0.6 * (pe_.x1 - pd_.x0)
+_rows = np.flatnonzero((~MOS6["outside"]).any(1))                                      # organ's top / bottom rows
+_y0 = axE6.transData.transform((0, _rows.max()))[1]; _y1 = axE6.transData.transform((0, _rows.min()))[1]
+_y0, _y1 = (fig.transFigure.inverted().transform((0, v))[1] for v in (_y0, _y1))
+cax6 = fig.add_axes([pe_.x1 + 0.06 / W_IN, _y0, 0.1 / W_IN, _y1 - _y0])                           # vertical, as tall as the mosaic
+cb6 = fig.colorbar(plt.cm.ScalarMappable(nQ, cQ), cax=cax6, orientation="vertical")
+cb6.set_label(r"$|Q|$ (nL/s)", fontsize=8, labelpad=2); cb6.ax.tick_params(labelsize=8, length=2, pad=1); cb6.outline.set_linewidth(0.5)
+axF6 = ax_abs(5.68, 0.62, 1.72, 1.72)
+m_ = IM & (np.abs(Qp) > 0) & (np.abs(Qsim) > 0)
+axF6.scatter(np.abs(Qp[m_]), np.abs(Qsim[m_]), s=1.2, color="0.15", alpha=0.25, lw=0, rasterized=True)
+axF6.set_xscale("log"); axF6.set_yscale("log")
+x_, y_ = np.abs(Qp[m_]), np.abs(Qsim[m_])
+lim6 = [1e-4, 1.3 * max(x_.max(), y_.max())]                                          # floor 1e-4; top: data-driven (no cap)
 
+xx6 = np.logspace(np.log10(lim6[0]), np.log10(lim6[1]), 200)
+bn = np.polyfit(x_, y_, 1)
+axF6.plot(xx6, xx6, color="#d7191c", lw=1.2, zorder=4)                                    # equal flow, |Q_sim| = |Q′|
+axF6.legend(handles=[Line2D([], [], color="#d7191c", lw=1.2, label=r"$|Q_{\mathrm{sim}}| = |Q'|$")], loc="lower right",
+            frameon=False, fontsize=8, handlelength=1.6, borderaxespad=0.2)                   # least-squares line
+axF6.set_xlim(lim6); axF6.set_ylim(lim6)
+r_lin = float(np.corrcoef(x_, y_)[0, 1]); r_log = float(np.corrcoef(np.log(x_), np.log(y_))[0, 1]); bl = (np.nan, np.nan); in2 = np.nan
+axF6.text(0.04, 0.96, rf"$r = {r_lin:.2f}$", transform=axF6.transAxes, ha="left", va="top", fontsize=9)
+dir_ = float(np.mean(np.sign(Qp[m_]) == np.sign(Qsim[m_])))
+log(f"d: linear fit slope {bn[0]:.2f} intercept {bn[1]:.3f}; r {r_lin:.3f} (r_log {r_log:.3f})")
+axF6.set_xlabel(r"$|Q'|$ (nL/s)"); axF6.set_ylabel(r"$|Q_{\mathrm{sim}}|$ (nL/s)"); axF6.spines[["top", "right"]].set_visible(False)
+axF6.set_title("Measured vessels " + rf"$(n = {int(m_.sum()):,})$".replace(",", "{,}"), fontsize=9, pad=3)
+import matplotlib.transforms as mtrans
+fig.canvas.draw()
+_yt = max(axD6.get_position().y1, axF6.get_position().y1) + 0.12 / H_IN                    # one title line for c and d
+for ax_ in (axD6, axE6, axF6):
+    ax_._t6 = ax_.get_title(); ax_.set_title("")
+for ax_ in (axD6, axE6, axF6):
+    p_ = ax_.get_position(); fig.text(p_.x0 + p_.width / 2, _yt, ax_._t6, ha="center", va="baseline", fontsize=9)
+for l_, x_ in (("c", 0.03), ("d", 5.05)):
+    fig.text(x_ / W_IN, _yt, l_, fontsize=12, fontweight="bold", ha="left", va="baseline")
+for ax_, l_, x_ in ():
+    tr = mtrans.blended_transform_factory(fig.transFigure, ax_.title.get_transform())
+    fig.text(x_ / W_IN, ax_.title.get_position()[1], l_, transform=tr, fontsize=12, fontweight="bold", ha="left", va="baseline")
+log(f"d–f: passive comparison on {int(m_.sum())} measured vessels: r_log {r_log:.3f}, direction {100 * dir_:.1f} %; closed cuts {len(closed)}; "
+    f"vein outflows {fb_[dom['out']].round(2)}")
 ps.save(fig, OUT / os.environ.get("FIG6_NAME", "fig6_abs"))
 log(f"saved {OUT}/fig6_abs.png / .pdf / .tif (strip layout)")

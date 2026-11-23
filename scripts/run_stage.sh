@@ -27,7 +27,9 @@ PY=${PYTHON:-python3}
 run() { echo; echo "=== $* ==="; "$PY" "$@"; }
 echo "stage $PLEXUSFLOW_STAGE → results $RES"
 
-run scripts/dc_reconcile.py                 # reliability model + reconciled mean flow → reliability_model_v1.json, dc_reconciled_v2.pkl
+run scripts/dc_reconcile.py                 # reliability model + reconciled mean flow → reliability_model_v1.json, dc_reconciled_v3.pkl
+                                            #   (2026-11-20: residual-variance weights, left = right arterial inflow; the validation scripts
+                                            #    below and the viewer still read dc_reconciled_v2.pkl — to be moved over)
 run scripts/dc_qc.py                        # review list: gross-error tests, loops, hotspots → dc_qc.csv, dc_qc.json
 if [[ $VALIDATE == 1 ]]; then
   run scripts/dc_validate_weighting.py      # leave-one-recording-out validation       → dc_weighting_validation.json
@@ -36,8 +38,9 @@ if [[ $VALIDATE == 1 ]]; then
   run scripts/dc_ablation.py                # paired ablation: weighting × conservation × HR normalisation → dc_ablation.json
 fi
 if [[ $AC == 1 ]]; then
-  run scripts/ac_field.py                   # tile-synchronised harmonic field         → ac_field_v7.pkl
-  run scripts/mech/ac_estimate.py           # profiled distensibility fit              → ac_estimate_v8.json
+  run scripts/pulse_field.py                # reconciled pulsatile field (plexusflow.ac.pulse) → ac_field_v8.pkl
+  run scripts/mech/ac_estimate.py           # distensibility fit, forcing as measured          → ac_estimate_v9.json
+  run scripts/make_figure_model.py          # revised Fig 7                                    → figures/fig7_model/
 fi
 echo
 echo "done. View:  plexusflow view \"$PLEXUSFLOW_STAGE\""

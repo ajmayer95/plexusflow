@@ -63,7 +63,11 @@ PX_UM = 1.7
 
 PER_VESSEL = "average"      # since 2026-11-10 (was "winner"): see vessel_input
 ESTIMATOR = "fixed"         # since 2026-11-19 (was "ql"): static inverse-variance fusion + constrained weighted least squares
-VARIANCE = "block"          # "block" (per-recording heartbeat-block variance, the handoff recipe) | "pooled" (κ s²/N)
+VARIANCE = "residual"       # since 2026-11-20 (was "block"): "residual" (s²/M from the mean + 2-harmonic fit residual) |
+                            # "block" (per-recording heartbeat-block variance, the handoff recipe) | "pooled" (κ s²/N)
+SYMMETRIC = True            # since 2026-11-20 (was False): total left arterial inflow = total right enforced in the reconciliation
+K_FIT = 2                   # harmonics of the heart rate in the per-recording fit (2026-11-20: the third adds ~0.1 % of the power)
+RESULT = "dc_reconciled_v3"  #: results/<RESULT>.pkl of the current method (v2 = block variance, free left/right split)
 FS_HZ = 250.0
 
 
@@ -123,6 +127,46 @@ def recording_block_variances(G, M):
         f0 = (mm.get("harm") or {}).get("f0_hz") if mm else None
         f0 = float(f0) if f0 and np.isfinite(f0) else tf0.get(t, np.nan)
         v[(t, e)] = block_variance(mm["Q_t"], f0) if mm is not None and mm.get("Q_t") is not None else np.nan
+    good = [x for x in v.values() if np.isfinite(x) and x > 0]
+    if not good:
+        raise RuntimeError("no valid recording variance")
+    med = float(np.median(good)); n_bad = sum(1 for x in v.values() if not (np.isfinite(x) and x > 0))
+    return {k: max(x if np.isfinite(x) and x > 0 else med, 1e-16) for k, x in v.items()}, n_bad
+
+
+def residual_variance(q, f0, K=K_FIT, fs=FS_HZ):
+    """Variance of a recording's fitted mean flux from the residual of its mean + K-harmonic fit at the tile heart rate:
+    s² = RSS / (M − (2K + 1)) over the M finite frames, σ² = s² / M (independent residuals, complete cycles).  NaN if unavailable."""
+    q = np.asarray(q, float); ok = np.isfinite(q); M = int(ok.sum())
+    if not np.isfinite(f0) or f0 <= 0 or M <= 4 * K + 10:
+        return np.nan
+    w = 2 * np.pi * f0 * np.arange(len(q))[ok] / fs
+    X = np.column_stack([np.ones(M)] + [g(k * w) for k in range(1, K + 1) for g in (np.cos, np.sin)])
+    r = q[ok] - X @ np.linalg.lstsq(X, q[ok], rcond=None)[0]
+    return float(r @ r) / ((M - (2 * K + 1)) * M)
+
+
+def fitted_mean(q, f0, K=K_FIT, fs=FS_HZ):
+    """Mean of the mean + K-harmonic least-squares fit of a recording (the Q̄fit of the Methods; differs from the plain time
+    average by ~0.4 % because recordings do not hold a whole number of beats).  NaN if unavailable."""
+    q = np.asarray(q, float); ok = np.isfinite(q); M = int(ok.sum())
+    if not np.isfinite(f0) or f0 <= 0 or M <= 4 * K + 10:
+        return np.nan
+    w = 2 * np.pi * f0 * np.arange(len(q))[ok] / fs
+    X = np.column_stack([np.ones(M)] + [g(k * w) for k in range(1, K + 1) for g in (np.cos, np.sin)])
+    return float(np.linalg.lstsq(X, q[ok], rcond=None)[0][0])
+
+
+def recording_residual_variances(G, M):
+    """{key: σ²_r} = residual_variance of each recording's Q(t) at its tile heart rate; nonpositive / unavailable → median of the
+    valid ones in M; floored at 1e-16.  Also returns the number of unavailable recordings."""
+    from .gain import tile_heart_rates
+    tf0 = tile_heart_rates(G); v = {}
+    for (t, e), m in M.items():
+        mm = next((x for x in G.edges[e].get("measurements_piv") or [] if int(x.get("tile_id", -1)) == t), None)
+        f0 = (mm.get("harm") or {}).get("f0_hz") if mm else None
+        f0 = float(f0) if f0 and np.isfinite(f0) else tf0.get(t, np.nan)
+        v[(t, e)] = residual_variance(mm["Q_t"], f0) if mm is not None and mm.get("Q_t") is not None else np.nan
     good = [x for x in v.values() if np.isfinite(x) and x > 0]
     if not good:
         raise RuntimeError("no valid recording variance")
@@ -241,10 +285,11 @@ def ql_solve(Q, y, C, imaged, s0, m, dom, tol=1e-10, max_iter=500):
 
 
 def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, n_shuffle=10, seed=0, n_starts=4, start_noise=0.3, stable_rtol=0.10,
-                 radius="tube", per_vessel=PER_VESSEL, mask=None, estimator=None, symmetric=False, kappa=None, variance=None):
+                 radius="tube", per_vessel=PER_VESSEL, mask=None, estimator=None, symmetric=None, kappa=None, variance=None):
     """estimator: "fixed" (production since 2026-11-19; module docstring a–c) or "ql" (quasi-likelihood, before).
-    symmetric: add total left = total right arterial inflow.  kappa: pooled autocorrelation factor (None → estimated)."""
-    estimator = estimator or ESTIMATOR
+    symmetric: add total left = total right arterial inflow (None → SYMMETRIC).  variance: "residual" | "block" | "pooled"
+    (None → VARIANCE).  kappa: pooled autocorrelation factor (None → estimated)."""
+    estimator = estimator or ESTIMATOR; symmetric = SYMMETRIC if symmetric is None else bool(symmetric)
     dom = dom or carved_domain(G, topology=topology)
     recs = {}
     for (t, e), m in M.items():
@@ -261,7 +306,9 @@ def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, 
     fixed = None
     if estimator == "fixed":
         variance = variance or VARIANCE
-        if variance == "block":
+        if variance == "residual":
+            vr, n_bad = recording_residual_variances(G, M); kap, s_floor, sr = np.nan, np.nan, None
+        elif variance == "block":
             vr, n_bad = recording_block_variances(G, M); kap, s_floor, sr = np.nan, np.nan, None
         else:
             assert variance == "pooled", variance
@@ -269,9 +316,18 @@ def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, 
             kap = autocorrelation_factor(G, M) if kappa is None else float(kappa)
             vr = {k: kap * sr[k] ** 2 / M[k]["n_frames"] for k in M}
         mu = np.zeros(me); Ve = np.full(me, np.nan); nrec = np.zeros(me, int)
-        sgn = {}
+        sgn = {}; qfit = {}
+        if variance == "residual":                         # the recording's value is the mean of the same fit that gives its variance
+            from .gain import tile_heart_rates
+            tf0_ = tile_heart_rates(G)
+            for (t, e), mrow in M.items():
+                mm = next((x for x in G.edges[e].get("measurements_piv") or [] if int(x.get("tile_id", -1)) == t), None)
+                f0_ = (mm.get("harm") or {}).get("f0_hz") if mm else None; f0_ = float(f0_) if f0_ and np.isfinite(f0_) else tf0_.get(t, np.nan)
+                v_ = fitted_mean(mm["Q_t"], f0_) if mm is not None and mm.get("Q_t") is not None else np.nan
+                if np.isfinite(v_) and np.sign(v_) == np.sign(mrow["Q"]):
+                    qfit[(t, e)] = v_
         for (t, e), mrow in M.items():
-            sgn.setdefault(e, []).append((mrow["Q"], vr[(t, e)]))
+            sgn.setdefault(e, []).append((qfit.get((t, e), mrow["Q"]), vr[(t, e)]))
         for i, e in enumerate(sub):
             r = sgn.get(e)
             if r:
@@ -283,7 +339,7 @@ def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, 
         obj = float(0.5 * np.sum((Qp[imaged] - Qm[imaged]) ** 2 / Ve[imaged]))
         info = dict(n_iter=1, converged=True, objective=obj, n_concave=0); m = wm
         Qp_sd = np.zeros(me); unstable = np.zeros(me, bool)
-        fixed = dict(variance=variance, kappa=kap, s_floor=s_floor, V=Ve, v_rec=vr, n_variance_unavailable=n_bad)
+        fixed = dict(variance=variance, kappa=kap, s_floor=s_floor, V=Ve, v_rec=vr, n_variance_unavailable=n_bad, n_fitted_mean=len(qfit))
     else:
         assert estimator == "ql", estimator
         start = lambda q: project(q, np.where(imaged, 1.0, EPS_UNIMAGED), dom_fit)  # uniform-weight conservative projection

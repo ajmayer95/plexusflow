@@ -38,7 +38,10 @@ def main():
                          "calibrated segmentation radius (scripts/anatomical_radius.py)")
     ap.add_argument("--no-topology", action="store_true", help="ignore topology-uncertain region tags (open-region carve only)")
     ap.add_argument("--estimator", default=None, choices=("fixed", "ql"), help="fixed (production) or ql (quasi-likelihood, before 2026-11-19)")
-    ap.add_argument("--symmetric", action="store_true", help="add total left = total right arterial inflow (sensitivity)")
+    ap.add_argument("--symmetric", action=argparse.BooleanOptionalAction, default=None,
+                    help="total left = total right arterial inflow (default: on, plexusflow.reconcile.dc.SYMMETRIC; --no-symmetric = free split)")
+    ap.add_argument("--variance", default=None, choices=("residual", "block", "pooled"),
+                    help="variance of each recording's mean: residual of the mean + 2-harmonic fit (default), heartbeat blocks, or pooled κ s²/N")
     a = ap.parse_args()
     G = paths.load_graph()
     M = measurement_table(G)
@@ -52,7 +55,7 @@ def main():
     print(f"[1] reliability fit: {model['n_junctions']} junctions, {len(cT)} tiles:  {model['formula'].split(';')[0]}:  c_a {model['c_a']:.2f}  "
           f"σ0 {model['sigma0']:.4f}  " + (f"c0 {model['c0']:.3f}" if 'c0' in model else
           f"c_T median {np.median(cT):.2f} [IQR {np.percentile(cT, 25):.2f}–{np.percentile(cT, 75):.2f}]"))
-    D = reconcile_dc(G, model, M, radius=a.radius, topology=not a.no_topology, estimator=a.estimator, symmetric=a.symmetric)
+    D = reconcile_dc(G, model, M, radius=a.radius, topology=not a.no_topology, estimator=a.estimator, symmetric=a.symmetric, variance=a.variance)
     D["gain"] = gfit
     if a.radius == "tube":
         pr = D["radius_profiled"]
@@ -75,7 +78,8 @@ def main():
              f"{len(V)} V nodes: total {V.sum():+.2f} nL/s ({np.sum(V < 0)} withdrawing, {np.sum(V > 0)} injecting)")
     if D.get("fixed"):
         fx = D["fixed"]; Ve = fx["V"][im]
-        vtxt = (f"per-recording heartbeat-block variance ({fx['n_variance_unavailable']} unavailable → median)" if fx["variance"] == "block"
+        vtxt = (f"per-recording residual variance s²/M of the mean + 2-harmonic fit ({fx['n_variance_unavailable']} unavailable → median)" if fx["variance"] == "residual"
+                else f"per-recording heartbeat-block variance ({fx['n_variance_unavailable']} unavailable → median)" if fx["variance"] == "block"
                 else f"pooled κ = {fx['kappa']:.2f}, s floor {fx['s_floor']:.4f} nL/s")
         print(f"[3] fixed inverse-variance fusion + constrained WLS{' (SYMMETRIC: total L = total R)' if D['symmetric'] else ''}: "
               f"{vtxt}; vessel SD of the mean median "
@@ -89,7 +93,10 @@ def main():
           f"(log {met['corr_log']:.3f}, {a.radius} radii), shuffled radii {D['shuffled_corr']:.3f};  loop share {met['loop_share']:.2f}")
     paths.RESULTS.mkdir(parents=True, exist_ok=True)
     (paths.RESULTS / "reliability_model_v1.json").write_text(json.dumps(model, indent=1))
-    out = paths.RESULTS / ("dc_reconciled_v2_sym.pkl" if a.symmetric else "dc_reconciled_v2.pkl")
+    from plexusflow.reconcile.dc import RESULT
+    current = D["symmetric"] and (D.get("fixed") or {}).get("variance") == "residual"      # the method since 2026-11-20
+    out = paths.RESULTS / (f"{RESULT}.pkl" if current else
+                           f"{RESULT}_{(D.get('fixed') or {}).get('variance', D['estimator_key'])}_{'sym' if D['symmetric'] else 'free'}.pkl")
     out.write_bytes(pickle.dumps(D, protocol=4))
     print(f"wrote {paths.RESULTS / 'reliability_model_v1.json'}, {out}")
 

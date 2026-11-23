@@ -4,9 +4,14 @@ The representative vessel (edge 75489–75638) in its own tile (36), the tile of
   a  one representative raw frame (closest to the movie median) with the time-mean optical flow (arrows, centred on their
      sample points), the centreline from the mapped graph and every 5th cross-section
   b  axial-speed profiles across three cross-sections and their Poiseuille fits v(ρ) = v_CL (1 − ρ²/R_s²); the vessel's
-     mean flux Q̄ (mean of the shape-valid sections' (π/2) R_s² v_CL,s) is stated in the panel
-  c  pulsatile flux: Q(t) over the recording (250 fps) with its harmonic model Q̂(t) = Q̄ + Σ_k Re(H_k e^{2πik f0 t}),
-     k = 1..3 (left); every beat folded on the cardiac phase against the model, and the model's harmonics (right)
+     mean flux Q̄ (mean of the shape-valid sections' (π/2) R_s² v_CL,s) is stated in the panel.  Only the samples each
+     section's fit used are drawn (per_slice_fit_bins): the cross-section sampling reaches past the vessel edge, and at
+     section 1 the mask also covers a neighbouring vessel's lumen — those samples never enter the flux (2026-11-19).
+  c  pulsatile flux: per-frame Q(t) = (π/2)⟨R_s² U_s(t)⟩_s (geometry frozen from the time-mean fit, centreline speed U_s
+     per frame; kloosterman.per_frame operator) with its truncated Fourier series Q_N(t) = Q̂_0 + Σ_{n=1..N} Q̂_n cos(2πn f0 t + φ_n), N = 3 (the fit),
+     A_k = |H_k|, φ_k = arg H_k (Q̂_n = |H_n|, φ_n = arg H_n, H_n the complex amplitude); in the background the modes: Q̂_0 and each
+     harmonic drawn about it, Q̂_0 + Q̂_n cos(2πn f0 t + φ_n), at half the fit's line width. right: every beat folded on the
+     cardiac phase (mean ± SD) against the model.
 The per-section flux along the vessel and the fixed-radius peak/trough profiles are in the SI figure
 (make_figure_S_flux_estimator.py), which reuses load_vessel() from here.
 
@@ -36,6 +41,7 @@ EDGE, TILE = (75489, 75638), 36
 INK, MEAS, MODEL, VCOL = "#1a1a1a", "#1b9e3a", "#1f4e8c", "#d62728"
 HCOL = ["#1f4e8c", "#d95f02", "#7570b3"]
 KW = PRODUCTION_KW
+N_FIT = 2                       # harmonics kept in the pulsatile fit (2026-11-20: the third adds ~0.1 % of the power, panel d)
 UMS = PX_SIZE_UM / FRAME_DT_S
 HALO = [pe.withStroke(linewidth=1.6, foreground="black")]
 
@@ -49,11 +55,40 @@ def load_vessel():
     valid = np.asarray(res["valid_mask"], bool); conv = float(ki["conv"])
     m = next(x for x in G.edges[EDGE]["measurements_piv"] if x["tile_id"] == TILE)
     q = np.asarray(m["Q_t"], float); f0 = float(tf0[TILE]); t = np.arange(len(q)) / FS
-    a0, H = phasors(q, f0)
-    model = lambda tt, ks=(0, 1, 2, 3): a0 * (0 in ks) + sum((H[k - 1] * np.exp(2j * np.pi * k * f0 * tt)).real for k in ks if k > 0)
+    a0, H = phasors(q, f0, K=N_FIT)
+    model = lambda tt, ks=tuple(range(N_FIT + 1)): a0 * (0 in ks) + sum((H[k - 1] * np.exp(2j * np.pi * k * f0 * tt)).real for k in ks if k > 0)
     return dict(P=P, G=G, ki=ki, vf=vf, cl=cl, R0=R0, off=off, res=res, valid=valid, Qs=np.asarray(res["per_slice_Q"]) * conv,
                 Rs=np.asarray(res["per_slice_R"]) * PX_SIZE_UM, arc=np.asarray(res["per_slice_arc"]) * PX_SIZE_UM,
                 Qbar=float(res["Q_char"]) * conv, q=q, f0=f0, t=t, a0=a0, H=H, model=model)
+
+
+def truncated_power_fractions(G, K=3):
+    """Fraction of the measured power captured by the truncated series Q_k(t) = Q̂_0 + Σ_{n=1..k} q_n(t), k = 0..K, pooled
+    over every measured vessel (recordings with a valid profile fit in a tile inside the heart-rate band; a property of
+    the measurement only).  Per recording: nested LSQ fits of mean + k harmonics at the tile heart rate; power of the fit
+    = ⟨Q_obs²⟩ − ⟨residual²⟩ (exact for a least-squares fit).  Per vessel: mean over its recordings (repeatedly imaged
+    vessels not over-represented).  Pooled: Σ_vessels power(Q_k) / Σ_vessels ⟨Q_obs²⟩.
+    Returns (fractions [K + 1], number of vessels)."""
+    from plexusflow.ac.field import CANONICAL_F0_BAND, REF_TILE
+    tf0 = G.graph["tile_f0_piv"]; st = G.graph.get("tile_f0_status") or {}
+    band = {t for t, f in tf0.items() if f and abs(f / tf0[REF_TILE] - 1) <= CANONICAL_F0_BAND
+            and (st.get(t) or {}).get("status") not in ("no_signal", "excluded", "no measurements")}
+    num, den, n_ves = np.zeros(K + 1), 0.0, 0
+    for _, _, d in G.edges(data=True):
+        Pv, Tv = [], []
+        for m in d.get("measurements_piv") or []:
+            if not ((m.get("quality") or {}).get("kl_ok") and m["tile_id"] in band and m.get("Q_t") is not None):
+                continue
+            q = np.asarray(m["Q_t"], float); t = np.arange(len(q)) / FS; ok = np.isfinite(q)
+            if ok.sum() < 200:
+                continue
+            q, t = q[ok], t[ok]; f0 = tf0[m["tile_id"]]
+            X = np.column_stack([np.ones(len(t))] + [fn(2 * np.pi * k * f0 * t) for k in range(1, K + 1) for fn in (np.cos, np.sin)])
+            ms = np.array([np.mean((q - X[:, :2 * k + 1] @ np.linalg.lstsq(X[:, :2 * k + 1], q, rcond=None)[0]) ** 2) for k in range(K + 1)])
+            Tv.append(np.mean(q ** 2)); Pv.append(Tv[-1] - ms)
+        if Pv:
+            num += np.mean(Pv, axis=0); den += np.mean(Tv); n_ves += 1
+    return num / den, n_ves
 
 
 def main():
@@ -63,10 +98,9 @@ def main():
     print(f"[fig3] {EDGE} tile {TILE}: {valid.sum()}/{len(valid)} sections, Q̄ {Qbar:.3f} nL/s (trace mean {a0:.3f}), f0 {f0:.2f} Hz, "
           f"|H| {np.round(np.abs(H), 3)}")
 
-    fig = plt.figure(figsize=(7.5, 5.0))
-    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.9], hspace=0.40, left=0.07, right=0.985, top=0.93, bottom=0.09)
+    fig = plt.figure(figsize=(7.5, 5.75))
+    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 1.0], hspace=0.30, left=0.08, right=0.985, top=0.94, bottom=0.07)
     gT = gs[0].subgridspec(1, 2, width_ratios=[1.0, 1.25], wspace=0.30)
-    gB = gs[1].subgridspec(1, 2, width_ratios=[1.75, 1.0], wspace=0.28)
 
     # a: vessel in its tile, time-mean OF, cross-sections
     from plexusflow.config import StageConfig
@@ -106,56 +140,63 @@ def main():
     vcl = np.asarray(res["per_slice_v_CL"], float) * UMS; offs = np.asarray(res.get("per_slice_offset", np.zeros(len(cl))), float) * PX_SIZE_UM
     step = float(np.round(np.nanmax(vcl[picks]) * 0.85, -2))
     for j, i in enumerate(picks):
-        y0_ = j * step; ok = np.isfinite(prof[i])
-        axB.plot(rho[ok], prof[i][ok] + y0_, "o", ms=1.8, color=INK, mew=0, zorder=3)
-        rr = np.linspace(-Rs[i], Rs[i], 100)
-        axB.plot(rr + offs[i], vcl[i] * (1 - (rr / Rs[i]) ** 2) + y0_, color="#2b70b4", lw=1.1, zorder=2)
+        y0_ = j * step; ok = np.isfinite(prof[i]) & np.asarray(res["per_slice_fit_bins"][i], bool)   # samples the fit used
+        o_ = offs[i] if np.isfinite(offs[i]) else 0.0
+        axB.plot((rho[ok] - o_) / Rs[i], prof[i][ok] + y0_, "o", ms=1.8, color=INK, mew=0, zorder=3)   # ρ / R_s (section's own radius)
+        xx = np.linspace(-1, 1, 100)
+        axB.plot(xx, vcl[i] * (1 - xx ** 2) + y0_, color="#2b70b4", lw=1.1, zorder=2)
         axB.axhline(y0_, color="0.88", lw=0.4, zorder=1)
-        axB.text(rho.max() * 1.02, y0_ + 0.08 * step, str(j + 1), fontsize=8, color="0.35", va="bottom")
-    axB.set_xlabel("Radial position (µm)", labelpad=1); axB.set_ylabel("Axial speed (µm/s, offset)", labelpad=1)
+        axB.text(1.08, y0_ + 0.08 * step, str(j + 1), fontsize=8, color="0.35", va="bottom")
+    axB.set_xlim(-1.2, 1.2); axB.set_xticks([-1, -0.5, 0, 0.5, 1]); axB.set_xticklabels(["−1", "−0.5", "0", "0.5", "1"])
+    axB.set_xlabel(r"Radial position / fitted radius, $r/R_s$", labelpad=1); axB.set_ylabel("Axial speed (µm/s)", labelpad=1)
     axB.set_yticks([0, step]); axB.set_yticklabels(["0", f"{step:.0f}"]); axB.spines[["top", "right"]].set_visible(False)
-    axB.plot([], [], "o", ms=2.5, color=INK, label="Optical flow"); axB.plot([], [], color="#2b70b4", lw=1.1, label="Parabolic fit")
+    axB.plot([], [], "o", ms=2.5, color=INK, label=r"$v_{\rm obs}(r)$"); axB.plot([], [], color="#2b70b4", lw=1.1, label=r"$v(r) = v_{\rm CL}\,(1 - r^2/R_s^2)$")
     axB.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, borderaxespad=0.2, handlelength=1.2, columnspacing=0.8)
-    axB.set_ylim(-0.12 * step, (len(picks) - 1) * step + np.nanmax(vcl[picks]) + 0.75 * step)   # headroom for the flux note
-    axB.text(0.02, 0.98, r"$\bar Q_s = \frac{\pi}{2}R_s^2\,\bar v_{\rm CL,s}$" + f"\n$\\bar Q$ = {Qbar:.2f} nL/s ({valid.sum()} sections)",
-             transform=axB.transAxes, ha="left", va="top", fontsize=9, linespacing=1.5)
+    axB.set_ylim(-0.12 * step, (len(picks) - 1) * step + 1.12 * np.nanmax(vcl[picks]))
 
-    # c (left): Q(t) + harmonic model
+    # c: per-frame Q(t) (foreground), the fit Q_3 (foreground) and its modes (background): the mean Q̂0 and each harmonic n
+    #    drawn about the mean, Q̂0 + Q̂_n cos(2πn f0 t + φ_n), so the modes share the data's scale
+    gB = gs[1].subgridspec(1, 2, width_ratios=[2.55, 1.0], wspace=0.27)
     axD = fig.add_subplot(gB[0])
-    axD.plot(t, q, "o", ms=1.6, mew=0, color=MEAS, alpha=0.85, zorder=2, label="Estimated flux")
-    tt = np.linspace(0, t[-1], 2000); axD.plot(tt, model(tt), color=MODEL, lw=1.1, zorder=3, label="Harmonic fit")
-    axD.axhline(a0, color="0.7", lw=0.5, ls="--")
+    tt = np.linspace(0, t[-1], 2000); LW_FIT = 1.6; LW_MODE = LW_FIT / 2; A_MODE = 0.55
+    MCOL = {0: "#009E73", 1: "#0072B2", 2: "#E69F00", 3: "#9467bd"}
+    axD.plot(tt, np.full_like(tt, a0), color=MCOL[0], lw=LW_MODE, alpha=A_MODE, zorder=2, label=r"$\hat Q_0$")
+    for n in range(1, N_FIT + 1):
+        axD.plot(tt, a0 + model(tt, (n,)), color=MCOL[n], lw=LW_MODE, alpha=A_MODE, zorder=2, label=rf"$\hat Q_0 + q_{n}$")
+    axD.plot(t, q, "o", ms=2.0, mew=0, color="0.25", zorder=4, label=r"$Q_{\rm obs}(t)$")
+    axD.plot(tt, model(tt), color="#C2185B", lw=LW_FIT, zorder=5, label=rf"$Q_{N_FIT}(t)$")
     axD.set_xlim(0, t[-1]); axD.set_xlabel("Time (s)", labelpad=1); axD.set_ylabel("Flux (nL/s)", labelpad=1)
     axD.spines[["top", "right"]].set_visible(False)
-    axD.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, borderaxespad=0.2, handlelength=1.5)
-    yl = axD.get_ylim(); axD.set_ylim(yl[0], yl[0] + 1.22 * (yl[1] - yl[0]))           # headroom for the waveform equation
-    axD.text(0.015, 0.985, r"$Q(t) = \bar Q\,v_0(t)\,/\,\langle v_0\rangle_t$",
-             transform=axD.transAxes, ha="left", va="top", fontsize=9, bbox=dict(fc="white", ec="none", alpha=0.85, pad=1))
+    h_, l_ = axD.get_legend_handles_labels(); order = [N_FIT + 1, N_FIT + 2] + list(range(N_FIT + 1))
+    LEG_C = axD.legend([h_[k] for k in order], [l_[k] for k in order], loc="lower left", bbox_to_anchor=(0.0, 1.01), ncol=6,
+                       frameon=False, borderaxespad=0.0, borderpad=0.0, handlelength=1.2, columnspacing=0.9, handletextpad=0.4, fontsize=8)
+    yl = axD.get_ylim(); axD.set_ylim(yl[0], yl[0] + 1.06 * (yl[1] - yl[0]))
 
-    # c (right): folded beats + harmonic components
-    gE = gB[1].subgridspec(2, 1, height_ratios=[1.6, 1.0], hspace=0.32)
-    axE = fig.add_subplot(gE[0]); ph = (t * f0) % 1.0; cyc = np.floor(t * f0).astype(int)
-    full = [c for c in np.unique(cyc) if (cyc == c).sum() > 0.9 * FS / f0]; nb = len(full)
-    bins_ = np.linspace(0, 1, 41); sel_ = np.isin(cyc, full); idx_ = np.clip(np.digitize(ph[sel_], bins_) - 1, 0, 39)
-    mu = np.array([q[sel_][idx_ == b].mean() for b in range(40)]); sd = np.array([q[sel_][idx_ == b].std() for b in range(40)])
-    bc_ = 0.5 * (bins_[:-1] + bins_[1:])
-    axE.fill_between(bc_, mu - sd, mu + sd, color="0.72", alpha=0.6, lw=0); axE.plot(bc_, mu, "o", ms=2.8, color=MEAS, mew=0, zorder=3)
-    pp = np.linspace(0, 1, 300); axE.plot(pp, model(pp / f0), color=MODEL, lw=1.3, zorder=2)
-    axE.set_xlim(0, 1); axE.tick_params(labelbottom=False); axE.set_ylabel("Flux (nL/s)", labelpad=1); axE.spines[["top", "right"]].set_visible(False)
-    axK = fig.add_subplot(gE[1], sharex=axE)
-    for k, nm in zip((1, 2, 3), ("Fundamental", "2nd", "3rd")):
-        axK.plot(pp, model(pp / f0, (k,)), color=HCOL[k - 1], lw=1.0, label=nm)
-    axK.axhline(0, color="0.85", lw=0.5); axK.set_xlabel("Cardiac phase", labelpad=1); axK.set_ylabel("nL/s", labelpad=1)
-    axK.spines[["top", "right"]].set_visible(False)
-    axK.legend(loc="lower center", bbox_to_anchor=(0.5, 0.97), ncol=3, frameon=False, borderaxespad=0.1, handlelength=1.0, columnspacing=0.6)
-    axK.set_xticks([0, 0.5, 1])
+    # d: fraction of the measured power in the truncated series Q_k = Q̂_0 + Σ_{n ≤ k} q_n, pooled over all measured vessels
+    FR, n_ves = truncated_power_fractions(G, K=N_FIT); FR = 100 * FR; kk = np.arange(len(FR))
+    print(f"[fig3] d: {n_ves} vessels; fraction of measured power in Q_0..Q_{len(FR) - 1} (%): {np.round(FR, 2)}")
+    axE = fig.add_subplot(gB[1])
+    axE.bar(kk, FR, width=0.66, color=[MCOL[0] if k == 0 else "#C2185B" if k == N_FIT else "0.7" if k < N_FIT else "0.88" for k in kk], edgecolor="0.15", lw=0.5, zorder=3)
+    for k in kk:
+        axE.annotate(f"{FR[k]:.1f}", (k, FR[k]), xytext=(0, 2), textcoords="offset points", fontsize=8, ha="center", va="bottom")
+    axE.set_xlim(-0.6, len(FR) - 0.4); axE.set_xticks(kk); axE.set_xticklabels([rf"$Q_{k}$" for k in kk])
+    axE.set_ylim(0, 100); axE.set_yticks([0, 25, 50, 75, 100]); axE.set_ylabel("Fraction of power (%)", labelpad=1)
+    axE.spines[["top", "right"]].set_visible(False)
+
     # panel letters: a/b share the top row's y, c sits on the bottom row; a and c share x
     fig.canvas.draw(); rr = fig.canvas.get_renderer(); inv = fig.transFigure.inverted()
     edge = lambda ax_: inv.transform(ax_.get_tightbbox(rr))           # [[x0, y0], [x1, y1]] in figure fraction
-    tops = {k: max(edge(ax_)[1, 1] for ax_ in row) for k, row in (("top", (axA, axB)), ("bot", (axD, axE)))}
+    tops = {k: max(edge(ax_)[1, 1] for ax_ in row) for k, row in (("top", (axA, axB)), ("bot", (axD,)))}
     x_left = min(edge(axA)[0, 0], edge(axD)[0, 0]) - 0.005
     for ax_, l_, row in ((axA, "a", "top"), (axB, "b", "top"), (axD, "c", "bot")):
         x_ = x_left if l_ in "ac" else edge(ax_)[0, 0] - 0.005
+        if l_ == "c":                                         # c: letter and the series definition on one baseline
+            lb = LEG_C.get_window_extent(rr).transformed(fig.transFigure.inverted())
+            y_c = lb.y0 + 0.3 * (lb.y1 - lb.y0)                   # baseline of the legend row
+            fig.text(x_, y_c, l_, fontsize=12, fontweight="bold", va="baseline", ha="left")
+            fig.text(axE.get_position().x0 - 0.075, y_c, "d", fontsize=12, fontweight="bold", va="baseline", ha="left")
+            fig.text(axE.get_position().x0, y_c, rf"$N = {n_ves:,}$ vessels".replace(",", "{,}"), fontsize=9, va="baseline", ha="left")
+            continue
         fig.text(x_, min(tops[row] + 0.004, 0.993), l_, fontsize=12, fontweight="bold", va="top" if tops[row] + 0.004 > 0.95 else "bottom", ha="left")
     plos_style.save(fig, _paths.FIGURES / "fig3" / "fig3")
 

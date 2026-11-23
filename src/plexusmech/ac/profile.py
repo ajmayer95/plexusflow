@@ -32,7 +32,7 @@ _DG = np.linspace(-np.pi, np.pi, 720, endpoint=False)
 
 
 def _chain(C, c, tile, gauge_sd_deg, ref_tile, var_phi, var_logpi, d_list, eta, weights, gauge, pin_veins, gauge_block=None, beta_fixed=None,
-           harmonics=(1, 2)):
+           harmonics=(1, 2), x_fixed=None, delta_fixed=None):
     el = C["elig"]; c = c[el]; gid = groups(C)
     Qp, Qs = C["Qp"][el], C["Qs_dc"][el]; sgnQs = np.sign(Qs)
     phd = {k: np.angle(C["H"][k][el] * np.sign(Qp)) for k in (1, 2)}; pid = np.abs(C["H"][1][el]) / np.abs(Qp)
@@ -94,8 +94,21 @@ def _chain(C, c, tile, gauge_sd_deg, ref_tile, var_phi, var_logpi, d_list, eta, 
         for q in (2, 3, 6, 7, 10, 11):
             bounds[q] = (0.0, 0.0)
     Sv, X, DL, BT, prev, dl, beta = [], [], [], [], None, np.zeros(nT), (0.0 if beta_fixed is None else float(beta_fixed))
+    if delta_fixed is not None:                              # sensitivity: tile clock offsets held (radians per tile)
+        dl = np.array([float(delta_fixed.get(int(t), 0.0)) for t in tiles]); beta = 0.0; blk = np.zeros(nT)
     for D_ in d_list:
         B1, B2 = group_response(C, 1, D_, eta, gid, el), group_response(C, 2, D_, eta, gid, el)
+        if x_fixed is not None:                              # sensitivity: boundary group corrections held at x_fixed for every D
+            x = np.asarray(x_fixed, float)
+            if gauge and delta_fixed is None:
+                for _ in range(6):
+                    new, nb = update_delta(x, B1, B2, dl, beta)
+                    done = np.max(np.abs(np.angle(np.exp(1j * (new - dl))))) < np.radians(1.0)
+                    dl, beta = new, nb
+                    if done:
+                        break
+            Sv.append(nll(x, B1, B2, dl, beta) + (prior(dl) if gauge else 0.0)); X.append(x); DL.append(dl + beta * blk); BT.append(beta)
+            continue
         starts = [np.zeros(12)] + ([prev] if prev is not None else [])
         for it in range(4 if gauge else 1):
             rb = min((minimize(nll, x0, args=(B1, B2, dl, beta), method="L-BFGS-B", bounds=bounds, options=dict(maxiter=300)) for x0 in starts),
@@ -113,11 +126,12 @@ def _chain(C, c, tile, gauge_sd_deg, ref_tile, var_phi, var_logpi, d_list, eta, 
 
 
 def fit_profile(C, c, field, d_grid=D_GRID, eta_grid=(0.0,), weights="waveform", gauge=True, pin_veins=True, n_jobs=1,
-                progress=print, gauge_block=None, harmonics=(1, 2)):
+                progress=print, gauge_block=None, harmonics=(1, 2), x_fixed=None, delta_fixed=None):
     """C: model.build_context on the measurement-supported field (vein forcing already set, e.g. model.vein_forcing);
     c: DC reliability of each edge's AC winner (model.ac_reliability); field: the AC field (tile, gauge_sd_deg, ref_tile,
     var_phi, var_logpi).  Returns dict(S [nη × nD], D_grid, eta_grid, D, eta, i_min, j_min, x, delta_deg {tile: deg},
-    nll, profile_D)."""
+    nll, profile_D).  Sensitivity only: x_fixed holds the boundary group corrections at the same values for every D (no
+    re-fit); delta_fixed ({tile: radians}) also holds the tile clock offsets.  Defaults re-fit both at each D (profiling)."""
     from joblib import Parallel, delayed
     d_grid = np.asarray(d_grid, float); eta_grid = np.asarray(eta_grid, float)
     n_seg = max(1, min(len(d_grid), n_jobs // max(len(eta_grid), 1)))
@@ -127,7 +141,8 @@ def fit_profile(C, c, field, d_grid=D_GRID, eta_grid=(0.0,), weights="waveform",
         progress(f"[ac.profile] {len(d_grid)} D × {len(eta_grid)} η, weights '{weights}', gauge {'on' if gauge else 'off'}, "
                  f"veins {'pinned' if pin_veins else 'fitted'}; {len(jobs)} chains on {n_jobs} workers")
     args = (field["tile"], field["gauge_sd_deg"], int(field["ref_tile"]), field.get("var_phi"), field.get("var_logpi"))
-    res = Parallel(n_jobs=n_jobs)(delayed(_chain)(C, c, *args, d_grid[s], eta_grid[i], weights, gauge, pin_veins, gauge_block, harmonics=tuple(harmonics)) for i, s in jobs)
+    res = Parallel(n_jobs=n_jobs)(delayed(_chain)(C, c, *args, d_grid[s], eta_grid[i], weights, gauge, pin_veins, gauge_block, harmonics=tuple(harmonics),
+                                                    x_fixed=x_fixed, delta_fixed=delta_fixed) for i, s in jobs)
     S = np.full((len(eta_grid), len(d_grid)), np.nan); X, DL, BT = {}, {}, {}
     for (i, s), (Sv, Xs, DLs, tiles, BTs) in zip(jobs, res):
         S[i, s] = Sv

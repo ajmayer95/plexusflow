@@ -58,7 +58,7 @@ INK, MUTED = "#1a1a1a", "#6b6b6b"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plos_style
 plos_style.apply()
-plt.rcParams["mathtext.default"] = "regular"
+
 
 t0 = time.time()
 log = lambda s: print(f"[{time.strftime('%H:%M:%S')} +{time.time() - t0:4.0f} s] {s}", flush=True)

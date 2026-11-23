@@ -26,7 +26,7 @@ def stage_label(p):
 
 
 def main():
-    plos_style.apply(); plt.rcParams["mathtext.default"] = "regular"
+    plos_style.apply()
     stages = [Path(s) for s in sys.argv[1:]] or [_paths.STAGE]
     res = []
     for s in stages:

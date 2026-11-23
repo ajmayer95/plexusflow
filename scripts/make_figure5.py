@@ -55,7 +55,7 @@ def main():
                 ax.text(P_[:, 0].max() + 40 if dx < 0 else P_[:, 0].min() - 40, P_[:, 1].mean(), lab, ha="left" if dx < 0 else "right", va="center",
                         fontsize=9, fontweight="bold", color=ART, path_effects=HALO, zorder=6)
         if show_V:
-            for n, lab, dx in zip(dom["V"], ("V$_1$", "V$_2$"), (-1, 1)):
+            for n, lab, dx in zip(sorted(dom["V"], key=lambda n_: xy(n_)[0]), (r"$V_{\mathrm{L}}$", r"$V_{\mathrm{R}}$"), (-1, 1)):   # image left = embryo left
                 p_ = xy(n); ax.scatter(*p_, s=90, marker="s", color="white", edgecolor=VEN, linewidth=1.4, zorder=5)
                 ax.text(p_[0] + dx * 18, p_[1] + 18, lab, ha="right" if dx < 0 else "left", va="top", fontsize=9, fontweight="bold", color=VEN,
                         path_effects=HALO, zorder=6)
@@ -75,13 +75,19 @@ def main():
     da_stubs = [smooth_line(seg(e)) for n in dom["DA"] for e in G.edges(n) if e not in keep and e[::-1] not in keep]
     def draw_da(ax):                                               # dorsal-aorta skeleton (excluded stubs) + termini, in arterial red
         ax.add_collection(LineCollection(da_stubs, colors=ART, linewidths=1.0, alpha=0.95, zorder=4))
-        for n, lab, dx in zip(dom["DA"], (r"A$_{\mathrm{DA},1}$", r"A$_{\mathrm{DA},2}$"), (-1, 1)):
+        for n, lab, dx in zip(sorted(dom["DA"], key=lambda n_: xy(n_)[0]), (r"$A_{\mathrm{DA,L}}$", r"$A_{\mathrm{DA,R}}$"), (-1, 1)):
             p_ = xy(n); ax.scatter(*p_, s=40, color=ART, edgecolor="white", linewidth=0.6, zorder=6)
             ax.text(p_[0] + dx * 22, p_[1] + 10, lab, ha="right" if dx < 0 else "left", va="center", fontsize=9, fontweight="bold",
                     color=ART, path_effects=HALO, zorder=6)
-    fig = plt.figure(figsize=(5.2, 4.3))                       # a full height left; b, c stacked right
-    gs = fig.add_gridspec(2, 2, width_ratios=[1.15, 1.0], hspace=0.14, wspace=0.05, left=0.01, right=0.99, top=0.93, bottom=0.01)
-    axA = fig.add_subplot(gs[:, 0]); sch = _paths.STAGE / "assets" / "fig5_anatomy.png"     # drawing (assets/fig5_anatomy.svg), an input
+    # a (drawing, aspect h/w of the raster) exactly as tall as b and c stacked (two squares + gap):
+    #   0.04 + Hc/ar + 0.16 + (Hc − gap)/2 + 0.06 = W_IN
+    sch_ar = plt.imread(str(_paths.STAGE / "assets" / "fig5_anatomy.png")).shape
+    ar = sch_ar[0] / sch_ar[1]; W_IN, gap = 5.2, 0.32
+    Hc = (W_IN - 0.26 + gap / 2) / (1 / ar + 0.5); sq = (Hc - gap) / 2; wA = Hc / ar
+    H_IN = Hc + 0.36 + 0.36; fig = plt.figure(figsize=(W_IN, H_IN)); top_ = H_IN - 0.3   # + room below a for its bottom label
+    at = lambda x, y, w, h: fig.add_axes([x / W_IN, y / H_IN, w / W_IN, h / H_IN])
+    xR = W_IN - 0.06 - sq
+    axA = at(0.04, top_ - Hc, wA, Hc); axA.set_anchor("C"); sch = _paths.STAGE / "assets" / "fig5_anatomy.png"     # drawing (assets/fig5_anatomy.svg), an input
     if not sch.exists():
         raise FileNotFoundError(f"{sch} missing: the drawing is an input (data release <stage>/assets/)")
     if True:
@@ -103,13 +109,15 @@ def main():
     half_a = 0.62 * max(np.ptp(Pa[:, 0]), np.ptp(Pa[:, 1])); ca = Pa.mean(0)
     Pda = np.array([xy(n) for n in dom["DA"]])                       # dorsal-aorta stub ends sit just below the veins
     cv = np.array([Pv[:, 0].mean(), (Pv[:, 1].min() + Pda[:, 1].max()) / 2 + 40]); half_v = 0.62 * (Pda[:, 1].max() + 120 - Pv[:, 1].min())
-    axB = fig.add_subplot(gs[1, 1]); crop(axB, ca, half_a, True, False, 200, show_exc=False); axB.set_title("Effective arterial boundaries", fontsize=9, pad=3)
-    axC = fig.add_subplot(gs[0, 1]); crop(axC, cv, half_v, False, True, 100, show_exc=False); draw_da(axC); axC.set_title("Anatomical boundaries", fontsize=9, pad=3)
-    yb = axC.get_position().y1 + 0.015
-    fig.text(0.01, yb, "a", fontsize=12, fontweight="bold", ha="left", va="bottom")                         # level with b
-    fig.text(0.5 * (axA.get_position().x0 + axA.get_position().x1), yb + 0.003, "Computational domain", fontsize=9, ha="center", va="bottom")
+    axB = at(xR, top_ - 2 * sq - gap, sq, sq); crop(axB, ca, half_a, True, False, 200, show_exc=False); axB.set_title("Effective arterial boundaries", fontsize=9, pad=3)
+    axC = at(xR, top_ - sq, sq, sq); crop(axC, cv, half_v, False, True, 100, show_exc=False); draw_da(axC); axC.set_title("Anatomical boundaries", fontsize=9, pad=3)
+    import matplotlib.transforms as mtrans                          # letters and titles on one baseline
+    tr = mtrans.blended_transform_factory(fig.transFigure, axC.title.get_transform()); y_t = axC.title.get_position()[1]
+    fig.text(0.01, y_t, "a", transform=tr, fontsize=12, fontweight="bold", ha="left", va="baseline")
+    fig.text(axA.get_position().x0 + axA.get_position().width / 2, y_t, "Computational domain", transform=tr, fontsize=9, ha="center", va="baseline")
     for ax_, l_ in ((axC, "b"), (axB, "c")):
-        ax_.text(-0.02, 1.015, l_, transform=ax_.transAxes, fontsize=12, fontweight="bold", ha="right", va="bottom")
+        trr = mtrans.blended_transform_factory(fig.transFigure, ax_.title.get_transform())
+        fig.text(ax_.get_position().x0 - 0.045, ax_.title.get_position()[1], l_, transform=trr, fontsize=12, fontweight="bold", ha="left", va="baseline")
     plos_style.save(fig, _paths.FIGURES / "fig5" / "fig5")
 
 

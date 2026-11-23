@@ -1,4 +1,11 @@
-"""Wall distensibility D (η optional) from the AC field: profile likelihood of plexusmech.ac.profile.
+"""Wall distensibility D (η optional) from the pulsatile field: loss of plexusmech.ac.profile on a grid of D.
+
+METHOD SINCE 2026-11-20 (--method measured, the default): the reconciled field of scripts/pulse_field.py (ac_field_v8) on the mean
+flow dc_reconciled_v3; boundary forcing taken from the field as measured (no group corrections fitted), tile clocks fixed (no
+latent tile gauge); per-vessel variance = the variance of the averaged coefficient (fit residual) + one common variance fitted
+per loss term (H1 phase, H2 phase, H1 amplitude) — the reliability model is not used.  Writes results/ac_estimate_v9.json.
+--method profiled --field ac_field_v7 --dc dc_reconciled_v2 --out ac_estimate_v8 reproduces the previous fit, described below.
+
 
 Needs results/dc_reconciled_v2.pkl, results/ac_field_v2.pkl (scripts/ac_field.py, with the per-winner a0 / var_phi /
 var_logpi fields), results/reliability_model_v1.json.
@@ -37,40 +44,47 @@ def main():
     ap.add_argument("--gauge-passes", type=int, default=2)
     ap.add_argument("--n-jobs", type=int, default=8)
     ap.add_argument("--h1-only", action="store_true", help="sensitivity: leave the H2 phase term out of the likelihood (H1 phase + pulsatility only)")
-    ap.add_argument("--out", default="ac_estimate_v8", help="results/<out>.json (default ac_estimate_v8, the paper fit)")
-    ap.add_argument("--field", default="ac_field_v7", help="results/<field>.pkl (default ac_field_v7 = scripts/ac_field.py defaults)")
+    ap.add_argument("--method", choices=("measured", "profiled"), default="measured",
+                    help="measured (default): boundary forcing as measured, clocks fixed, common extra variance; profiled: the previous fit "
+                         "(boundary group corrections and tile gauge re-fitted at each D, reliability-model variance)")
+    ap.add_argument("--out", default=None, help="results/<out>.json (default ac_estimate_v9; ac_estimate_v8 with --method profiled)")
+    ap.add_argument("--field", default=None, help="results/<field>.pkl (default ac_field_v8 = scripts/pulse_field.py; ac_field_v7 with --method profiled)")
+    ap.add_argument("--dc", default=None, help="results/<dc>.pkl (default dc_reconciled_v3; dc_reconciled_v2 with --method profiled)")
     ap.add_argument("--gauge-block", default=None, help="tiles sharing one extra gauge offset with a flat prior, e.g. 15,18,19,20,29,30,31,32,33,34")
     ap.add_argument("--topo", default="flux", choices=("sealed", "flux", "supernode"),
                     help="pulsatile closure of topology-uncertain regions (plexusmech.ac.model.build_context); sensitivity, none primary")
     ap.add_argument("--supernode-scale", type=float, default=1.0, help="supernode compliance × this (region volume uncertain)")
-    a = ap.parse_args()
+    a = ap.parse_args(); measured = a.method == "measured"
+    a.out = a.out or ("ac_estimate_v9" if measured else "ac_estimate_v8"); a.field = a.field or ("ac_field_v8" if measured else "ac_field_v7")
+    a.dc = a.dc or ("dc_reconciled_v3" if measured else "dc_reconciled_v2")
     from plexusflow.config import StageConfig
     _cfg = StageConfig.load(paths.STAGE)                     # per-stage defaults (plexusflow.yaml)
     if a.veins is None:
         a.veins = _cfg.ac_veins
     if a.gauge_block is None and _cfg.ac_gauge_block:
         a.gauge_block = ",".join(str(int(t)) for t in _cfg.ac_gauge_block)
-    G = paths.load_graph(); D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes())
+    G = paths.load_graph(); D = pickle.loads((paths.RESULTS / f"{a.dc}.pkl").read_bytes())
     A = pickle.loads((paths.RESULTS / f"{a.field}.pkl").read_bytes())
     if "var_phi" not in A:
         sys.exit("results/ac_field_v2.pkl predates the per-beat uncertainties — rerun scripts/ac_field.py")
     model = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text()); model["c_T"] = {int(k): v for k, v in model["c_T"].items()}
     dom = carved_domain(G); sup = supported(A); Am = dict(A, elig=sup)
-    C0 = build_context(D, Am, dom, topo=a.topo, supernode_scale=a.supernode_scale); c = ac_reliability(G, Am, model)
+    C0 = build_context(D, Am, dom, topo=a.topo, supernode_scale=a.supernode_scale)
+    c = np.ones(len(A["edges"])) if measured else ac_reliability(G, Am, model)   # measured: (τ·1)² = one common variance per loss term
     log(f"  topology regions: {len(dom['regions'])} ({sum(not r['leaky'] for r in dom['regions'])} sealed-in-DC), pulsatile closure '{a.topo}'"
         + (f" × {a.supernode_scale:g}" if a.topo == 'supernode' else ''))
     log(f"{paths.STAGE.name}: {sup.sum()} measurement-supported of {A['elig'].sum()} AC-eligible vessels; veins '{a.veins}'"
         f"{' (fitted)' if a.fit_veins else ' (pinned)'}; η {a.eta}; weights '{a.weights}'")
     d_grid = np.logspace(np.log10(a.d_range[0]), np.log10(a.d_range[1]), int(a.d_range[2])); gauge_rad = None
-    for p in range(max(1, a.gauge_passes if a.veins != "local" else 1)):
+    for p in range(1 if measured else max(1, a.gauge_passes if a.veins != "local" else 1)):
         if a.veins == "local":
             C = C0
         else:
             C, info = vein_forcing(C0, A, mode=a.veins, gauge_rad=gauge_rad)
             log(f"  pass {p + 1}: {len(info['stubbed'])} of {len(dom['out'])} vein nodes have a stub;  shared waveform "
                 + ", ".join(f"H{k} {abs(info['mean'][k]):.3f}∠{np.degrees(np.angle(info['mean'][k])):+.0f}°" for k in (1, 2)))
-        R = fit_profile(C, c, A, d_grid=d_grid, eta_grid=a.eta, weights=a.weights, gauge=not a.no_gauge, pin_veins=not a.fit_veins,
-                        n_jobs=a.n_jobs, progress=lambda m: log("  " + m),
+        R = fit_profile(C, c, A, d_grid=d_grid, eta_grid=a.eta, weights=a.weights, gauge=not (a.no_gauge or measured), pin_veins=not a.fit_veins,
+                        n_jobs=a.n_jobs, progress=lambda m: log("  " + m), x_fixed=np.zeros(12) if measured else None,
                         gauge_block=[int(t) for t in a.gauge_block.split(",")] if a.gauge_block else None, harmonics=(1,) if a.h1_only else (1, 2))
         gauge_rad = {t: np.radians(v) for t, v in R["delta_deg"].items()}
         prof = np.nanmin(R["S"], axis=0) - np.nanmin(R["S"])
@@ -86,7 +100,10 @@ def main():
     f = fitted_forcing(C, R["x"]); bnd = np.asarray(dom["bnd"])
     out = dict(stage=paths.STAGE.name, D=R["D"], D_parabola=quadratic_min(d_grid, prof), eta=R["eta"], nll=R["nll"],
                topo=a.topo, supernode_scale=a.supernode_scale,
-               forcing=f"carve: local ratio + L/R group corrections; topology regions: {a.topo}; veins: {a.veins}{' (fitted)' if a.fit_veins else ' (pinned)'}; "
+               method=a.method, field=a.field, dc=a.dc,
+               forcing=(f"measured: boundary inflow × local measured waveform, no corrections; topology regions: {a.topo}; veins: {a.veins} (pinned); "
+                        f"clocks fixed; variance = averaged-coefficient variance + one common variance per term") if measured else
+                       f"carve: local ratio + L/R group corrections; topology regions: {a.topo}; veins: {a.veins}{' (fitted)' if a.fit_veins else ' (pinned)'}; "
                        f"weights {a.weights}; tile gauge {'latent' if not a.no_gauge else 'off'}",
                settings=vars(a), D_grid=d_grid.tolist(), eta_grid=list(a.eta), S=R["S"].tolist(),
                nodes=[int(dom["nodes"][b]) for b in bnd], f1=[[float(z.real), float(z.imag)] for z in f[1]],
@@ -98,7 +115,7 @@ def main():
     fig, ax = plt.subplots(figsize=(7, 4.5))
     for i, e in enumerate(a.eta):
         ax.plot(d_grid, R["S"][i] - np.nanmin(R["S"]), "o-", ms=3, label=f"η = {e:g}")
-    ax.set_xscale("log"); ax.set_yscale("symlog", linthresh=10); ax.set_xlabel("D (1/Pa)"); ax.set_ylabel("ΔNLL (profiled)")
+    ax.set_xscale("log"); ax.set_yscale("symlog", linthresh=10); ax.set_xlabel("D (1/Pa)"); ax.set_ylabel("ΔNLL")
     ax.axvline(R["D"], color="k", lw=0.8); ax.legend(fontsize=8)
     ax.set_title(f"{paths.STAGE.name}: D = {out['D_parabola']:.2e} /Pa (veins {a.veins})", fontsize=10)
     o = paths.FIGURES / "ac" / f"{a.out}.png"; o.parent.mkdir(parents=True, exist_ok=True); fig.tight_layout(); fig.savefig(o, dpi=120)
