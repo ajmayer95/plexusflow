@@ -2,7 +2,7 @@
 
 Needs results/reliability_model_v1.json (scripts/dc_reconcile.py).  By default the field is reconstructed here on the whole
 network with topology-uncertain region tags ignored (flags inside those areas are then visible too); --topology reviews the
-production field (results/dc_reconciled_v2.pkl) instead.  Writes results/dc_qc.csv (one
+production field (results/dc_reconciled_v3.pkl) instead.  Writes results/dc_qc.csv (one
 row per flag: kind, vessel or junction, tile, statistic, location, hotspot) and results/dc_qc.json (summary + hotspots ranked
 by the reconstructed flow they involve).  Flags are for review in the workbench (video, segmentation, region tags); they never
 change the reconstruction.  Usage: python scripts/dc_qc.py [--z 4] [--no-loops] [--topology]
@@ -25,9 +25,9 @@ def main():
     G = paths.load_graph(); M = measurement_table(G)
     model = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text()); model["c_T"] = {int(k): v for k, v in model.get("c_T", {}).items()}
     if a.topology:
-        D = pickle.loads((paths.RESULTS / "dc_reconciled_v2.pkl").read_bytes()); dom = carved_domain(G, topology=D.get("n_topology_edges", 0) > 0)
+        D = pickle.loads((paths.RESULTS / "dc_reconciled_v3.pkl").read_bytes()); dom = carved_domain(G, topology=D.get("n_topology_edges", 0) > 0)
         if [tuple(e) for e in dom["edges"]] != [tuple(e) for e in D["edges"]]:
-            sys.exit("results/dc_reconciled_v2.pkl was built on a different graph or region tags: rerun scripts/dc_reconcile.py first")
+            sys.exit("results/dc_reconciled_v3.pkl was built on a different graph or region tags: rerun scripts/dc_reconcile.py first")
     else:
         dom = carved_domain(G, topology=False); D = reconcile_dc(G, model, M, dom=dom, n_starts=0, n_shuffle=0); D.pop("dom", None)
     print(f"{paths.STAGE.name}: reviewing the field {'with' if a.topology else 'without'} topology-uncertain regions ({len(D['edges'])} vessels)")

@@ -78,14 +78,14 @@ and its tags).  Steps marked GUI are interactive; the rest are batch.
 | 10 | measure flow | `plexusflow analyze STAGE` (hours; `--tiles`, `--out` for a local copy) | `graph/graph_vessels_piv.gpickle`, `batch_kl_inputs/` |
 | 11 | annotate (GUI) | `plexusflow workbench STAGE`: Edit tab → mark the dorsal-aorta anchors *source* and the vein anchors *sink*; View tab → region tools, *Tag class* → tag **open boundary** regions (beside the aortae) and **topology uncertain** regions (graph does not represent the vessels); Save | tags on `graph_vessels_piv.gpickle` |
 | 12 | stage settings | add `ac_ref_tile` (a clearly beating tile near the aortae) and, if needed, `ac_f0_band`, `ac_veins`, `ac_gauge_block`, `f0_min_hz`/`f0_max_hz`, `of_dt` to `plexusflow.yaml` | |
-| 13 | reconstruct | `bash scripts/run_stage.sh STAGE` (`--no-ac`, `--no-validate`) | `results/` |
+| 13 | reconstruct | `bash scripts/run_stage.sh STAGE` (`--no-ac`) | `results/` |
 | 14 | view | `plexusflow view STAGE` (read-only) | |
 
-Step 13 runs `dc_reconcile.py` (reliability model fitted on this stage's junctions + mean-flow reconstruction), `dc_qc.py`
+Step 13 runs `dc_reconcile.py` (mean-flow reconstruction), `dc_qc.py`
 (review list `results/dc_qc.csv`: gross-error tests — measurement, repeat, nodal, radius — plus loop flow and large
 unmeasured flows, grouped into hotspots ranked by the flow involved; for review in the workbench, never applied
-automatically), the validations (`dc_validate_weighting.py`, `dc_junction_calibration.py`, `dc_withholding_curve.py`), `ac_field.py`
-(tile-synchronised pulsatile field) and `mech/ac_estimate.py` (distensibility fit).  Set `PLEXUSFLOW_RESULTS` to write
+automatically), `pulse_field.py` (tile clocks and pulsatile field) and `mech/ac_estimate.py` (distensibility fit); the method is
+in [method.md](method.md).  Set `PLEXUSFLOW_RESULTS` to write
 results elsewhere.  The read-only viewer shows the measured graph and, when `results/` holds them, the reconstructed mean
 flow and pulsatile field.  Region tags can be revised in the workbench at any time; rerun step 13 afterwards
 (`scripts/dc_topology_sensitivity.py` compares the field with and without the topology regions).
@@ -97,7 +97,7 @@ STAGE`, `plexusflow carry-measurements STAGE` (copies measurements of unchanged 
 **Changing the flux estimator's section rule.**  `python3 scripts/kl_reaggregate.py` re-estimates every recording from
 `batch_kl_inputs/` without re-running optical flow (backs up the graph first); then rerun step 13.
 
-**Reproducing the paper.**  `bash scripts/reproduce_paper.sh` runs step 13 for the 21S release plus the benchmark and
+**Reproducing the paper.**  `bash scripts/reproduce_paper.sh` runs step 13 for the 21S release plus the
 figure scripts (README).
 
 Each command has `--help`.  Common overrides:

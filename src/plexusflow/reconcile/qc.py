@@ -28,7 +28,7 @@ from .network import EPS_UNIMAGED
 from .reliability import c_of
 
 Z_FLAG = 4.0          # |z| beyond which a test flags (≈ 1 false flag per 16 000 Gaussian tests; the observed tails are heavier)
-TAU_TILE = 0.4        # between-tile log-scale scatter of repeat recordings, 21S (docs/dc_method.md, "Scope of the error model")
+TAU_TILE = 0.4        # between-tile log-scale scatter of repeat recordings, 21S (between-recording scatter of repeated vessels)
 
 
 def redundancy(D, dom):

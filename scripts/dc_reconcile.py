@@ -1,10 +1,10 @@
-"""Mean-flow (DC) reconstruction of one stage from its measured graph.
+"""Mean-flow reconstruction of one stage from its measured graph (docs/method.md, step 2).
 
-PRODUCTION SINCE 2026-11-19: per recording the variance of its mean, v = κ s²/N (s = residual temporal SD about a mean +
-3-harmonic fit, N frames, κ pooled heartbeat-block autocorrelation factor); per vessel the inverse-variance mean; constrained
-weighted least squares under interior conservation (plexusflow.reconcile.dc, ESTIMATOR = "fixed").  --estimator ql reproduces
-the quasi-likelihood method below (production 2026-11-03 … 11-18); the reliability model c is still fitted and stored for it.
---symmetric adds total left = total right arterial inflow (sensitivity; writes dc_reconciled_v2_sym.pkl).
+Per recording: the mean of a mean + 2-harmonic fit and its variance σ² = s²/M from the fit residual.  Per vessel: the 1/σ²-weighted
+average.  Network: weighted least squares under conservation at every interior junction, with total left arterial inflow = total
+right (plexusflow.reconcile.dc; ESTIMATOR "fixed", VARIANCE "residual", SYMMETRIC True).  Writes results/dc_reconciled_v3.pkl.
+Earlier variants remain selectable and write suffixed files: --variance block | pooled, --no-symmetric, --estimator ql (the
+quasi-likelihood method below; the reliability model c is still fitted and stored for it, results/reliability_model_v1.json).
 
 Quasi-likelihood method (before 2026-11-19):
 
@@ -17,7 +17,7 @@ Quasi-likelihood method (before 2026-11-19):
    f = B Q'; passive comparison (--radius: tube-interior [default], consensus or calibrated anatomical radii) + radius shuffle.
 Graph regions (plexusflow.reconcile.regions): open-boundary regions are carved with free inflow boundaries; topology-uncertain
 regions are carved as mass-conserving black boxes (--no-topology ignores them, reproducing the open-region-only carve).
-See plexusflow.reconcile.  Writes results/reliability_model_v1.json and results/dc_reconciled_v2.pkl.
+See plexusflow.reconcile.
 """
 import sys
 from pathlib import Path

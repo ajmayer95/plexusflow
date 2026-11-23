@@ -1,7 +1,7 @@
 # Guide for AI coding agents (and new contributors)
 
-Read this first, then [README.md](README.md) (install, reproduce), [docs/status_2026-11.md](docs/status_2026-11.md) (current
-method decisions and numbers) and [docs/pipeline.md](docs/pipeline.md) (end-to-end pipeline).
+Read this first, then [README.md](README.md) (install, reproduce), [docs/method.md](docs/method.md) (the
+method and its numbers) and [docs/pipeline.md](docs/pipeline.md) (end-to-end pipeline).
 
 ## What this repository is
 
@@ -38,10 +38,9 @@ Point RESULTS / FIGURES at your own folders so the frozen release is never modif
 | task | command |
 |---|---|
 | everything for the paper | `bash scripts/reproduce_paper.sh` |
-| analysis chain for one stage | `bash scripts/run_stage.sh "$PLEXUSFLOW_STAGE"` (`--no-ac`, `--no-validate`) |
+| analysis chain for one stage | `bash scripts/run_stage.sh "$PLEXUSFLOW_STAGE"` (`--no-ac`) |
 | mean-flow reconstruction only | `python scripts/dc_reconcile.py` |
-| compare uncertainty models | `python scripts/dc_uncertainty_models.py` → `results/dc_uncertainty_models.json` |
-| figure N | `python scripts/make_figureN.py` (see [FIGURES.md](FIGURES.md)); `FIG7_SYM=1` for the 50/50 left/right Fig 7 |
+| figure N | `python scripts/make_figureN.py` (see [FIGURES.md](FIGURES.md)) |
 | read-only viewer | `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"` (needs `[gui]`) |
 | tests | `pytest -q` |
 
@@ -52,7 +51,7 @@ import plexusflow.paths as P                                  # resolves PLEXUSF
 from plexusflow.reconcile import measurement_table, fit_reliability, carved_domain, reconcile_dc
 G = P.load_graph()                                            # networkx graph, edges carry measurements_piv (per tile)
 M = measurement_table(G)                                      # {(tile, (u, v)): row}: Q (signed u→v), cv, align, …
-model, junctions = fit_reliability(G, M)                      # c = c0 + c_cv·CV (production)
+model, junctions = fit_reliability(G, M)                      # reliability model: used by the earlier estimators only
 D = reconcile_dc(G, model, M, dom=carved_domain(G))           # D["Qp"] reconciled flux per carved edge, D["fb"] boundary fluxes
 ```
 
@@ -62,11 +61,12 @@ Edge orientation: every edge has a tail → head orientation and positive flux r
 ## Current method decisions (don't change without discussion)
 
 - **Flux per recording:** per-frame Kloosterman fit with geometry frozen from the time-mean fit. A failed Kloosterman fit means *unmeasured*; there is no fallback estimator.
-- **Uncertainty:** the CV model, c = c0 + c_cv·CV (`reconcile.reliability`, `PROFILE_TERM = "cv"`). Its variance is evaluated at the reconciled flux (a quasi-likelihood). Do not switch to weights fixed from measured values: they bias the field low (see `status_2026-11.md` §3).
-- **No gain correction:** no heart-rate or per-recording gain is applied (`reconcile.gain.DEFAULT = None`). Gains are a sensitivity analysis.
-- **Recording average:** recordings of a vessel are averaged with 1/c² weights. Between-recording spread enters as a variance floor.
-- **No forced symmetry:** left/right symmetry is not imposed. The reported split comes from the reconstruction; gain-free comparisons are reported alongside.
-- **Fig 7:** arterial cuts with net inflow < 0.02 nL/s are closed.
+- **Fit per recording:** mean + 2 harmonics at the tile heart rate (`reconcile.dc.K_FIT = 2`).
+- **One uncertainty per recording:** σ² = s²/M from the residual of that fit; every weight is 1/σ² (mean flow, tile clocks, harmonic average). The reliability model c is not used.
+- **Mean flow:** 1/σ² average of the fitted means, projected onto junction conservation with total left = total right arterial inflow (`reconcile.dc.SYMMETRIC = True`).
+- **Pulsatile flow:** `plexusflow.ac.pulse`: clocks from repeated recordings of network vessels, solved jointly; direction rule off. The dorsal-aorta segments in the clock fit are provisional (module docstring).
+- **Distensibility fit:** boundary forcing as measured, clocks fixed, no group corrections, one common variance per loss term (`scripts/mech/ac_estimate.py --method measured`).
+- **Result files:** `dc_reconciled_v3.pkl`, `ac_field_v8.pkl`, `ac_estimate_v9.json`. Earlier estimators stay selectable and write other names.
 
 ## Conventions and pitfalls
 
@@ -88,4 +88,4 @@ Edge orientation: every edge has a tail → head orientation and positive flux r
 | `src/plexusmech/` | RC model and distensibility fit |
 | `src/plexusflow/viewer/` | napari viewer: `app.py`; edge flux card in `edge_card.py` |
 | `scripts/` | drivers, figures, `make_release.py` (builds a data release from a stage) |
-| `docs/` | methods notes (`dc_method.md`, `pipeline.md`, `synthetic_validation.md`), status (`status_2026-11.md`) |
+| `docs/` | methods notes (`method.md`, `pipeline.md`, `synthetic_validation.md`) |

@@ -1,22 +1,20 @@
-"""Figure 7 — whole-organ DC: reconstructed reference field Q′ vs the passive Poiseuille prediction Q_sim.
+"""Figure 7 — mean and pulsatile flow in the compliant network: reconstructed field vs distributed RC network.
 
-Inputs: results/dc_reconciled_v2.pkl (scripts/dc_reconcile.py: reliability-weighted IRLS projection of the measured mean
-flows onto mass conservation on the carved network, emergent boundary fluxes f = BQ′) and the canonical graph.
-Passive model: conductance K = r⁴/ℓ (model radii: tube-interior segmentation radius by default, results D['radius']), the emergent boundary fluxes imposed at every boundary vertex, and a
-soft equal-pressure penalty at the two vitelline-vein outlets (plexusflow.reconcile.venous_pressure_penalty, σ_P = 2 Pa;
-FIG7_SIGMA_P=inf renders the unpenalised variant).
-
-  a  Q′ on direction-resolved vessels (|Q′| > 2σ_e), measured-uncertain and unmeasured vessels in two greys, boundary-flux
-     key, direction arrows, posterior rim flow divide (stagnation point)
-  b  Q_sim on the same vessels, arterial / venous boundary markers, the model's own divide
-  c  local agreement log10(|Q_sim|/|Q′|) on resolved vessels (clipped ±1), direction mismatches marked
-  d  measured vs predicted |Q| (log hexbin): r_log on all measured and on resolved vessels, direction agreement
-  e  radius controls: measured (model radius) vs uniform vs shuffled radii (r_log, all measured vessels)
-SI: fig7_S_boundary_distance, fig7_S_threshold (k = 0–3σ), fig7_S_forcing (arterial-inflow redistributions).
-Writes figures/fig7/; nothing to any graph.
+  a  2 × 4 maps (rows reconstructed / RC network): mean flow |Q|, pulsatile / mean power (|H1|² + |H2|²)/Q̄², and the H1 and H2
+     phase lags behind the vitelline veins; the three example vessels and the boundary nodes are marked
+  b  loss of the distensibility fit against D (scripts/mech/ac_estimate.py, --method measured)
+  c  one cardiac cycle of three vessels, reconstructed vs RC network, each normalised by its own mean; the relative error of
+     the modelled mean flux is written in each panel
+Inputs: results/dc_reconciled_v3.pkl (scripts/dc_reconcile.py), results/ac_field_v8.pkl (scripts/pulse_field.py) and
+results/ac_estimate_v9.json (scripts/mech/ac_estimate.py).  Phase lags: H_n in each vessel's own flow direction, relative to the
+vitelline-vein waveform.  The boundary-forcing panel of the earlier version is still built (for the node markers) but hidden.
+Writes figures/fig7/fig7.{png,pdf,tif}; nothing to any graph.
 """
 from __future__ import annotations
 import sys
+import argparse
+import json
+import pickle
 from pathlib import Path
 
 import numpy as np
@@ -25,475 +23,329 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import matplotlib.patheffects as pe
 from matplotlib.collections import LineCollection
-from scipy.sparse.csgraph import shortest_path
-import scipy.sparse as sp
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-import plexusflow.paths as _paths  # stage + results locations (PLEXUSFLOW_STAGE)
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src")); sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plos_style
-from plexusflow.reconcile import carved_domain, passive
+import plexusflow.paths as _paths
+from plexusflow.reconcile import carved_domain
+from plexusmech.ac.model import build_context, solve
 
-STAGE = _paths.STAGE
-MOSAIC_P = _paths.MOSAIC
-import os
-SYM = os.environ.get('FIG7_SYM', '0') == '1'   # sensitivity: reference field reconciled with equal left / right arterial inflow
-OUT_DIR = _paths.FIGURES / ('fig7_sym' if SYM else 'fig7')
-import os
-SIGMA_P = float(os.environ.get('FIG7_SIGMA_P', '2.0'))   # Pa; 'inf' = no pressure penalty (measured venous split)  #: soft equal-venous-pressure penalty (any σ_P ≲ 5 Pa gives the same split)
-SCHEME, RADIUS, N_SHUFFLE = 'irls', 'tube', 200
-CUT_MIN = float(os.environ.get('FIG7_CUT_MIN', '0.02'))   # nL/s: arterial cuts with net inflow below this (incl. net withdrawals) are closed
+D_MAIN, ETA_MAIN, VEIN_BC = 3.5e-4, 0.0, 'flux'
+GAUGE_SD_MAX = 30.0     # deg: tiles with a less certain time gauge are greyed in the measured phase maps
+OUT_DIR = None                                                     # set in main(): figures/fig7
+
+
+PAPER_PICKS = '67236,67239;36453,36993;93211,93245'   # 21S panel e vessels (auto rule on the 2026-11-02 field)
+
+
+def auto_picks(segs, e, rho, Qp, n=6):
+    """Well-measured, coherent vessels spread over the network (farthest-point sampling on midpoints)."""
+    cand = np.flatnonzero(e & np.isfinite(rho))
+    cand = cand[(rho[cand] >= np.percentile(rho[cand], 75)) & (np.abs(Qp[cand]) >= np.percentile(np.abs(Qp[cand]), 50))]
+    mid = np.array([segs[c][len(segs[c]) // 2] for c in cand])
+    chosen = [int(np.argmax(rho[cand]))]
+    for _ in range(n - 1):
+        d = np.min(np.linalg.norm(mid[:, None, :] - mid[chosen][None], axis=2), axis=1)
+        chosen.append(int(np.argmax(d)))
+    return [int(cand[i]) for i in chosen]
 
 
 def main():
-    import pickle
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument('--picks', default=PAPER_PICKS, help='three edges "u,v;u,v;…" for panel e (default: the paper\'s; "auto" = '
+                    'good / typical / poor by harmonic-residual percentile 20/50/80 among well-measured vessels)')
+    ap.add_argument('--bc-json', default=None, help='distensibility fit (D, boundary forcing, loss over the D grid); default results/ac_estimate_v9.json')
+    ap.add_argument('--field', default='ac_field_v8', help='results/<field>.pkl (scripts/pulse_field.py)')
+    ap.add_argument('--abs-q', action='store_true', help='panel e in nL/s (each vessel in its own flow direction, own y axis) '
+                    'instead of Q/Q̄; the model curve then also shows its mean-flow mismatch')
+    args = ap.parse_args()
+
     plos_style.apply()
-    D = pickle.loads((_paths.RESULTS / 'dc_reconciled_v2.pkl').read_bytes())
-    G = pickle.loads(_paths.GRAPH.read_bytes())
-    dom = carved_domain(G)
-    G.graph['boundary'] = dict(DA=dom['DA'], V=dom['V'])
-    edges = dom['edges']; assert edges == D['edges']
-    if SYM:                                                   # same reconciliation + constraint Σ_L inflow = Σ_R inflow
-        import scipy.sparse as _sp
-        from plexusflow.reconcile import measurement_table, reconcile_dc
-        from plexusflow.reconcile.network import emergent
-        ds = carved_domain(G); ij, sd0 = np.asarray(ds['inj']), np.asarray(ds['side'])
-        row = np.asarray(0.5 * ds['B'][ij[sd0 == 'L']].sum(0) - 0.5 * ds['B'][ij[sd0 == 'R']].sum(0)).ravel()
-        ds['B'] = _sp.vstack([ds['B'], _sp.csr_matrix(row)]).tocsr()
-        Rs = reconcile_dc(G, D['model'], measurement_table(G, gain=D.get('gain')), dom=ds, n_starts=2, n_shuffle=0)
-        D['Qp'] = np.asarray(Rs['Qp'], float); D['fb'] = emergent(D['Qp'], dom)
-        print(f"[fig7] SYMMETRIC reference: inflow L {D['fb'][ij[sd0 == 'L']].sum():.2f} / R {D['fb'][ij[sd0 == 'R']].sum():.2f} nL/s")
-    # Close negligible arterial cuts: net withdrawals and inflows < CUT_MIN become ordinary junctions (f = 0; a degree-1 stub
-    # carries no flow, a degree-2 node is a pass-through); the veins absorb the difference (re-split below by the soft
-    # equal-pressure penalty).  Changes the passive agreement by < 0.01 (sandbox/fig7_closed_withdrawals.py).
-    fb_ = np.asarray(D['fb'], float).copy(); inj0 = np.asarray(dom['inj']); closed = inj0[fb_[inj0] < CUT_MIN]
-    print(f"[fig7] closed {len(closed)} arterial cuts with net inflow < {CUT_MIN} nL/s ({int((fb_[closed] < 0).sum())} withdrawals): "
-          f"Σ {fb_[closed].sum():+.3f} nL/s")
-    fb_[closed] = 0.0; vo = fb_[dom['out']]; fb_[dom['out']] = vo - fb_.sum() * vo / vo.sum(); D['fb'] = fb_
-    idx = np.arange(len(edges)); em = np.ones(len(edges), bool)
-    rec = dict(length=D['length'])
-    Qp, Qs, fb, imaged, r = D['Qp'], D['Qs'], D['fb'], D['imaged'], D['radius']
-    K = r ** 4 / D['length']; nodes = dom['nodes']
-    # passive model with a soft equal-pressure penalty at the two vitelline-vein outlets (plexusflow.reconcile.venous_pressure_penalty)
-    from plexusflow.reconcile import venous_pressure_penalty
-    v1, v2 = dom['out']; Bm = dom['B']
-    fb, vp = venous_pressure_penalty(fb, dom, r, D['length'], D['sigma'], sigma_P=SIGMA_P)
-    shift, dP0, dP1 = vp['shift'], vp['dP_before'], vp['dP_after']
-    Qs = passive(K, fb, dom)
-    print(f"[fig7] soft venous penalty σ_P {SIGMA_P} Pa: outflow V1 {fb[v1]:.2f}, V2 {fb[v2]:.2f} nL/s (shift {shift:+.2f}); "
-          f"P_V2 − P_V1 {dP1:+.2f} Pa (was {dP0:+.2f})")
-    print(f"[fig7] carved: {len(idx)} edges ({int(imaged.sum())} measured); "
-          f"Σ in {fb[dom['inj']].sum():.2f}; V {fb[dom['out']]}")
+    G = _paths.load_graph()
+    global OUT_DIR
+    OUT_DIR = _paths.FIGURES / 'fig7'; OUT_DIR.mkdir(parents=True, exist_ok=True)
+    D = pickle.loads((_paths.RESULTS / 'dc_reconciled_v3.pkl').read_bytes())
+    A = pickle.loads((_paths.RESULTS / f'{args.field}.pkl').read_bytes())
+    dom = carved_domain(G); assert dom['edges'] == D['edges'] == A['edges']
+    bc = Path(args.bc_json) if args.bc_json else _paths.RESULTS / 'ac_estimate_v9.json'
+    J = json.loads(bc.read_text()) if bc.exists() else None
+    if J is None:
+        print(f'[fig7] {bc} not found: falling back to D = {D_MAIN:g}, no profile panel (run scripts/mech/ac_estimate.py)')
+    gcorr = (J or {}).get('gauge_correction_deg')
+    if gcorr:
+        dlt = np.radians(np.array([gcorr.get(str(int(t)), 0.0) if t >= 0 else 0.0 for t in A['tile']]))
+        A = dict(A, H=A['H'] * np.exp(-1j * np.arange(1, A['H'].shape[0] + 1)[:, None] * dlt[None, :]))
+        print(f'[fig7] tile gauge corrections applied: {sum(abs(v) > 1 for v in gcorr.values())} tiles moved > 1°, '
+              f'largest ' + ', '.join(f'{t}: {v:+.0f}°' for t, v in sorted(gcorr.items(), key=lambda kv: -abs(kv[1]))[:5]))
+    C = build_context(D, A, dom)
+    from plexusmech.ac.model import vein_forcing
+    from plexusmech.ac.group_bc import groups as _groups
+    _Cv, VINFO = vein_forcing(C, A, mode='mean', gauge_rad=None)
+    F0 = {k: _Cv['F'][(k, 'flux')].copy() for k in (1, 2)}               # reconstructed boundary forcing (before group corrections)
+    d_main, eta_main, bc_lab = D_MAIN, ETA_MAIN, 'local measured ratio'
+    if J:
+        d_main, eta_main = J.get('D_parabola', J['D']), J['eta']; bc_lab = J['forcing']
+        nix = {n: i for i, n in enumerate(dom['nodes'])}; C['F'] = dict(C['F'])
+        for k in (1, 2):
+            F = np.zeros(C['nN'], complex); F[[nix[n] for n in J['nodes']]] = [complex(a, b) for a, b in J[f'f{k}']]
+            C['F'][(k, 'flux')] = F
+    e, Qp, Qdc_s = C['elig'], C['Qp'], C['Qs_dc']
+    Hm_ = C['H']; rho = A['rho']
+    # phases are only comparable across tiles whose time gauge is well determined (bootstrap SD ≤ GAUGE_SD_MAX)
+    gsd = A.get('gauge_sd_deg') or {}
+    ph_ok = e & np.array([gsd.get(int(t), 0.0) <= GAUGE_SD_MAX if t >= 0 else False for t in A['tile']])
+    Hs = {k: solve(C, k, d_main, eta_main, VEIN_BC) for k in (1, 2)}
+    edges = dom['edges']; nE = len(edges)
+    print(f'[fig7] phase-determined vessels {int(ph_ok.sum())} of {int(e.sum())} eligible (tile gauge SD ≤ {GAUGE_SD_MAX:.0f}°)')
+    print(f'[fig7] {_paths.STAGE.name}: carved edges {nE}, AC-eligible {int(e.sum())}; ref tile '
+          f'{A.get("ref_tile", "?")} ({C["f0"]:.2f} Hz); D={d_main:g}, η={eta_main}; boundary: {bc_lab}')
 
-    mos = tifffile.imread(str(MOSAIC_P)); mos = mos.mean(axis=-1) if mos.ndim == 3 else mos
-    Hm, Wm = mos.shape
+    # phase reference = Fig 8's zero: ρ-weighted H1 (H2) phase of the dorsal-aorta and vitelline-vein stubs, all recorded in
+    # tile 14 (one clock), taken into this field's gauge (ψ_14 and the fitted correction δ_14), each in its own flow direction
+    from plexusflow.reconcile.harmonics import phasors as _phz, coherence as _coh
+    ZT = 14; tf0 = G.graph['tile_f0_piv']; psi14 = float(A['psi'][ZT]); d14 = np.radians((gcorr or {}).get(str(ZT), 0.0))
+    zr = {1: 0j, 2: 0j}
+    for n_ in list(dom['V']):                                   # zero = vitelline veins, as Fig 7
+        for e_ in G.edges(n_):
+            for m in G.edges[e_].get('measurements_piv') or []:
+                if int(m['tile_id']) == ZT and m.get('Q_t') is not None and (m.get('quality') or {}).get('kl_ok'):
+                    a0_, H_ = _phz(m['Q_t'], tf0[ZT]); w_ = max(_coh(m['Q_t'], tf0[ZT]), 0)
+                    for k in (1, 2):
+                        zr[k] += w_ * np.exp(1j * np.angle(np.sign(a0_) * H_[k - 1] * np.exp(-1j * k * (psi14 + d14))))
+    phref = {k: np.angle(zr[k]) for k in (1, 2)}
+    print(f'[fig7] phase reference (tile-14 DA/V stubs): H1 {np.degrees(phref[1]):.0f}°, H2 {np.degrees(phref[2]):.0f}°')
+    lag = lambda H, dc, k: (np.degrees(np.angle(np.exp(1j * phref[k]) * np.conj(H * np.sign(dc)))) + (90 if k == 1 else 30)) % 360 - (90 if k == 1 else 30)   # H1: [−90°, 270°), the wrap in the empty part of the distribution
+    pulsfrac = lambda H1, H2, dc: (np.abs(H1) ** 2 + np.abs(H2) ** 2) / np.maximum(np.abs(dc), 1e-30) ** 2
+    pf_m, pf_s = pulsfrac(Hm_[1], Hm_[2], Qp), pulsfrac(Hs[1], Hs[2], Qdc_s)
+    PI = lambda H, dc: H * np.sign(dc) / np.maximum(np.abs(dc), 1e-30)
+    pires = np.sqrt(sum(np.abs(PI(Hm_[k], Qp) - PI(Hs[k], Qdc_s)) ** 2 for k in (1, 2)))
+    rms_m = np.sqrt(sum(np.abs(Hm_[k]) ** 2 for k in (1, 2)))
+    rms_s = np.sqrt(sum(np.abs(Hs[k]) ** 2 for k in (1, 2)))
+    lc = lambda a, b: np.corrcoef(np.log(a), np.log(b))[0, 1]
+    dphi = lambda k: np.degrees(np.median(np.abs(np.angle(np.exp(1j * (np.angle(Hm_[k][ph_ok] * np.sign(Qp[ph_ok]))
+                                                                        - np.angle(Hs[k][ph_ok] * np.sign(Qdc_s[ph_ok]))))))))
+    ok = e & (pf_m > 0) & (pf_s > 0)
+    stats = dict(pf_corr=lc(pf_m[ok], pf_s[ok]), rms_corr=lc(rms_m[e & (rms_s > 0)], rms_s[e & (rms_s > 0)]),
+                 h1_dphi_deg=dphi(1), h2_dphi_deg=dphi(2), pires=np.median(pires[e]))
+    print('[fig7] ' + ', '.join(f'{k} {v:.3f}' for k, v in stats.items()))
+    print(f'[fig7] n: RMS correlation {int((e & (rms_s > 0) & (rms_m > 0)).sum())}, phase errors {int(ph_ok.sum())}')
+
+    mos = tifffile.imread(str(_paths.MOSAIC)); mos = mos.mean(axis=-1) if mos.ndim == 3 else mos
+    Hmos, Wmos = mos.shape
     segs = []
-    for i in idx:
-        d = G.edges[edges[i]]
-        p = np.asarray(d['path'], float) if d['path'] is not None else \
-            np.array([[G.nodes[n]['x'], G.nodes[n]['y']] for n in edges[i]])
-        segs.append(np.column_stack([p[:, 0], Hm - p[:, 1]]))
-    nxy = {n: (G.nodes[n]['x'], Hm - G.nodes[n]['y']) for n in G.nodes}
+    for uv in edges:
+        d = G.edges[uv]
+        p = np.asarray(d['path'], float) if d.get('path') is not None else \
+            np.array([[G.nodes[n]['x'], G.nodes[n]['y']] for n in uv])
+        segs.append(np.column_stack([p[:, 0], Hmos - p[:, 1]]))
 
-    # shared colour scale for A & B (measured edges of both fields)
-    allq = np.abs(np.r_[Qp[imaged], Qs[imaged]])
-    vmin = max(float(np.percentile(allq, 2)), 1e-4); vmax = float(np.percentile(allq, 98))
-    nAB = mcolors.LogNorm(vmin, vmax); cAB = plt.cm.viridis
-    nC = mcolors.TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1); cC = plt.cm.PuOr_r
-    MIS = '#c51b8a'; INKC = '#1a1a1a'
+    pos = {}
+    for c, (u, v) in enumerate(edges):
+        pos[(u, v)] = c; pos[(v, u)] = c
+    if args.picks and args.picks != 'auto' and all(tuple(int(x) for x in s_.split(',')) in pos for s_ in args.picks.split(';')):
+        picks = [pos.get(tuple(int(x) for x in s.split(','))) for s in args.picks.split(';')]
+    else:                                                       # good / typical / poor agreement among well-measured vessels
+        cand = np.flatnonzero(e & np.isfinite(rho) & np.isfinite(pires))
+        cand = cand[(rho[cand] >= np.percentile(rho[cand], 75)) & (np.abs(Qp[cand]) >= np.percentile(np.abs(Qp[cand]), 50))]
+        picks = [int(cand[np.argmin(np.abs(pires[cand] - np.percentile(pires[cand], q_)))]) for q_ in (10, 50, 90)]
+    for k, c in enumerate(picks):
+        print(f'  pick {k + 1}: ' + ('not in carved network' if c is None else
+                                     f'edge {edges[c]}, eligible={bool(e[c])}, ρ={rho[c]:.2f}, Q\'={Qp[c]:+.3f}, harmonic residual '
+                                     f'{pires[c]:.2f} (percentile {100 * np.mean(pires[np.isfinite(pires) & e] <= pires[c]):.0f} of eligible)'))
+
+    # map extent: crop to the network (+ margin) so tall/wide embryos fill their panels
+    allxy = np.vstack(segs); pad = 60
+    x0, x1 = max(allxy[:, 0].min() - pad, 0), min(allxy[:, 0].max() + pad, Wmos)
+    y0, y1 = max(allxy[:, 1].min() - pad, 0), min(allxy[:, 1].max() + pad, Hmos)
 
     def bg(ax):
-        ax.imshow(mos, cmap='gray', vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), aspect='equal', zorder=0, alpha=0.42)
+        ax.imshow(mos, cmap='gray', vmin=np.percentile(mos, 2), vmax=np.percentile(mos, 98), aspect='equal', zorder=0, alpha=0.45)
         ax.set_xticks([]); ax.set_yticks([]); [s.set_visible(False) for s in ax.spines.values()]
-        ax.set_xlim(0, Wm); ax.set_ylim(Hm, -0.06 * Hm)          # headroom above the organ for the boundary-flux key
+        ax.set_xlim(x0, x1); ax.set_ylim(y1, y0)
 
-    ART_S = lambda f: 4 + 60 * abs(f)                                       # marker area per nL/s of boundary inflow
-    def markers(ax, sized=False):
-        for i_ in dom['inj']:                               # Fig 5 convention: arterial cuts red, venous outlets blue
-            if D['fb'][i_] == 0:                            # closed cut (negligible inflow) — not a boundary in the model
-                continue
-            if sized:                                       # area ∝ inflow of the reference field; hollow = net withdrawal
-                f_ = D['fb'][i_]
-                ax.scatter(*nxy[nodes[i_]], s=ART_S(f_), facecolor='#d40000' if f_ > 0 else 'white', edgecolor='#d40000' if f_ <= 0 else 'white',
-                           linewidths=0.4 if f_ > 0 else 0.8, zorder=6, alpha=0.9)
-            else:
-                ax.plot(*nxy[nodes[i_]], 'o', color='#d40000', ms=2.2, mec='white', mew=0.3, zorder=6)
-        for n in G.graph['boundary']['V']:
-            ax.plot(*nxy[n], 's', color='#2b35a8', ms=4, mec='white', mew=0.5, zorder=6)
+    def edgemap(ax, val, mask, norm, cmap, lw=1.2):
+        ax.add_collection(LineCollection([segs[c] for c in np.flatnonzero(~mask)], colors=(0.35, 0.35, 0.35, 0.35),
+                                         linewidths=0.2, zorder=2))
+        sel = np.flatnonzero(mask & np.isfinite(val))
+        ax.add_collection(LineCollection([segs[c] for c in sel], colors=cmap(norm(val[sel])), linewidths=lw, zorder=3))
 
-    resolved = np.abs(Qp) > 2 * D['sigma']                     # direction determined: |Q'| > 2σ_e (Fig 6 noise model)
-    print(f"[fig7] direction resolved for {resolved.sum()} of {len(Qp)} vessels (|Q'| > 2σ)")
-    print(f"[fig7] resolved vessels carry {100 * np.abs(Qp[resolved]).sum() / np.abs(Qp).sum():.0f}% of Σ|Q'|; length-weighted {100 * (np.abs(Qp) * D['length'])[resolved].sum() / (np.abs(Qp) * D['length']).sum():.0f}%; passive Σ|Q_sim| on them {100 * np.abs(Qs[resolved]).sum() / np.abs(Qs).sum():.0f}%")
-    # posterior divide of the peripheral (rim) vein: rim = vessels within 70 px of the organ outline (all pieces: topology-
-    # uncertain regions on the margin cut the rim vein into several);
-    # each rim vessel's flow is expressed as angular motion about the organ centroid; the divide is the angle θc on the
-    # posterior arc maximising min(flux leaving θc on each side) over ±30° windows, i.e. flow away from θc on BOTH sides
-    from scipy import ndimage as ndi
-    org_ = tifffile.imread(str(STAGE / 'fuse' / 'organ_fusion.tif')); org_ = org_.mean(-1) if org_.ndim == 3 else org_
-    organ = ndi.binary_fill_holes(ndi.binary_closing(org_ > 0, iterations=10)); dist_ = ndi.distance_transform_edt(organ)
-    cyo, cxo = ndi.center_of_mass(organ)
-    mids = np.array([sg_[len(sg_) // 2] for sg_ in segs])
-    near = np.array([dist_[int(np.clip(y_, 0, Hm - 1)), int(np.clip(x_, 0, Wm - 1))] < 70 for x_, y_ in mids])
-    rim = near.copy()
-    rim &= r >= np.percentile(r[rim], 50)                                   # the rim vein proper: larger half of rim vessels
-    th_ = np.degrees(np.arctan2(mids[:, 1] - cyo, mids[:, 0] - cxo))         # 90° = posterior midline (image y down)
-    len_ok = np.array([len(sg_) >= 8 for sg_ in segs])
-    def rim_divide(Q):
-        dth = np.zeros(len(Q))
-        for k in np.flatnonzero(rim):
-            sg_ = segs[k]; u_ = np.array(nxy[edges[k][0]])
-            a_, b_ = (sg_[0], sg_[-1]) if np.linalg.norm(sg_[0] - u_) < np.linalg.norm(sg_[-1] - u_) else (sg_[-1], sg_[0])
-            if Q[k] < 0: a_, b_ = b_, a_
-            ta, tb = (np.degrees(np.arctan2(v_[1] - cyo, v_[0] - cxo)) for v_ in (a_, b_))
-            dth[k] = np.sign((tb - ta + 180) % 360 - 180)                      # +1: flow toward larger θ
-        w = np.abs(Q) * dth * rim
-        grid = np.arange(60, 176); score = [min(w[(th_ > c) & (th_ < c + 30)].sum(), -w[(th_ < c) & (th_ > c - 30)].sum()) for c in grid]   # both sides must flow away
-        c = float(grid[int(np.argmax(score))])
-        kl = np.flatnonzero(rim & (th_ <= c) & (dth < 0)); kr = np.flatnonzero(rim & (th_ > c) & (dth > 0))
-        if not (len(kl) and len(kr)):                                          # no rim vessel flows away on one side: no divide
-            return None, None, dth
-        kl, kr = kl[np.argmax(th_[kl])], kr[np.argmin(th_[kr])]                 # the two rim vessels flowing apart
-        return 0.5 * (th_[kl] + th_[kr]), 0.5 * (mids[kl] + mids[kr]), dth
-    from matplotlib.patches import FancyArrowPatch
-    def arrow(ax, c, Q):
-        """Fixed-length direction arrow at the middle of vessel c, pointing along its flow Q[c] (Q > 0: u → v)."""
-        sg = segs[c]; u_ = np.array(nxy[edges[c][0]]); sg = sg if np.linalg.norm(sg[0] - u_) < np.linalg.norm(sg[-1] - u_) else sg[::-1]
-        sg = sg if Q[c] > 0 else sg[::-1]
-        k0 = len(sg) // 2; d_ = sg[min(k0 + 4, len(sg) - 1)] - sg[max(k0 - 4, 0)]; d_ = d_ / np.linalg.norm(d_)
-        ax.add_patch(FancyArrowPatch(sg[k0] - 62 * d_, sg[k0] + 62 * d_, arrowstyle='-|>', mutation_scale=6, color=INKC, lw=0.85, zorder=7,
-                                     shrinkA=0, shrinkB=0, path_effects=[pe.withStroke(linewidth=1.6, foreground='white')]))
-    def mark_divide(ax, Q, name, ok, min_gap=0):
-        c, xy_, dth = rim_divide(Q)
+    def pick_marks(ax):
+        for k, c in enumerate(picks):
+            if c is None: continue
+            mid = segs[c][len(segs[c]) // 2]
+            ax.plot(*mid, 'o', color='#f5d400', markersize=8, markeredgecolor='black', markeredgewidth=0.6, zorder=8)
+            ax.text(*mid, str(k + 1), ha='center', va='center', fontsize=8, fontweight='bold', zorder=9)
+
+    aspect = (y1 - y0) / (x1 - x0)          # >1 for tall embryos
+    WIDE = 1.31                                                 # no boundary-forcing panel (2026-11-20): the maps span the full width
+    fig = plt.figure(figsize=(7.5, 3.1 + 1.95 * aspect * WIDE), facecolor='white')
+    outer = fig.add_gridspec(2, 1, height_ratios=[1.45 * aspect * WIDE, 0.85], hspace=0.34, left=0.075, right=0.985, top=0.95, bottom=0.07)
+    gA = outer[0].subgridspec(2, 4, hspace=0.05, wspace=0.03); gF = outer[0]   # gF: boundary-forcing axes, built for the node markers then hidden
+    gB = None
+    bot = outer[1].subgridspec(1, 2, width_ratios=[1.25, 2.9], wspace=0.2)
+    gE = bot[1].subgridspec(1, 3, wspace=0.32 if args.abs_q else 0.12)
+
+    nPF = mcolors.LogNorm(0.05, 0.6); cPF = plt.cm.magma
+    nPH = mcolors.Normalize(0, 220); nPH2 = mcolors.Normalize(0, 330); cPH = plt.cm.plasma          # as Fig 7 (H1); H2 spans a full cycle
+    allmask = np.ones(nE, bool); axes_A = {}
+    qa_ = np.abs(np.r_[Qp, Qdc_s]); qa_ = qa_[qa_ > 0]; nQ = mcolors.LogNorm(max(np.percentile(qa_, 2), 1e-4), np.percentile(qa_, 98)); cQ = plt.cm.viridis
+    TT = ['Mean flow', 'Relative pulsatile power', 'H1 phase lag', 'H2 phase lag']
+    for row, (side, pf, Hr, dcr, mask, pmask) in enumerate((('Reconstructed', pf_m, Hm_, Qp, e, e if gcorr else ph_ok),
+                                                            ('RC network', pf_s, Hs, Qdc_s, allmask, allmask))):   # whole carved network
+        for col in range(4):
+            ax = fig.add_subplot(gA[row, col]); bg(ax); axes_A[row, col] = ax
+            if col == 0: edgemap(ax, np.abs(dcr), allmask & (np.abs(dcr) > 0), nQ, cQ, 0.45)
+            elif col == 1: edgemap(ax, pf, mask, nPF, cPF, 0.45)
+            else: edgemap(ax, np.clip(lag(Hr[col - 1], dcr, col - 1), 0, None), pmask, nPH if col == 2 else nPH2, cPH, 0.4)
+            if row == 0:
+                ax.set_title(TT[col], fontsize=9, pad=3)
+            if col == 0:
+                ax.text(-0.06, 0.5, side, transform=ax.transAxes, rotation=90, ha='center', va='center', fontsize=9)
+    for col, (nrm, cm_, lab) in enumerate(((nQ, cQ, r'$|Q|$ (nL/s)'), (nPF, cPF, 'Pulsatile / mean power'),
+                                           (nPH, cPH, r'H1 delay ($^\circ$)'), (nPH2, cPH, r'H2 delay ($^\circ$)'))):
+        cax = axes_A[1, col].inset_axes([0.08, -0.08, 0.84, 0.035])
+        cb = plt.colorbar(plt.cm.ScalarMappable(norm=nrm, cmap=cm_), cax=cax, orientation='horizontal')
+        cb.set_label(lab, fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
+        if nrm is nPF:
+            cb.set_ticks([0.05, 0.2, 0.6]); cb.set_ticklabels(['0.05', '0.2', '0.6']); cb.ax.minorticks_off()
+        elif nrm is nPH:
+            cb.set_ticks([0, 90, 180])
+        elif nrm is nPH2:
+            cb.set_ticks([0, 180])
+
+    # c  pulsatile RMS scatter + statistics
+    axC = fig.add_axes([0, 0, 0.01, 0.01]); axC.set_visible(False)
+    sel = e & (rms_s > 0) & (rms_m > 0)
+    lo, hi = 3e-4, 1.0
+    axC.hexbin(np.clip(rms_m[sel], lo, hi), np.clip(rms_s[sel], lo, hi), gridsize=28, xscale='log', yscale='log', bins='log',
+               cmap='Greys', mincnt=1, linewidths=0, extent=(np.log10(lo), np.log10(hi), np.log10(lo), np.log10(hi)))
+    axC.plot([lo, hi], [lo, hi], color='#d62728', lw=0.9)
+    axC.set_xlim(lo, hi); axC.set_ylim(lo, hi); axC.set_aspect('equal')
+    axC.set_xticks([1e-3, 1e-2, 1e-1]); axC.set_yticks([1e-3, 1e-2, 1e-1]); axC.minorticks_off()
+    axC.set_xlabel('Measured (nL/s)', fontsize=8, labelpad=1); axC.set_ylabel('RC network (nL/s)', fontsize=8, labelpad=1)
+    axC.tick_params(labelsize=8); axC.set_title('Pulse amplitude', fontsize=9, pad=3)
+    axC.text(0.05, 0.95, f"r = {stats['rms_corr']:.2f}", transform=axC.transAxes, va='top', fontsize=8)
+    axC.spines[['top', 'right']].set_visible(False)
+
+    # d  profiled objective vs D
+    axD = fig.add_subplot(bot[0])
+    if J and J.get('D_grid') and J.get('S'):
+        Dg = np.array(J['D_grid']); Sg = np.array(J['S'][0]); dS = Sg - Sg.min()
+        axD.plot(Dg * 1e4, dS, 'o-', color='0.2', ms=2.5, lw=1.0)
+        axD.axvline(d_main * 1e4, color='#d62728', lw=0.8, ls='--')
+        axD.text(d_main * 1e4, 0.97 * dS.max(), f" $\\hat D$ = {d_main * 1e4:.1f}", color='#d62728', fontsize=8, va='top', ha='left')
+        axD.set_xlabel('$D$ ($10^{-4}$ Pa$^{-1}$)', fontsize=8, labelpad=1)
+        axD.set_ylabel(r'Loss, $\Delta\mathcal{L}(D)$', fontsize=8, labelpad=1); axD.tick_params(labelsize=8)
+        axD.set_ylim(-0.03 * dS.max(), 1.05 * dS.max())
+        print(f'[fig7] D profile: min at {Dg[np.argmin(Sg)]:.3g} (fit {d_main:.3g}); Δ at grid ends {dS[0]:.0f} / {dS[-1]:.0f}')
+    axD.set_title('Effective network distensibility', fontsize=9, pad=3); axD.spines[['top', 'right']].set_visible(False)
+
+    # e  waveforms, Q/Q̄ over one beat
+    t = np.linspace(0, 1, 400)
+    def wave(dc_, Hk):
+        q = dc_ + sum((Hk[k] * np.exp(2j * np.pi * k * t)).real for k in (1, 2))
+        return q * np.sign(dc_) if args.abs_q else q / dc_
+    axs_e = []
+    for k, c in enumerate(picks):
+        ax = fig.add_subplot(gE[k], sharey=None if args.abs_q or not axs_e else axs_e[0]); axs_e.append(ax)
         if c is None:
-            print(f"[fig7] posterior rim divide ({name}): not resolved (no rim vessel flowing away on one side) — no marker")
-            return None
-        for side, tgt in ((-1, c - 12), (1, c + 12)):                      # one flank arrow each side: flow leaving the divide
-            cand = np.flatnonzero(rim & ok & (dth == side) & ((th_ - c) * side > 4) & (len_ok))
-            if len(cand):
-                k_ = cand[np.argmin(np.abs(th_[cand] - tgt))]
-                if np.linalg.norm(mids[k_] - xy_) >= min_gap:              # arrows crowding the marker are dropped
-                    arrow(ax, k_, Q)
-        ax.plot(*xy_, 'D', ms=5.5, mfc='white', mec=INKC, mew=1.0, zorder=9)
-        print(f"[fig7] posterior rim divide ({name}): θ = {c:.0f}° at (x {xy_[0]:.0f}, y {xy_[1]:.0f})")
-        return xy_
-    GREY_U, GREY_N = (0.45, 0.45, 0.45, 0.55), (0.78, 0.78, 0.78, 0.6)   # measured, direction undetermined | unmeasured (imputed)
-    def greys(ax, show):
-        """Grey under-layer: measured vessels below 2σ (mid grey) and unmeasured/imputed vessels (light grey)."""
-        for sel, col in ((show & imaged, GREY_U), (show & ~imaged, GREY_N)):
-            ax.add_collection(LineCollection([segs[c] for c in np.flatnonzero(sel)], colors=[col], linewidths=0.35, zorder=2))
-    def field(ax, Q, mask_unresolved):
-        und = (~resolved & imaged) if mask_unresolved else np.zeros(len(Q), bool)   # unmeasured vessels drawn with their Q′ (set by conservation)
-        greys(ax, und)
-        keep = np.flatnonzero(~und)
-        ax.add_collection(LineCollection([segs[c] for c in keep], colors=[cAB(nAB(min(max(abs(Q[c]), vmin), vmax))) for c in keep],
-                                         linewidths=0.85, zorder=3))
-    def totals(ax):
-        """Net boundary fluxes of the reference field (A→V transport is reported only through these totals)."""
-        f0 = D['fb']; inj_, sd = f0[dom['inj']], np.asarray(dom['side'])   # Q′'s own boundary fluxes (before the venous penalty)
-        ax.text(-0.03, 0.995, 'Boundary flux (nL/s)', transform=ax.transAxes, ha='left', va='top', fontsize=8)
-        ax.text(-0.03, 0.96, f"Arterial  L {inj_[sd == 'L'].sum():.1f} · R {inj_[sd == 'R'].sum():.1f}",
-                transform=ax.transAxes, ha='left', va='top', fontsize=8, color='#a00000')
-        ax.text(-0.03, 0.925, f"Venous   V$_1$ {-f0[dom['out'][0]]:.1f} · V$_2$ {-f0[dom['out'][1]]:.1f}",
-                transform=ax.transAxes, ha='left', va='top', fontsize=8, color='#2b35a8')
-
-    fig = plt.figure(figsize=(7.5, 6.6), facecolor='white')
-    gs = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.8], hspace=0.2, left=0.06, right=0.9, top=0.935, bottom=0.07)
-    gT = gs[0].subgridspec(1, 3, width_ratios=[1.0, 0.34, 1.0], wspace=0.04); gBm = gs[1].subgridspec(1, 3, width_ratios=[0.37, 0.29, 0.34], wspace=0.3)
-    LETTERS = {}
-    def letter(ax, l, title, dx=-0.02):                                      # letter + title placed on a shared row line after layout (below)
-        LETTERS[l] = (ax, title)
-
-    # a
-    axA = fig.add_subplot(gT[0]); bg(axA); field(axA, Qp, True); markers(axA)
-    letter(axA, 'a', "Reference and passive flow fields")
-    axA.text(0.5, 0.995, "reference Q′", transform=axA.transAxes, ha='center', va='top', fontsize=9)
-    div_a = mark_divide(axA, Qp, "Q′", resolved, min_gap=400)
-    axA.plot([], [], color=GREY_U[:3], lw=1.2, label='measured, |Q′| < 2σ')
-    axA.plot([], [], 'D', ms=5, mfc='white', mec=INKC, mew=1.0, label='stagnation point')
-    # middle column: the arterial cuts zoomed, each cut coloured by its inflow in Q′ (red log scale; white = net withdrawal)
-    cxy_ = np.array([nxy[nodes[i_]] for i_ in np.r_[dom['inj'], dom['out']]]); pad_ = 110          # arterial cuts and venous outlets
-    x0i, x1i = cxy_[:, 0].min() - pad_, cxy_[:, 0].max() + pad_; y0i, y1i = cxy_[:, 1].min() - pad_, cxy_[:, 1].max() + pad_
-    axIn = fig.add_subplot(gT[1]); bg(axIn); field(axIn, Qp, True)
-    axIn.set_xlim(x0i, x1i); axIn.set_ylim(y1i, y0i); axIn.set_aspect('equal')
-    for s_ in axIn.spines.values():
-        s_.set_visible(True); s_.set_color('0.3'); s_.set_linewidth(0.8)
-    fcut_ = D['fb'][dom['inj']]; pos_ = fcut_ > 0
-    nCut = mcolors.LogNorm(vmin=0.01, vmax=max(fcut_.max(), 1.0))
-    cCut = mcolors.LinearSegmentedColormap.from_list('rt', plt.get_cmap('Reds')(np.linspace(0.25, 1.0, 256)))
-    for i_, f_ in zip(dom['inj'], fcut_):
-        if f_ == 0:                                                          # closed cut
-            continue
-        if f_ > 0:
-            axIn.scatter(*nxy[nodes[i_]], s=30, color=cCut(nCut(max(f_, 0.01))), edgecolor='black', linewidths=0.5, zorder=7)
+            ax.text(0.5, 0.5, 'not in carved network', transform=ax.transAxes, ha='center', color='red', fontsize=8); continue
+        if not args.abs_q:
+            ax.axhline(1, color='0.85', lw=0.5, zorder=1)
+        ax.plot(t, wave(Qp[c], {j: Hm_[j][c] for j in (1, 2)}), color='#2ca02c', lw=1.4, zorder=2, label='Reconstructed')
+        ax.plot(t, wave(Qdc_s[c], {j: Hs[j][c] for j in (1, 2)}), color='#d62728', lw=1.0, ls='--', zorder=3, label='RC network')
+        ax.set_xticks([0, 0.5, 1]); ax.set_xticklabels(['0', '0.5', '1']); ax.tick_params(labelsize=8)
+        ax.spines[['top', 'right']].set_visible(False)
+        dm = 100 * (abs(Qdc_s[c]) / abs(Qp[c]) - 1)          # RC-network mean flow vs the measured (reconciled) mean
+        ax.text(0.97, 0.97, f'mean {dm:+.0f} %'.replace('-', '\u2212'), transform=ax.transAxes, ha='right', va='top', fontsize=8, color='#d62728')   # top right: clear of every waveform
+        if args.abs_q:
+            ax.set_ylim(bottom=0)
+            if k == 0:
+                ax.set_ylabel('$Q$ (nL/s)', fontsize=8, labelpad=1)
+        elif k > 0:
+            ax.tick_params(labelleft=False)
         else:
-            axIn.scatter(*nxy[nodes[i_]], s=24, facecolor='white', edgecolor='black', linewidths=0.7, zorder=7)
-    axA.add_patch(plt.Rectangle((x0i, y0i), x1i - x0i, y1i - y0i, fill=False, ec='0.3', lw=0.8, zorder=7))
-    from matplotlib.patches import ConnectionPatch
-    for ya_ in (y0i, y1i):                                                   # box in a → zoomed panel
-        fig.add_artist(ConnectionPatch(xyA=(x1i, ya_), coordsA=axA.transData, xyB=(x0i, ya_), coordsB=axIn.transData, color='0.5', lw=0.6, ls=(0, (2, 2))))
-    fV_ = -D['fb'][dom['out']]; nV = mcolors.Normalize(0, fV_.max())
-    cV = mcolors.LinearSegmentedColormap.from_list('bt', plt.get_cmap('Blues')(np.linspace(0.35, 1.0, 256)))
-    for i_, f_ in zip(dom['out'], fV_):
-        axIn.scatter(*nxy[nodes[i_]], s=60, marker='s', color=cV(nV(f_)), edgecolor='black', linewidths=0.6, zorder=7)
-        if False: axIn.text(nxy[nodes[i_]][0], nxy[nodes[i_]][1] + 45, f"{f_:.1f}", ha='center', va='top', fontsize=8, color='#2b35a8',
-                  path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground='white')], zorder=8)
-    axIn.set_title('Boundary fluxes', fontsize=8, pad=30); axIn.set_zorder(5)
-    cbCut = axIn.inset_axes([0.05, -0.1, 0.9, 0.035])
-    cb_ = plt.colorbar(plt.cm.ScalarMappable(norm=nCut, cmap=cCut), cax=cbCut, orientation='horizontal', ticks=[0.01, 0.1, 1.0])
-    cb_.ax.set_xticklabels(['0.01', '0.1', '1']); cb_.ax.minorticks_off(); cb_.ax.tick_params(labelsize=8, length=2, pad=1); cb_.outline.set_linewidth(0.4)
-    cb_.set_label('arterial inflow (nL/s)', fontsize=8, labelpad=2, linespacing=1.1)
-    f0_ = D['fb']; inj_, sd_ = f0_[dom['inj']], np.asarray(dom['side'])
-    axIn.text(0.5, 1.085, f"arterial L {inj_[sd_ == 'L'].sum():.1f} · R {inj_[sd_ == 'R'].sum():.1f}", transform=axIn.transAxes, ha='center', va='bottom',
-              fontsize=8, color='#a00000')
-    axIn.text(0.5, 1.01, f"venous V$_1$ {-f0_[dom['out'][0]]:.1f} · V$_2$ {-f0_[dom['out'][1]]:.1f}", transform=axIn.transAxes, ha='center', va='bottom',
-              fontsize=8, color='#2b35a8')
-    _hs = []
-    axA.legend(handles=[h_ for h_ in axA.get_legend_handles_labels()[0] if h_ not in _hs], loc='upper center', bbox_to_anchor=(0.5, 0.0), ncol=3,
-               fontsize=8, frameon=False, borderaxespad=0.2, scatterpoints=1,
-               handlelength=1.4, columnspacing=1.2)
-    # a handful of direction arrows on the strongest direction-resolved vessels, spread over the organ
-    picked = []; bxy = np.array([nxy[nodes[i_]] for i_ in np.r_[dom['inj'], dom['out']]])
-    far = lambda c, gap: all(np.linalg.norm(mids[c] - mids[q]) >= gap for q in picked) and (div_a is None or np.linalg.norm(mids[c] - div_a) >= 400)
-    for c in np.argsort(-np.abs(Qp) * (resolved & imaged)):
-        if len(picked) >= 14 or not resolved[c]:
-            break
-        if len_ok[c] and abs(Qp[c]) >= 4 * D['sigma'][c] and np.min(np.linalg.norm(bxy - mids[c], axis=1)) >= 250 and far(c, 420):
-            picked.append(c); arrow(axA, c, Qp)
-    # plus a few in regions the strongest-vessel pass leaves bare: the posterior plexus (below the arterial cuts) and the
-    # upper-left lobe (left of the cuts, above them), and the top-left lobe tip (left of and above V1, where the rim vein runs round toward the heart; rim allowed); otherwise interior vessels only, |Q'| ≥ 3σ
-    vxy = np.array([nxy[n] for n in G.graph['boundary']['V']])
-    cxy = np.array([nxy[nodes[i_]] for i_ in dom['inj']]); y_cut, y_top, x_left = cxy[:, 1].max(), cxy[:, 1].min(), cxy[:, 0].min()
-    regions = (('posterior plexus', lambda m_: m_[1] > y_cut + 250, 5, False, 450),
-               ('upper-left lobe', lambda m_: m_[0] < x_left - 250 and m_[1] < y_top, 3, False, 450),
-               ('top-left lobe tip', lambda m_: m_[0] < vxy[:, 0].min() - 300 and m_[1] < vxy[:, 1].min() - 350, 2, True, 300))   # rim allowed
-    n_pl = 0
-    for nm_, inside, n_max, rim_ok, gap in regions:
-        n_r = 0
-        for c in np.argsort(-np.abs(Qp) * resolved):
-            if n_r >= n_max or not resolved[c]:
-                break
-            if len_ok[c] and (rim_ok or not near[c]) and inside(mids[c]) and abs(Qp[c]) >= 3 * D['sigma'][c] and far(c, gap):
-                picked.append(c); arrow(axA, c, Qp); n_r += 1
-        n_pl += n_r; print(f"[fig7] {nm_}: {n_r} extra arrows")
-    print(f"[fig7] direction arrows: {len(picked) - n_pl} strongest + {n_pl} regional (+ divide flanks)")
-    L_ = 1000 / 1.7; x0_, y0_ = 0.03 * Wm, 0.975 * Hm                  # 1 mm scale bar (mosaic 1.7 µm/px); shared by a–c
-    axA.plot([x0_, x0_ + L_], [y0_, y0_], color=INKC, lw=2, solid_capstyle='butt', zorder=8)
-    axA.text(x0_ + L_ / 2, y0_ - 0.012 * Hm, '1 mm', ha='center', va='bottom', fontsize=8, zorder=8)
+            ax.set_ylabel(r'$Q/\bar Q$', fontsize=8, labelpad=1)
+        if k == 1:
+            ax.set_xlabel('$t/T$', fontsize=8, labelpad=1)
+        ax.text(0.04, 0.95, str(k + 1), transform=ax.transAxes, ha='center', va='center', fontsize=8, fontweight='bold',
+                bbox=dict(fc='#f5d400', ec='black', lw=0.6, boxstyle='circle,pad=0.2'))
+        print(f"[fig7] e{k + 1} ({('good', 'typical', 'poor')[k]}): edge {edges[c]}, harmonic residual {pires[c]:.2f}")
+    if not args.abs_q:                                          # headroom so the 'mean' notes clear every waveform (shared y axis)
+        _yl = axs_e[0].get_ylim(); axs_e[0].set_ylim(_yl[0], _yl[1] + 0.13 * (_yl[1] - _yl[0]))
+    axs_e[1].legend(fontsize=8, loc='lower center', bbox_to_anchor=(0.5, 1.07), ncol=2, frameon=False, borderaxespad=0.0, handlelength=1.8)
+    axs_e[1].set_title(' ', fontsize=9, pad=12)
 
-    # b
-    axB = fig.add_subplot(gT[2]); bg(axB); field(axB, Qs, False); markers(axB); mark_divide(axB, Qs, 'Q_sim', np.ones(len(Qs), bool))
-    axB.add_patch(plt.Rectangle((x0i, y0i), x1i - x0i, y1i - y0i, fill=False, ec='0.3', lw=0.8, zorder=7))
-    for ya_ in (y0i, y1i):                                                   # zoomed panel → same box in the passive prediction
-        fig.add_artist(ConnectionPatch(xyA=(x1i, ya_), coordsA=axIn.transData, xyB=(x0i, ya_), coordsB=axB.transData, color='0.5', lw=0.6, ls=(0, (2, 2))))
-    for c in picked:                                         # same vessels as a, in the passive model's own direction
-        if abs(Qs[c]) >= 0.01:                               # no arrow where the model's flow is negligible (direction meaningless)
-            arrow(axB, c, Qs)
-    flip = [c for c in picked if np.sign(Qp[c]) != np.sign(Qs[c])]
-    print(f"[fig7] arrows flipped between a and b: {len(flip)} of {len(picked)}: " +
-          ", ".join(f"{edges[c]} at ({mids[c][0]:.0f}, {mids[c][1]:.0f}) Q′ {Qp[c]:+.2f} ({abs(Qp[c]) / D['sigma'][c]:.1f}σ) vs Q_sim {Qs[c]:+.2f}" for c in flip))     # same measurement-support mask as a
-    inj = fb[dom['inj']]                                     # arterial cuts drawn red by markers(); net withdrawals not marked (caption)
-    print(f"[fig7] arterial cuts: {int((inj < 0).sum())} net withdrawals, Σ {inj[inj < 0].sum():.2f} nL/s ({100 * -inj[inj < 0].sum() / inj[inj > 0].sum():.0f}% of inflow)")
-    axB.plot([], [], 'o', ms=3.2, color='#d40000', mec='white', mew=0.3, label='arterial boundary')
-    axB.plot([], [], 's', ms=4, color='#2b35a8', mec='white', mew=0.5, label='venous outlet')
-    axB.plot([], [], 'D', ms=5, mfc='white', mec=INKC, mew=1.0, label='_nolegend_')
-    axB.legend(loc='upper center', bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=8, frameon=False, borderaxespad=0.2,
-               handletextpad=0.2, columnspacing=1.0)
-    letter(axB, 'b', '')
-    axB.text(0.5, 0.995, r'passive Q$_{\rm sim}$', transform=axB.transAxes, ha='center', va='top', fontsize=9)
-    pB = axB.get_position(); cax = fig.add_axes([pB.x1 + 0.012, pB.y0 + 0.1 * pB.height, 0.013, 0.8 * pB.height])
-    cb = plt.colorbar(plt.cm.ScalarMappable(norm=nAB, cmap=cAB), cax=cax)
-    cb.set_label(r'$|\bar Q|$ (nL/s)', fontsize=9, labelpad=2); cb.outline.set_linewidth(0.5)
-
-    # c
-    axC = fig.add_subplot(gBm[0]); bg(axC)
-    m = imaged & (np.abs(Qp) > 1e-12) & (np.abs(Qs) > 1e-12)
-    E = np.log10(np.abs(Qs) / np.maximum(np.abs(Qp), 1e-12))
-    mr = m & (np.abs(Qp) > 2 * D['sigma'])
-    greys(axC, ~mr)
-    axC.add_collection(LineCollection([segs[c] for c in np.flatnonzero(mr)],
-                                      colors=[cC(nC(E[c])) for c in np.flatnonzero(mr)], linewidths=0.8, zorder=3))
-    q_floor = max(vmin * 3, 3e-3)
-    # noise level = each vessel's calibrated measurement uncertainty σ_e = sqrt((c_e y_e)² + σ0²) (Fig 6); a direction is only
-    # judged where the reconciled flow is clearly above it, |Q'| > 2σ_e
-    sig_ok = np.abs(Qp) > 2 * D['sigma']
-    mism = m & sig_ok & (np.sign(Qp) != np.sign(Qs))
-    for c in np.flatnonzero(mism):
-        s = segs[c]; mid = s[len(s) // 2]
-        axC.plot(*mid, 'o', color=MIS, ms=1.5, markeredgewidth=0, zorder=6, alpha=0.7)
-    markers(axC)
-    letter(axC, 'c', 'Local agreement')
-    caxC = axC.inset_axes([0.15, -0.06, 0.7, 0.035])
-    cbC = plt.colorbar(plt.cm.ScalarMappable(norm=nC, cmap=cC), cax=caxC, ticks=[-1, 0, 1], orientation='horizontal', extend='both')
-    cbC.set_label(r'log$_{10}$(|Q$_{\rm sim}$| / |Q′|)', labelpad=1); cbC.outline.set_linewidth(0.5)
-    axC.plot([], [], 'o', color=MIS, ms=3, label='direction mismatch')
-    axC.legend(fontsize=8, loc='lower right', frameon=False, borderaxespad=0, handletextpad=0.1)
-
-    # D
-    axD = fig.add_subplot(gBm[1])
-    md = m & sig_ok                                                          # direction-resolved vessels (|Q′| > 2σ), as in a
-    lm, ls_ = np.log10(np.maximum(np.abs(Qp[md]), 1e-5)), np.log10(np.maximum(np.abs(Qs[md]), 1e-5))
-    gcm = mcolors.LinearSegmentedColormap.from_list('g', [plt.cm.Greys(0.3), plt.cm.Greys(0.95)])   # lightest bin still visible
-    axD.hexbin(lm, ls_, gridsize=45, cmap=gcm, mincnt=1, bins='log', linewidths=0, zorder=2)
-    lo, hi = min(lm.min(), ls_.min()), max(lm.max(), ls_.max())
-    axD.plot([lo, min(hi, 0.0)], [lo, min(hi, 0.0)], color=INKC, ls='--', lw=0.9, zorder=3)
-    mm = mism[md]
-    axD.scatter(lm[mm], ls_[mm], s=5, facecolors='none', edgecolors=MIS, linewidths=0.5, alpha=0.8,
-                zorder=4, label='direction mismatch')
-    r_log = float(np.corrcoef(np.log10(np.maximum(np.abs(Qp[m]), 1e-5)), np.log10(np.maximum(np.abs(Qs[m]), 1e-5)))[0, 1])
-    consider = m & sig_ok
-    r_log_res = float(np.corrcoef(np.log10(np.abs(Qp[consider])), np.log10(np.abs(Qs[consider])))[0, 1])
-    p_agree = float(np.mean(np.sign(Qp[consider]) == np.sign(Qs[consider])))
-    axD.text(0.03, 0.97, f'|Q′| > 2σ\n$r_{{\\log}}$ = {r_log_res:.2f}\ndirection {100 * p_agree:.0f}%',
-             transform=axD.transAxes, va='top', ha='left', fontsize=8, linespacing=1.3, zorder=5,
-             bbox=dict(fc='white', ec='none', pad=1.5))
-    axD.set_xlabel(r"reconstructed log$_{10}$|Q′| (nL/s)", labelpad=1)
-    axD.set_ylabel(r'predicted log$_{10}$|Q$_{\rm sim}$| (nL/s)', labelpad=1)
-    letter(axD, 'd', 'Vessel-level agreement', dx=-0.2)
-    axD.set_aspect('equal')
-    axD.spines[['top', 'right']].set_visible(False)
-    axD.set_xlim(lo - 0.1, hi + 2.1); axD.set_ylim(lo - 0.1, hi + 2.1)       # headroom: statistics above the data
-
-    # E  geometry controls
-    ln = rec['length'][em]
-    def r_of(Kx):
-        q = passive(Kx, fb, dom); a, b = np.abs(Qp[m]), np.abs(q[m]); ok = (a > 1e-12) & (b > 1e-12)
-        return float(np.corrcoef(np.log10(a[ok]), np.log10(b[ok]))[0, 1])
-    rng = np.random.default_rng(0)
-    r_uni = r_of(np.mean(r) ** 4 / ln)
-    r_sh = np.array([r_of(rng.permutation(r) ** 4 / ln) for _ in range(N_SHUFFLE)])
-    print(f'  r_log measured {r_log:.3f}, uniform {r_uni:.3f}, shuffled {r_sh.mean():.3f} ± {r_sh.std():.3f}')
-    gE = gBm[2].subgridspec(1, 2, width_ratios=[1.0, 0.72], wspace=0.08); axE = fig.add_subplot(gE[0])
-    RC = {'measured': '#2b70b4', 'uniform': '#8a8a8a', 'shuffled': '#d07a14'}
-    for yi, rv, col in ((2, r_log, RC['measured']), (1, r_uni, RC['uniform'])):
-        axE.hlines(yi, 0, rv, color=col, lw=2, alpha=0.8)
-        axE.plot(rv, yi, 'o', color=col, markersize=5, zorder=4)
-        axE.text(rv + 0.04, yi, f'{rv:.2f}', va='center', ha='left', fontsize=8, color=col)
-    jit_ = np.random.default_rng(1).uniform(-0.2, 0.2, len(r_sh))           # every shuffle realisation
-    axE.scatter(r_sh, jit_, s=5, color=RC['shuffled'], alpha=0.45, linewidths=0, zorder=3)
-    axE.plot([r_sh.mean()] * 2, [-0.3, 0.3], color=RC['shuffled'], lw=1.6, zorder=4)
-    axE.text(r_sh.max() + 0.04, 0, f'{r_sh.mean():.2f} (n = {len(r_sh)})', va='center', ha='left', fontsize=8, color=RC['shuffled'])
-    axE.set_yticks([2, 1, 0], ['measured', 'uniform', 'shuffled'])
-    axE.set_xlim(0, 1.0); axE.set_ylim(-0.55, 2.55); axE.set_xticks([0, 0.5, 1.0]); axE.tick_params(axis='y', length=0)
-    axE.set_xlabel(r"$r_{\log}$ with Q′ (all measured vessels)", labelpad=1)
-    axE.spines['right'].set_visible(False); axE.spines['top'].set_visible(False)
-    letter(axE, 'e', 'Radius controls', dx=-0.3)
-    # inset: the flow field with uniform radii (same boundary fluxes), on the colour scale of a
-    Qu = passive(np.mean(r) ** 4 / ln, fb, dom)
-    Qsh1 = passive(np.random.default_rng(7).permutation(r) ** 4 / ln, fb, dom)        # one shuffled-radius realisation
-    axUs = []
-    for k_, (Qx, lab_, col_) in enumerate(((Qs, 'measured', RC['measured']), (Qu, 'uniform', RC['uniform']), (Qsh1, 'shuffled', RC['shuffled']))):
-        axU = fig.add_axes([0, 0, 0.1, 0.1]); axUs.append(axU); bg(axU); axU.set_ylim(Hm, 0); axU.set_aspect('equal')
-        axU.add_collection(LineCollection(segs, colors=[cAB(nAB(min(max(abs(Qx[c]), vmin), vmax))) for c in range(len(segs))], linewidths=0.25, zorder=3))
-        axU.set_title(lab_, fontsize=8, pad=1, color=col_)
-        for s_ in axU.spines.values():
-            s_.set_visible(True); s_.set_color(col_); s_.set_linewidth(0.8)
-
-    # F  distance from the driven carve boundary
-    B = dom['B']; Bc = B.tocoo()
-    tails = np.asarray((B.multiply(B > 0)).argmax(axis=0)).ravel(); heads = np.asarray((B.multiply(B < 0)).argmin(axis=0)).ravel()
-    A = sp.csr_matrix((np.ones(len(idx)), (tails, heads)), shape=(B.shape[0], B.shape[0]))
-    hop = shortest_path(A, directed=False, unweighted=True, indices=dom['inj']).min(axis=0)
-    ehop = np.minimum(hop[tails], hop[heads])
-    d_grid = np.arange(0, int(np.nanpercentile(ehop[m], 95)) + 1)
-    r_vals, n_vals = [], []
-    for dmin in d_grid:
-        mk = m & (ehop >= dmin)
-        n_vals.append(int(mk.sum()))
-        r_vals.append(float(np.corrcoef(np.log10(np.abs(Qp[mk])), np.log10(np.abs(Qs[mk])))[0, 1]) if mk.sum() >= 20 else np.nan)
-    r_vals = np.array(r_vals)
-    figF = plt.figure(figsize=(3.6, 2.4)); axF = figF.add_axes([0.16, 0.2, 0.68, 0.72])
-    axF.plot(d_grid, r_vals, '-', color='#2b70b4', lw=1.2, zorder=3)
-    axF.fill_between(d_grid, r_vals, where=~np.isnan(r_vals), color='#2b70b4', alpha=0.15, zorder=2)
-    axF.set_xlim(0, d_grid.max()); axF.set_ylim(0, 1); axF.axhline(0.5, color='0.65', lw=0.6, ls=':')
-    axF.set_xlabel('distance from the driven boundary (hops)', labelpad=1)
-    axF.set_ylabel(r"$r_{\log}$", labelpad=1)
-    axF2 = axF.twinx(); axF2.plot(d_grid, n_vals, '--', color='0.45', lw=0.8, alpha=0.8)
-    axF2.set_ylabel('vessels retained', color='0.45', labelpad=2); axF2.tick_params(colors='0.45'); axF2.spines['top'].set_visible(False); axF.spines['top'].set_visible(False)
-
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    # SI: sensitivity of the direction-confidence threshold k (|Q'| > kσ): coverage, directed loops, model agreement
-    import networkx as nx
-    tl_ = np.asarray((Bm.multiply(Bm > 0)).argmax(0)).ravel(); hd_ = np.asarray((Bm.multiply(Bm < 0)).argmin(0)).ravel()
-    zz = np.abs(Qp) / D['sigma']; ks = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]); rows = []
-    for k_ in ks:
-        keep = zz > k_ if k_ > 0 else np.abs(Qp) > 1e-12
-        DG = nx.DiGraph(); [DG.add_edge(tl_[e], hd_[e]) if Qp[e] > 0 else DG.add_edge(hd_[e], tl_[e]) for e in np.flatnonzero(keep)]
-        Sc = [c for c in nx.strongly_connected_components(DG) if len(c) > 1]; Su = set().union(*Sc) if Sc else set()
-        nl = sum(keep[e] and tl_[e] in Su and hd_[e] in Su for e in range(len(Qp)))
-        mk = keep & imaged & (np.abs(Qs) > 1e-12)
-        rows.append((100 * keep.mean(), 100 * np.abs(Qp[keep]).sum() / np.abs(Qp).sum(), 100 * nl / max(keep.sum(), 1),
-                     100 * np.mean(np.sign(Qp[mk]) == np.sign(Qs[mk])), np.corrcoef(np.log10(np.abs(Qp[mk])), np.log10(np.abs(Qs[mk])))[0, 1]))
-    rows = np.array(rows)
-    for k_, rw in zip(ks, rows):
-        print(f"[fig7 SI] k={k_:.1f}: vessels {rw[0]:.0f}%, flux {rw[1]:.0f}%, on directed loops {rw[2]:.1f}%, direction agree {rw[3]:.1f}%, r_log {rw[4]:.3f}")
-    figT, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.0, 2.8)); figT.subplots_adjust(wspace=0.55, left=0.08, right=0.91, bottom=0.18, top=0.92)
-    ax1.plot(ks, rows[:, 0], 'o-', color='0.3', ms=3, label='vessels retained'); ax1.plot(ks, rows[:, 1], 's-', color='#2b70b4', ms=3, label='flux carried')
-    ax1.plot(ks, rows[:, 2], '^-', color=MIS, ms=3, label='on directed loops')
-    ax1.set_xlabel("threshold k  (|Q′| > kσ)", labelpad=1); ax1.set_ylabel("%", labelpad=1); ax1.set_ylim(0, 102)
-    ax1.legend(frameon=False, loc='upper right', borderaxespad=0.1); ax1.axvline(2, color='0.7', lw=0.6, ls=':')
-    ax2.plot(ks, rows[:, 3], 'o-', color='#2b70b4', ms=3); ax2.set_ylabel('direction agreement (%)', color='#2b70b4', labelpad=1)
-    ax2b = ax2.twinx(); ax2b.plot(ks, rows[:, 4], 's--', color='0.4', ms=3); ax2b.set_ylabel(r'$r_{\log}$', color='0.4', labelpad=2)
-    ax2.set_xlabel(r"threshold $k$", labelpad=1); ax2.axvline(2, color='0.7', lw=0.6, ls=':')
-    for ax_, l_ in ((ax1, 'a'), (ax2, 'b')):
-        ax_.text(-0.18, 1.02, l_, transform=ax_.transAxes, fontsize=12, fontweight='bold', va='bottom')
-    plos_style.save(figT, OUT_DIR / 'fig7_S_threshold')
-    # SI: forcing sensitivity — redistribute arterial inflow across the cut vertices at fixed L/R totals (and fixed V split)
-    inj_ = np.asarray(dom['inj']); side_ = np.asarray(dom['side']); Bcr = Bm.tocsr()
-    def redistribute(w):
-        f_ = fb.copy()
-        for s_ in ('L', 'R'):
-            mk_ = side_ == s_; tot_ = fb[inj_[mk_]].sum(); ww = np.maximum(np.asarray(w, float)[mk_], 0); f_[inj_[mk_]] = tot_ * ww / ww.sum()
-        return f_
-    def score(f_):
-        q_ = passive(K, f_, dom); mk = m & (np.abs(q_) > 1e-12); mr = mk & (np.abs(Qp) > 2 * D['sigma'])
-        rl_ = lambda x: np.corrcoef(np.log10(np.abs(Qp[x])), np.log10(np.abs(q_[x])))[0, 1]
-        return rl_(mk), rl_(mr), 100 * np.mean(np.sign(Qp[mr]) == np.sign(q_[mr]))
-    stub = lambda fn: np.array([fn(Bcr[i].indices) for i in inj_])
-    cases = [('reconstructed', fb), ('uniform', redistribute(np.ones(len(inj_)))),
-             ('∝ radius²', redistribute(stub(lambda ix: (r[ix] ** 2).sum()))), ('∝ conductance', redistribute(stub(lambda ix: K[ix].sum())))]
-    sc = np.array([score(f_) for _, f_ in cases])
-    rngF = np.random.default_rng(0); rnd = np.array([score(redistribute(rngF.dirichlet(np.ones(len(inj_))))) for _ in range(40)])
-    fx = fb.copy(); fx[inj_] = 0; fx[inj_[side_ == 'L']] = fb[inj_].sum() / (side_ == 'L').sum(); ext = np.array(score(fx))
-    figF2, axs_ = plt.subplots(1, 2, figsize=(7.0, 2.8)); figF2.subplots_adjust(wspace=0.3, left=0.2, right=0.98, bottom=0.18, top=0.9)
-    labs = ['reconstructed', 'uniform', r'$\propto r^2$', r'$\propto r^4/L$', 'random (n = 40)', 'all inflow from L']; y_ = np.arange(len(labs))[::-1]
-    for ax_, j_, xl in ((axs_[0], 1, r'$r_{\log}$ (|Q′| > 2σ)'), (axs_[1], 2, 'direction agreement (%)')):
-        vals = list(sc[:, j_]) + [rnd[:, j_].mean(), ext[j_]]; errs = [0] * len(cases) + [rnd[:, j_].std(), 0]
-        cols = ['#2b70b4'] + ['0.45'] * (len(cases) - 1) + ['0.65', '#e08214']
-        ax_.barh(y_, vals, color=cols, height=0.6)
-        ax_.errorbar(vals[-2], y_[-2], xerr=errs[-2], fmt='none', ecolor='k', lw=0.8, capsize=2)
-        ax_.set_yticks(y_, labs if j_ == 1 else [''] * len(labs)); ax_.set_xlabel(xl, labelpad=1)
-        ax_.set_xlim(0.4 if j_ == 1 else 70, 0.85 if j_ == 1 else 100); ax_.spines[['top', 'right']].set_visible(False)
-        for yy, vv in zip(y_, vals):
-            ax_.text(vv + (0.012 if j_ == 1 else 0.8) + (errs[list(y_).index(yy)] if True else 0), yy, f'{vv:.2f}' if j_ == 1 else f'{vv:.1f}', va='center', fontsize=8)
-    axs_[0].text(-0.45, 1.03, 'a', transform=axs_[0].transAxes, fontsize=12, fontweight='bold', va='bottom')
-    axs_[1].text(-0.1, 1.03, 'b', transform=axs_[1].transAxes, fontsize=12, fontweight='bold', va='bottom')
-    print('[fig7 SI forcing] ' + '; '.join(f'{l_}: r {v[1]:.3f}, dir {v[2]:.1f}%' for l_, v in zip(labs, list(sc) + [rnd.mean(0), ext])))
-    plos_style.save(figF2, OUT_DIR / 'fig7_S_forcing')
-    # bottom row on explicit coordinates: b, c and d share their top (0.40) and bottom (0.11) edges
-    TOP_, BOT_ = 0.40, 0.11
-    axC.set_position([0.02, BOT_, 0.29, TOP_ - BOT_]); axC.set_anchor('N')
-    axD.set_position([0.40, BOT_, 0.23, TOP_ - BOT_]); axD.set_anchor('N')
-    xd0_, wmap_, gap_ = 0.69, 0.092, 0.009
-    for k_, axU in enumerate(axUs):
-        axU.set_position([xd0_ + k_ * (wmap_ + gap_), TOP_ - 0.175, wmap_, 0.15]); axU.set_anchor("N")
-    axE.set_position([xd0_ + 0.05, BOT_ + 0.02, 3 * wmap_ + 2 * gap_ - 0.05, 0.095])
-    fig.canvas.draw(); rr_ = fig.canvas.get_renderer(); inv_ = fig.transFigure.inverted(); tb_ = lambda a_: inv_.transform(a_.get_tightbbox(rr_))
-    # one baseline per row, just above the highest artist of that row (excluding text placed above the maps in a)
-    yT_ = min(max(LETTERS[k][0].get_position().y1 for k in 'ab') + 0.012, 0.955)
-    yB_ = max(tb_(LETTERS[k][0])[1, 1] for k in 'cde') + 0.01
-    # Q′ and Q_sim are one comparison → one panel (a); bottom row b–d
-    for k, shown in (('a', 'a'), ('b', None), ('c', 'b'), ('d', 'c'), ('e', 'd')):
-        ax_, title_ = LETTERS[k]; y_ = yT_ if k in 'ab' else yB_
-        xl_ = 0.005 if k in 'ac' else tb_(ax_)[0, 0] - 0.005
-        if shown:
-            shown = chr(ord(shown) + int(os.environ.get('FIG7_LETTER_OFFSET', '0')))   # e.g. 3 → d–g when used as part of a larger figure
-            fig.text(xl_, y_, shown, fontsize=12, fontweight='bold', va='baseline', ha='left')
-        fig.text(xl_ + (0.028 if shown else 0.0), y_, title_, fontsize=9, va='baseline', ha='left')
-    plos_style.save(fig, OUT_DIR / ('fig7' if np.isfinite(SIGMA_P) else 'fig7_no_vein_penalty')); plos_style.save(figF, OUT_DIR / 'fig7_S_boundary_distance')
-    print(f"[fig7] r_log {r_log:.3f}, P(dir agree|filtered) {p_agree:.2f}, mismatches {int(mism.sum())}, "
-          f"n {int(m.sum())}; wrote {OUT_DIR / 'fig7.png'}")
+    pick_marks(axes_A[0, 1])
+    # a  boundary forcing: inputs of the model (thin = reconstructed from nearby vessels, thick = after the fitted group corrections)
+    GCOL = {0: '#1f78b4', 1: '#e66101', 2: '#1b9e77', 3: '#1b9e77'}; GLAB = {0: 'arterial L', 1: 'arterial R', 2: 'venous (shared)', 3: 'venous (shared)'}
+    bnd = np.asarray(dom['bnd']); gid = _groups(C); fdc = (dom['B'] @ C['Qp'])[bnd]; th_ = np.linspace(0, 1, 300)
+    axF = fig.add_subplot(gF); bg(axF); axF.images[0].set_alpha(0.6)
+    edgemap(axF, np.zeros(nE), np.zeros(nE, bool), nPF, cPF, 0.3)
+    allxy = np.array([[G.nodes[dom['nodes'][j]]['x'], Hmos - G.nodes[dom['nodes'][j]]['y']] for j in bnd[gid < 4]])
+    cx_, cy_ = allxy.mean(0); hh_ = 0.5 * (allxy[:, 1].max() - allxy[:, 1].min()) + 700
+    pfA = axes_A[0, 0].get_position(); pfB = axes_A[1, 0].get_position(); pF0 = axF.get_position()
+    xF0 = 0.008; hfig = pfA.y1 - pfB.y0; wfig = pF0.x1 - xF0                 # left edge shared with panel c's letter
+    axF.set_axes_locator(None); axF.set_position([xF0, pfB.y0, wfig, hfig]); axF.set_aspect('auto')
+    W_, H_ = fig.get_size_inches(); hw_ = hh_ * (wfig * W_) / (hfig * H_)
+    axF.set_xlim(cx_ - hw_, cx_ + hw_); axF.set_ylim(cy_ + hh_, cy_ - hh_)
+    FF = {k: C['F'][(k, 'flux')] for k in (1, 2)}
+    nxy = lambda j: np.array([G.nodes[dom['nodes'][j]]['x'], Hmos - G.nodes[dom['nodes'][j]]['y']])
+    def wv(r1, r2):
+        return 1 + (r1 * np.exp(2j * np.pi * th_)).real + (r2 * np.exp(4j * np.pi * th_)).real
+    for g_ in (0, 1, 2, 3):                                           # all boundary nodes, small
+        m = gid == g_
+        if m.any():
+            xy_ = np.array([nxy(j) for j in bnd[m]])
+            for axm in (axF, axes_A[0, 2]):
+                axm.plot(xy_[:, 0], xy_[:, 1], '^' if g_ < 2 else 's', ms=3.5 if axm is axF else 3.0, mfc=GCOL[g_], mec='white', mew=0.4, ls='', zorder=9)
+    # insets: VL, VR (own stub waveform thin, shared forcing thick); two largest arterial sources per side (reconstructed thin, fitted thick)
+    vnodes = list(np.asarray(dom['out'])); vside = list(dom['side_out'])
+    big = {}
+    for sd in (0, 1):
+        order = [bnd[i] for i in np.argsort(-np.abs(fdc)) if gid[i] == sd]
+        first = order[0]; second = next(j for j in order[1:] if sd == 1 or np.linalg.norm(nxy(j) - nxy(first)) > 150)   # left: > 150 px apart
+        big[sd] = [first, second]
+    PANELS = []
+    for j, sd in zip(vnodes, vside):
+        own = (VINFO['ratio'][1].get(int(j), np.nan), VINFO['ratio'][2].get(int(j), np.nan)); shr = (VINFO['mean'][1], VINFO['mean'][2])
+        PANELS.append(('V' + sd, j, '#1b9e77', [(shr, 1.8, 1.0)], [0.02, 0.835, 0.40, 0.115] if sd == 'L' else [0.58, 0.835, 0.40, 0.115]))
+    for sd, lab, col, xs in ((0, 'A', '#1f78b4', 0.0), (1, 'A', '#e66101', 0.0)):
+        for k_, j in enumerate(big[sd]):
+            i_ = int(np.flatnonzero(bnd == j)[0])
+            rec = (F0[1][j] / fdc[i_], F0[2][j] / fdc[i_]); fit = (FF[1][j] / fdc[i_], FF[2][j] / fdc[i_])
+            nm = f"A{('L', 'R')[sd]}{k_ + 1} {100 * abs(fdc[i_]) / np.abs(fdc[gid == sd]).sum():.0f}%"
+            yf = (axF.transLimits.transform(nxy(big[sd][0]))[1]); y2 = (axF.transLimits.transform(nxy(big[sd][1]))[1])
+            yb_ = min(max(yf - 0.07, 0.2), 0.62) + (0.17 if (sd == 0 and y2 > yf) else -0.17) * k_
+            PANELS.append((nm, j, col, [(fit, 1.8, 1.0)], [0.015 if sd == 0 else 0.735, yb_, 0.25, 0.115]))
+    for nm, j, col, curves, box in PANELS:
+        ai = axF.inset_axes(box); ai.set_facecolor((1, 1, 1, 0.92))
+        for (r1, r2), lw_, al_ in curves:
+            if np.isfinite(r1):
+                ai.plot(th_, wv(r1, r2), color=col, lw=lw_ + 0.3, alpha=al_)
+        ai.axhline(1, color='0.8', lw=0.5); ai.set_xlim(0, 1); ai.set_ylim(-0.12, 1.85); ai.set_xticks([]); ai.set_yticks([])
+        for sp_ in ai.spines.values():
+            sp_.set_edgecolor(col); sp_.set_linewidth(0.9)
+        import matplotlib.patheffects as _pe
+        ai.text(0.0, 1.05, nm, transform=ai.transAxes, fontsize=8, color=col, va='bottom', ha='left', fontweight='bold', zorder=10,   # label above the box: never over the curve
+                path_effects=[_pe.withStroke(linewidth=2.2, foreground='white')])
+        p_ = nxy(j); axF.plot(*p_, 'o', ms=7, mfc='none', mec='k', mew=0.9, zorder=10)
+        ex = box[0] + box[2] if box[0] < 0.5 else box[0]; ey = box[1] + box[3] / 2
+        axF.annotate('', xy=p_, xytext=(ex, ey), textcoords='axes fraction', arrowprops=dict(arrowstyle='-', color=col, lw=0.6), zorder=8)
+        log_ = f"{nm}: node {dom['nodes'][j]}"; print('[fig8a]', log_)
+    axF.set_title('Boundary forcing', fontsize=9, pad=3); axF.set_visible(False)
+    from matplotlib.lines import Line2D as _L2
+    axF.text(0.98, 0.02, '', transform=axF.transAxes)
+    pa, pc, pd, pe = axes_A[0, 0].get_position(), axC.get_position(), axD.get_position(), axs_e[0].get_position(); pf = axF.get_position()
+    xl = pa.x0 - 0.045; yt = pa.y1 + 0.02; yb = pd.y1 + 0.03
+    fig.canvas.draw(); _r = fig.canvas.get_renderer(); _inv = fig.transFigure.inverted(); yb = axD.title.get_window_extent(_r).transformed(_inv).y0
+    fig.canvas.draw(); _r = fig.canvas.get_renderer(); _inv = fig.transFigure.inverted()
+    _tb = lambda ax_: ax_.title.get_window_extent(_r).transformed(_inv).y0
+    yab = _tb(axes_A[0, 0]); ycd = _tb(axD)
+    for x_, y_, l_ in ((0.008, yab, 'a'), (0.008, ycd, 'b'), (pe.x0 - 0.04, ycd, 'c')):
+        fig.text(x_, y_, l_, fontsize=12, fontweight='bold', va='baseline', ha='left')
+    plos_style.save(fig, OUT_DIR / 'fig7', finalize_fig=False)
 
 
 if __name__ == '__main__':

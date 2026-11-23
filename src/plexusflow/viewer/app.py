@@ -1948,7 +1948,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._src_radio_rec.setChecked(self.current_source == 'reconciled')
         self._src_radio_rec.setEnabled(self._reconciliation_available())
         self._src_radio_rec.setToolTip(
-            "Conservative DC flow Q\u2032 and tile-aligned harmonics (results/dc_reconciled_v2.pkl, ac_field_v7.pkl)."
+            "Conservative DC flow Q\u2032 and tile-aligned harmonics (results/dc_reconciled_v3.pkl, ac_field_v8.pkl)."
             if self._reconciliation_available() else
             "No reconciliation found: run scripts/dc_reconcile.py and scripts/ac_field.py for this stage.")
         self._src_radio_sim = QRadioButton("Sim (intact)")
@@ -2752,7 +2752,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._edge_card_btn.setToolTip(
             "For the selected edge: every tile recording, the single averaged input Q\u0304 the\n"
             "reconciliation fits, and the reconciled Q\u2032 — plus both end junctions (why it moved).\n"
-            "Needs the reconciliation results (results/dc_reconciled_v2.pkl).")
+            "Needs the reconciliation results (results/dc_reconciled_v3.pkl).")
         self._edge_card_btn.clicked.connect(self._show_edge_card)
         inspect_lay.addWidget(self._edge_card_btn)
         # Video overlay controls — only shown if positions + video paths
@@ -3903,7 +3903,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                     info.append("    not used by the reconciliation")
             except Exception as exc_:
                 info.append(f"    (details unavailable: {exc_!r})")
-        # DC reconciliation for this vessel (results/dc_reconciled_v2.pkl): averaged input and output.
+        # DC reconciliation for this vessel (results/dc_reconciled_v3.pkl): averaged input and output.
         if self._rec:
             qm_, c_, qp_ = d.get('_rec_Qm'), d.get('_rec_c'), d.get('_h_amp_DC_rec')
             info.append("\n  DC reconciliation (one input per vessel):")
@@ -3952,7 +3952,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             self._info_box.setPlainText("Select an edge first (click it), then 'Edge flux card'.")
             return
         if not self._rec:
-            self._info_box.setPlainText("No reconciliation results loaded (results/dc_reconciled_v2.pkl).")
+            self._info_box.setPlainText("No reconciliation results loaded (results/dc_reconciled_v3.pkl).")
             return
         try:
             import matplotlib.pyplot as plt
@@ -4306,7 +4306,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         env = os.environ.get('PLEXUSFLOW_RESULTS')
         cands = ([Path(env).expanduser()] if env else []) + [stage / 'results']
         for c in cands:
-            if (c / 'dc_reconciled_v2.pkl').exists():
+            if any((c / f).exists() for f in ('dc_reconciled_v3.pkl', 'dc_reconciled_v2.pkl')):
                 return c
         return None
 
@@ -4321,8 +4321,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             return {}
         import pickle as _pk
         try:
-            D = _pk.loads((res / 'dc_reconciled_v2.pkl').read_bytes())
-            af = next((res / f for f in ('ac_field_v7.pkl', 'ac_field_v2.pkl') if (res / f).exists()), None)   # current field, else the older one
+            # current method (dc v3 + pulse field v8); else the previous one (dc v2 + ac_field v7 / v2) — a field goes with its own mean flow
+            cur = (res / 'dc_reconciled_v3.pkl').exists()
+            D = _pk.loads((res / ('dc_reconciled_v3.pkl' if cur else 'dc_reconciled_v2.pkl')).read_bytes())
+            af = next((res / f for f in (('ac_field_v8.pkl',) if cur else ('ac_field_v7.pkl', 'ac_field_v2.pkl')) if (res / f).exists()), None)
             A = _pk.loads(af.read_bytes()) if af is not None else None
         except Exception as exc:
             print(f"  reconciliation: could not read {res}: {exc}")
@@ -4425,7 +4427,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             return True
         D = self._rec_D
         if D is None:
-            self._info_box.setPlainText("No reconciliation results loaded — the 50 % fit needs results/dc_reconciled_v2.pkl.")
+            self._info_box.setPlainText("No reconciliation results loaded — the 50 % fit needs results/dc_reconciled_v3.pkl.")
             return False
         try:
             import scipy.sparse as _sp

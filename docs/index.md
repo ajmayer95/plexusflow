@@ -3,7 +3,7 @@
 | Document | Contents |
 |---|---|
 | [pipeline.md](pipeline.md) | Raw tiles → stitched mosaic → vessel graph → per-vessel flow (CLI steps, coordinate frames) |
-| [dc_method.md](dc_method.md) | Mean flow: reliability model, conservative reconciliation, passive Poiseuille comparison |
+| [method.md](method.md) | The method of the paper: per-recording fit, mean flow, tile clocks and pulsatile flow, distensibility fit |
 | [synthetic_validation.md](synthetic_validation.md) | Known-truth Stokes benchmark of the flux measurement |
 | [../FIGURES.md](../FIGURES.md) | Paper figure → script → inputs |
 

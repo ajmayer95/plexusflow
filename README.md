@@ -18,7 +18,7 @@ analysis drivers and the scripts that produce every figure of the paper.
 | `src/plexusflow/` | reconstruction: tile preprocessing and stitching, mosaic fusion, mask → graph (`mve`, `vectorize`), per-vessel optical-flow flux (`analyze`), mean-flow reliability model and conservative reconciliation (`reconcile`), tile-synchronised harmonic field (`ac`), known-truth Stokes benchmark (`synthetic`), data-release loader (`release`), napari viewer (`viewer`) |
 | `src/plexusmech/` | modelling: two-port RC / transmission-line network (`ac.model`, `tl`), composite likelihood and profiled fit of wall distensibility (`ac.profile`) |
 | `scripts/` | analysis drivers (`dc_reconcile.py`, `ac_field.py`, `mech/ac_estimate.py`; `run_stage.sh` runs them for any stage), figure scripts (`make_figure*.py`, see [FIGURES.md](FIGURES.md)), benchmark drivers (`benchmark/`), `reproduce_paper.sh` |
-| `docs/` | methods notes: [pipeline](docs/pipeline.md), [mean-flow method](docs/dc_method.md), [synthetic validation](docs/synthetic_validation.md); **current status: [status_2026-11.md](docs/status_2026-11.md)** |
+| `docs/` | methods notes: [pipeline](docs/pipeline.md), **[the method](docs/method.md)**, [synthetic validation](docs/synthetic_validation.md) |
 | `AGENTS.md` | guide for AI coding agents and new contributors (setup, data, commands, conventions) |
 | `tests/` | unit and regression tests (`pytest`) |
 
@@ -55,21 +55,18 @@ editors), `vectorize` ([net3](https://github.com/ajmayer95/net3), mask → graph
 3. Run everything (about 4 minutes on a laptop):
 
    ```bash
-   bash scripts/reproduce_paper.sh             # results, then Figs 1–9 → $PLEXUSFLOW_FIGURES/latest/
+   bash scripts/reproduce_paper.sh             # results, then Figs 1–7 → $PLEXUSFLOW_FIGURES/latest/
    bash scripts/reproduce_paper.sh --figures   # figures only, from existing results
    ```
 
 | Step | Script | Output (in `$PLEXUSFLOW_RESULTS`) |
 |---|---|---|
-| reliability model + conservative mean flow | `scripts/dc_reconcile.py` | `reliability_model_v1.json`, `dc_reconciled_v2.pkl` |
-| tile-synchronised harmonic field | `scripts/ac_field.py` | `ac_field_v7.pkl` |
-| profiled distensibility fit | `scripts/mech/ac_estimate.py` | `ac_estimate_v8.json` |
-| Figures 1–9 | `scripts/make_figure*.py` ([FIGURES.md](FIGURES.md)) | `$PLEXUSFLOW_FIGURES/figN/` |
+| mean flow (conservation, equal left/right inflow) | `scripts/dc_reconcile.py` | `dc_reconciled_v3.pkl` |
+| tile clocks and pulsatile flow | `scripts/pulse_field.py` | `ac_field_v8.pkl` |
+| distensibility fit | `scripts/mech/ac_estimate.py` | `ac_estimate_v9.json` |
+| Figures 1–7 | `scripts/make_figure*.py` ([FIGURES.md](FIGURES.md)) | `$PLEXUSFLOW_FIGURES/figN/` |
 
-Script defaults are the settings used in the paper (`plexusflow.ac.field.CANONICAL_SYNC` for the phase
-synchronisation). A run from a clean environment reproduces the published mean flows bit for bit, the harmonic field to
-10⁻⁵ and the fitted distensibility exactly; profiled-objective values far from the optimum can differ by < 0.5 %
-(warm-started local optimisation).
+Script defaults are the settings used in the paper; the method is described in [docs/method.md](docs/method.md).
 
 ## Running the pipeline on new data
 
@@ -85,7 +82,7 @@ plexusflow mve         STAGE        # mask → vectorise → edit (napari, needs
 plexusflow condense    STAGE        # one edge per vessel
 plexusflow analyze     STAGE        # optical flow → Q(t) → harmonics per vessel and tile
 plexusflow workbench   STAGE        # mark aorta/vein anchors and tag open / topology-uncertain regions
-bash scripts/run_stage.sh STAGE     # reliability model, mean-flow reconstruction, validation, pulsatile field, D fit
+bash scripts/run_stage.sh STAGE     # mean flow, pulsatile field, distensibility fit
 plexusflow view        STAGE        # read-only viewer (measured and reconciled flow, video overlay)
 plexusflow info        STAGE        # which artefacts exist
 ```

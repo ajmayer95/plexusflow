@@ -23,8 +23,8 @@ import numpy as np
 import plexusflow.paths as paths
 from plexusflow.release import SCHEMA_VERSION
 
-RESULTS = ("reliability_model_v1.json", "dc_reconciled_v2.pkl", "dc_weighting_validation.json", "dc_junction_calibration.json", "dc_withholding.json", "c_truth_calibration.json", "dc_passive_comparison.json", "dc_synthetic_benchmark.json", "dc_async_benchmark.json", "ac_field_v7.pkl", "ac_estimate_v8.json")
-RESULTS_OPTIONAL = ("dc_ablation.json", "dc_uncertainty_models.json", "dc_qc.json", "dc_qc.csv")
+RESULTS = ("dc_reconciled_v3.pkl", "ac_field_v8.pkl", "ac_estimate_v9.json")
+RESULTS_OPTIONAL = ("reliability_model_v1.json", "dc_synthetic_benchmark.json", "dc_async_benchmark.json", "dc_ablation.json", "dc_uncertainty_models.json", "dc_qc.json", "dc_qc.csv")
 # inputs of the paper figures (scripts/make_figure*.py), copied as-is from the stage (core tier)
 FIGURE_INPUTS = ("fuse/organ_fusion.tif", "fuse/maxmed.tif", "fuse/probs_logit.tif", "mask/mask.tif", "tiles/maxmed", "assets")
 FIG3_TILE = 36                # its representative raw frame is stored (raw recordings are not released)
@@ -149,7 +149,7 @@ def downsample_videos(src_dir, dst_dir, spatial, n_frames):
 
 
 def export_results(res_dir, out):
-    D = pickle.loads((res_dir / "dc_reconciled_v2.pkl").read_bytes())
+    D = pickle.loads((res_dir / "dc_reconciled_v3.pkl").read_bytes())
     with open(out / "dc_reconciled_edges.csv", "w", newline="") as f:
         w = csv.writer(f); w.writerow(("u", "v", "Q_measured", "Q_reconciled", "Q_passive", "c", "sigma", "imaged", "winner_tile", "radius_px", "length_px",
                                        "Q_reconciled_sd", "unstable"))
@@ -162,7 +162,7 @@ def export_results(res_dir, out):
             w.writerow((D["nodes"][i], "carve", D["side"][k], scalar(D["fb"][i])))
         for i in D["out"]:
             w.writerow((D["nodes"][i], "vein", "", scalar(D["fb"][i])))
-    A = pickle.loads((res_dir / "ac_field_v7.pkl").read_bytes())
+    A = pickle.loads((res_dir / "ac_field_v8.pkl").read_bytes())
     with open(out / "ac_field_edges.csv", "w", newline="") as f:
         w = csv.writer(f); w.writerow(("u", "v", "eligible", "winner_tile", "H1_amp", "H1_phase", "H2_amp", "H2_phase", "beat_scatter_H1", "rho",
                                        "tile_gauge_sd_deg", "phase_determined"))
@@ -254,7 +254,7 @@ the analysis needs; **extras** adds the per-tile realtime videos (viewer playbac
 |---|---|---|
 | `graph/` | core | `graph_vessels_piv.gpickle` (networkx; includes the viewer's derived per-edge harmonic cache; Q(t) traces are re-attached from `export/traces.npz` on load) and `export/` — the same graph as CSV + npz, plus per-tile heart rates (see `export/SCHEMA.md`) |
 | `fuse/`, `stitch/` | core | organ mosaic and tile placement |
-| `results/` | core | final DC reconciliation, synchronised AC (waveform) field `ac_field_v7`, distensibility fit `ac_estimate_v8`, reliability model; CSV exports and `summary.json` |
+| `results/` | core | reconciled mean flow `dc_reconciled_v3`, reconciled pulsatile field `ac_field_v8`, distensibility fit `ac_estimate_v9`; CSV exports and `summary.json` |
 | `fuse/`, `mask/`, `tiles/maxmed/`, `assets/` | core | mosaic projections, segmentation probability and mask, per-tile projections, figure drawings |
 | `acquisition_times.json`, `tile_video_shapes.json`, `raw_subset/` | core | recording times and frame sizes of every tile (from the raw recordings) and the representative raw frame of tile 36 (Fig 3) |
 | `videos_realtime/` | extras | every tile's realtime video as used by the figures and the viewer |
@@ -281,7 +281,7 @@ No Python?  `graph/export/` (CSV + npz, see `SCHEMA.md`) and the CSVs in `result
 Reproducibility: re-running the scripts reproduces `results/` across Python / numpy / scipy versions up to solver tolerance
 (the DC reconciliation converges to a stationary point of an explicit objective); the build environment is in `MANIFEST.json`.
 `unstable` in `dc_reconciled_edges.csv` marks vessels whose reconciled flow depends on the solver start (direction, or > 10 %).
-Methods: `docs/dc_method.md`, `docs/synthetic_validation.md` in the code repository.  Checksums: `MANIFEST.json`.
+Methods: `docs/method.md`, `docs/synthetic_validation.md` in the code repository.  Checksums: `MANIFEST.json`.
 """)
     files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != "MANIFEST.json")
     import platform, scipy, networkx

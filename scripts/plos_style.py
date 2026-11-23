@@ -60,10 +60,11 @@ def finalize(fig, letter=LETTER):
             t.set_fontsize(MIN)
 
 
-def save(fig, stem, dpi=300, pdf=True, png=True):
+def save(fig, stem, dpi=300, pdf=True, png=True, finalize_fig=True):
     """finalize → stem.png (300 dpi preview), stem.pdf (vector working copy), stem.tif (submission: RGB, LZW, `dpi`)."""
     stem = Path(stem); stem.parent.mkdir(parents=True, exist_ok=True)
-    finalize(fig)
+    if finalize_fig:                                          # False: the script has already set every text size itself
+        finalize(fig)
     w, h = fig.get_size_inches()
     if w > MAX_W + 1e-6 or h > MAX_H + 1e-6:
         print(f"[plos] WARNING {stem.name}: {w:.2f} × {h:.2f} in exceeds {MAX_W} × {MAX_H} in")

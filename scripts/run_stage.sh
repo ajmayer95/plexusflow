@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Analysis chain for ONE stage (any embryo), from its measured graph to the results the read-only viewer shows.
 #
-#   bash scripts/run_stage.sh /path/to/PlexusFlowNNS              # reconstruction + validation + pulsatile field + D fit
+#   bash scripts/run_stage.sh /path/to/PlexusFlowNNS              # mean flow + pulsatile field + distensibility fit
 #   bash scripts/run_stage.sh /path/to/PlexusFlowNNS --no-ac       # mean flow only
-#   bash scripts/run_stage.sh /path/to/PlexusFlowNNS --no-validate # skip the validation runs
 #   PLEXUSFLOW_RESULTS=/elsewhere bash scripts/run_stage.sh ...    # write results somewhere other than <stage>/results
 #
 # Prerequisites (see docs/pipeline.md): graph/graph_vessels_piv.gpickle from `plexusflow analyze`, with boundary anchors
@@ -12,12 +11,11 @@
 # The paper's figures are made by scripts/reproduce_paper.sh, which runs the same chain for the 21S release.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-STAGE="${1:?usage: run_stage.sh /path/to/stage [--no-ac] [--no-validate]}"; shift
-AC=1; VALIDATE=1
+STAGE="${1:?usage: run_stage.sh /path/to/stage [--no-ac]}"; shift
+AC=1
 for a in "$@"; do
   case "$a" in
     --no-ac) AC=0 ;;
-    --no-validate) VALIDATE=0 ;;
     *) echo "unknown option $a"; exit 2 ;;
   esac
 done
@@ -27,20 +25,11 @@ PY=${PYTHON:-python3}
 run() { echo; echo "=== $* ==="; "$PY" "$@"; }
 echo "stage $PLEXUSFLOW_STAGE → results $RES"
 
-run scripts/dc_reconcile.py                 # reliability model + reconciled mean flow → reliability_model_v1.json, dc_reconciled_v3.pkl
-                                            #   (2026-11-20: residual-variance weights, left = right arterial inflow; the validation scripts
-                                            #    below and the viewer still read dc_reconciled_v2.pkl — to be moved over)
-run scripts/dc_qc.py                        # review list: gross-error tests, loops, hotspots → dc_qc.csv, dc_qc.json
-if [[ $VALIDATE == 1 ]]; then
-  run scripts/dc_validate_weighting.py      # leave-one-recording-out validation       → dc_weighting_validation.json
-  run scripts/dc_junction_calibration.py    # calibration on held-out tiles            → dc_junction_calibration.json
-  run scripts/dc_withholding_curve.py       # whole-vessel withholding, 5–75 %         → dc_withholding.json
-  run scripts/dc_ablation.py                # paired ablation: weighting × conservation × HR normalisation → dc_ablation.json
-fi
+run scripts/dc_reconcile.py                 # mean flow: 1/σ² average, conservation, left = right inflow → dc_reconciled_v3.pkl
+run scripts/dc_qc.py                        # review list: gross-error tests, loops, hotspots            → dc_qc.csv, dc_qc.json
 if [[ $AC == 1 ]]; then
-  run scripts/pulse_field.py                # reconciled pulsatile field (plexusflow.ac.pulse) → ac_field_v8.pkl
-  run scripts/mech/ac_estimate.py           # distensibility fit, forcing as measured          → ac_estimate_v9.json
-  run scripts/make_figure_model.py          # revised Fig 7                                    → figures/fig7_model/
+  run scripts/pulse_field.py                # reconciled pulsatile field (plexusflow.ac.pulse)           → ac_field_v8.pkl
+  run scripts/mech/ac_estimate.py           # distensibility fit, forcing as measured                    → ac_estimate_v9.json
 fi
 echo
 echo "done. View:  plexusflow view \"$PLEXUSFLOW_STAGE\""
