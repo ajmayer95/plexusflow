@@ -8,6 +8,8 @@
 #   bash scripts/reproduce_paper.sh --figures  # figures only, from existing results
 #
 # Steps: mean-flow reconciliation → pulsatile-flow reconciliation → distensibility fit → Figs 1–7 → figures/latest/.
+# The clock measurements between tiles (results/speed_pairs_v1.pkl) come with the release: they are computed from the raw movies
+# (scripts/speed_pairs.py), which are not part of it.  With RESULTS elsewhere, that file is copied over first.
 # Point RESULTS and FIGURES at your own folders so a frozen release is never modified.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -18,8 +20,10 @@ run() { echo; echo "=== $* ==="; "$PY" "$@"; }
 if [[ "${1:-}" != "--figures" ]]; then
   mkdir -p "${PLEXUSFLOW_RESULTS:-$PLEXUSFLOW_STAGE/results}"
   run scripts/dc_reconcile.py          # mean flow: 1/σ² average of the recordings, conservation, left = right inflow → dc_reconciled_v3.pkl
-  run scripts/pulse_field.py           # tile clocks, averaged harmonics, rescaled to the reconciled mean             → ac_field_v8.pkl
-  run scripts/mech/ac_estimate.py      # distensibility of the RC network, boundary forcing as measured                → ac_estimate_v9.json
+  RES="${PLEXUSFLOW_RESULTS:-$PLEXUSFLOW_STAGE/results}"
+  if [[ ! -f "$RES/speed_pairs_v1.pkl" && -f "$PLEXUSFLOW_STAGE/results/speed_pairs_v1.pkl" ]]; then cp "$PLEXUSFLOW_STAGE/results/speed_pairs_v1.pkl" "$RES/"; fi
+  run scripts/pulse_field.py           # tile clocks, averaged harmonics, rescaled to the reconciled mean             → ac_field_v9.pkl
+  run scripts/mech/ac_estimate.py      # distensibility of the RC network, boundary forcing as measured                → ac_estimate_v10.json
 fi
 
 for f in 1 2 3 4 5 6 7; do             # make_figureN.py draws Fig N

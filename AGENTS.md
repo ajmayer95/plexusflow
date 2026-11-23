@@ -64,9 +64,10 @@ Edge orientation: every edge has a tail → head orientation and positive flux r
 - **Fit per recording:** mean + 2 harmonics at the tile heart rate (`reconcile.dc.K_FIT = 2`).
 - **One uncertainty per recording:** σ² = s²/M from the residual of that fit; every weight is 1/σ² (mean flow, tile clocks, harmonic average). The reliability model c is not used.
 - **Mean flow:** 1/σ² average of the fitted means, projected onto junction conservation with total left = total right arterial inflow (`reconcile.dc.SYMMETRIC = True`).
-- **Pulsatile flow:** `plexusflow.ac.pulse`: clocks from repeated recordings of network vessels, solved jointly; direction rule off. The dorsal-aorta segments in the clock fit are provisional (module docstring).
+- **Tile clocks:** `plexusflow.ac.speed` + `ac.pulse.tile_clocks`: speed pulse of the velocity pooled over the common piece of a vessel seen in two tiles (from the raw movies, no profile fit, no flow direction); recordings whose velocity reverses within the beat are left out; weighted circular least squares, solved jointly; tiles with clock SD > 30° are not synchronised.
+- **Pulsatile flow:** `plexusflow.ac.pulse`: flux harmonics of the recordings that agree with the reconciled flow direction, averaged on the common clock and rescaled to the reconciled mean; recordings of the opposite direction are never sign-flipped; vessels with both directions are flagged.
 - **Distensibility fit:** boundary forcing as measured, clocks fixed, no group corrections, one common variance per loss term (`scripts/mech/ac_estimate.py --method measured`).
-- **Result files:** `dc_reconciled_v3.pkl`, `ac_field_v8.pkl`, `ac_estimate_v9.json`. Earlier estimators stay selectable and write other names.
+- **Result files:** `dc_reconciled_v3.pkl`, `speed_pairs_v1.pkl`, `ac_field_v9.pkl`, `ac_estimate_v10.json` (`ac_field_v8` / `ac_estimate_v9`: the earlier method, sensitivity). Earlier estimators stay selectable and write other names.
 
 ## Conventions and pitfalls
 

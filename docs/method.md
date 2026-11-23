@@ -35,35 +35,65 @@ inflow 5.74 nL/s.
 
 ## 3. Pulsatile flow
 
-`plexusflow.ac.pulse.build_pulse_field` · `scripts/pulse_field.py` → `results/ac_field_v8.pkl`
+`plexusflow.ac.speed` · `scripts/speed_pairs.py` → `results/speed_pairs_v1.pkl` (reads the raw movies)
+`plexusflow.ac.pulse.build_pulse_field` · `scripts/pulse_field.py` → `results/ac_field_v9.pkl`
 
 1. **Tiles used.** Tiles whose heart rate is within 21 % of the reference tile's (21S: tile 21, 2.69 Hz; tiles 1–6 fall
    outside).
-2. **Tile clocks.** One phase offset $\psi_\alpha$ per tile ($\psi_{\rm ref}=0$), from vessels recorded in more than
-   one tile, first harmonic only:
-   $$\min_\psi \sum_e \sum_{\alpha<\beta} w_{\alpha\beta}\,[1-\cos((\varphi_\alpha-\psi_\alpha)-(\varphi_\beta-\psi_\beta))],
-   \qquad w_{\alpha\beta} = \frac{1}{\tau_\alpha^2+\tau_\beta^2},\quad \tau^2 = \frac{2\sigma^2}{|\hat Q_1|^2},$$
-   with $\varphi = \arg \hat Q_1$ in the vessel's fixed orientation. Start from a spectral solution, then minimise
-   over all clocks jointly (a tile-by-tile update cannot move a weakly linked block of tiles).
-3. **Average.** Harmonic $n$ of each recording is rotated by $e^{-in\psi_\alpha}$ (a pure time shift) and the
-   recordings of a vessel are averaged with weights $1/\sigma^2$.
-4. **Rescale.** The averaged waveform is multiplied by the reconciled mean over the averaged measured mean,
-   $\bar Q^*_e/\bar Q^{\rm av}_e$. A vessel is not reconstructed where this ratio is negative or undefined.
+2. **Clock measurements.** A vessel seen in two tiles shows the same heartbeat in both movies. For each such vessel and
+   tile pair:
+   - the vessel path is mapped into both tiles with the stitching transforms; at every path point (2 px apart) the
+     optical-flow velocity (the settings of the flux measurement) is sampled at 7 positions across the vessel
+     (± 0.8 radius), projected on the path tangent and averaged;
+   - $u_\alpha(t)$ is the average over the path points that lie inside **both** frames (at least 5, i.e. 10 px), so the
+     two recordings describe the same piece of vessel;
+   - the **speed** $|u_\alpha(t)|$ is fitted with a mean and two harmonics at the tile's heart rate, giving the first
+     harmonic $\hat s_{\alpha,1}$ and the variance of the fitted mean $\sigma^2$;
+   - $\delta = \arg(\hat s_{\alpha,1}\,\hat s_{\beta,1}^{*})$ estimates $\psi_\alpha-\psi_\beta$, with variance
+     $\tau_\alpha^2+\tau_\beta^2$, $\tau^2 = 2\sigma^2/|\hat s_1|^2$.
 
-21S: 47 tile clocks; 5,212 vessels reconstructed.
+   No profile is fitted and no flow direction is needed: the magnitude is the same whichever way a recording reads the
+   flow. That matters because some recordings read a vessel's flow in the opposite direction; their signed harmonics are
+   then half a cycle off, their speed pulses are not. On 21S this happens in 4.4 % of the pairs in which both recordings
+   are clearly one-way (and in 24 % of all pairs, most of them slow vessels where the direction is not determined). It is
+   not a sign convention (every flux is stored in the edge's fixed orientation), not the stitching (tiles agree to within
+   about 8 px) and not the optical flow (the raw image pattern moves the same way). It goes with focus: the rate rises
+   from 2 % when both recordings are equally sharp to 21 % when one is much blurrier, and it is concentrated in the
+   out-of-focus top strips of a few tiles (16–18, 31).
+   A magnitude is a faithful pulse only if the velocity keeps its sign through the beat, so a recording whose pooled
+   velocity (smoothed over 5 frames) is on each side of zero for at least 15 % of the frames is left out of the clocks.
+3. **Tile clocks.** One offset $\psi_\alpha$ per tile ($\psi_{\rm ref}=0$) by weighted circular least squares over all
+   clocks jointly,
+   $$\min_\psi \sum_{\rm pairs} \frac{1-\cos(\delta-\psi_\alpha+\psi_\beta)}{\tau_\alpha^2+\tau_\beta^2},$$
+   from a spectral start followed by a quasi-Newton minimisation. Clock uncertainty: bootstrap over vessels; it is
+   conditional on the pair variances and is not a complete uncertainty of the physiological phase. A tile whose clock SD
+   exceeds 30° is not synchronised: its recordings stay in the mean flow but are left out of the pulsatile field.
+4. **Average.** The waveforms come from the signed flux, not from the speed. Of a vessel's flux recordings, those whose
+   mean flow has the direction of the reconciled mean flow are averaged with weights $1/\sigma^2$, harmonic $n$ rotated
+   by $e^{-in\psi_\alpha}$ (a pure time shift). A recording of the opposite direction is not used and is never
+   sign-flipped. Such recordings are mostly poorly focused ones; a real reversal of flow between recordings cannot be
+   excluded. Vessels with recordings of both
+   directions are flagged as temporally inconsistent. The mean-flow reconciliation (step 2 of this document) still uses
+   every recording.
+5. **Rescale.** The averaged waveform is rescaled so that its mean equals the reconciled mean. A vessel is not
+   reconstructed when none of its recordings agrees with the reconciled direction.
 
-**Provisional.** Two dorsal-aorta segments just outside the network take part in the clock fit only. The aorta is the
-one strongly pulsing vessel recorded on both sides of the seam between the left block of tiles and the rest; the plexus
-vessels alone fix that block's clock only to about ± 30°. One aorta recording (tile 20) reads the flow backwards, so
-the recordings of these segments are oriented to the segment's weighted majority direction before the fit. The proper
-fix is to re-measure that recording.
+The field is a composite of recordings made at different times, not a simultaneous observation, and comparing speeds
+does not establish the phase of the signed flow in a vessel whose direction changes between recordings.
 
-An optional rule (`--direction-rule`, off) drops recordings whose mean-flow direction disagrees with their vessel's
-weighted majority.
+21S: 15,018 clock measurements on 6,882 vessels (all tiles, network and open-region vessels alike), 5,726 of them between
+retained tiles and without a reversing recording; all 47 clocks synchronised (largest clock SD 25°, tile 53); 83 % of the
+flux recordings agree with the reconciled direction; 5,415 vessels reconstructed, 902 of them flagged as temporally
+inconsistent; 588 vessels have no recording in the reconciled direction.
+
+**Sensitivity.** `scripts/pulse_field.py --previous` → `ac_field_v8.pkl` is the earlier method: clocks from the first
+harmonics of the fluxes of repeated network vessels plus two dorsal-aorta segments outside the network (oriented to their
+majority direction), every recording averaged, rescaled by the combined mean of all measurements with negative ratios
+dropped. Its clocks differ for the tiles of the left plexus (ten tiles by about +28°, tiles 16–18 and 31 by about −4°).
 
 ## 4. Distensibility
 
-`plexusmech.ac` · `scripts/mech/ac_estimate.py` → `results/ac_estimate_v9.json`
+`plexusmech.ac` · `scripts/mech/ac_estimate.py` → `results/ac_estimate_v10.json`
 
 The network is modelled as a distributed RC line per vessel (Poiseuille resistance, wall compliance set by one areal
 distensibility $D$).
@@ -78,12 +108,12 @@ distensibility $D$).
 - **Estimate.** The loss is evaluated on 21 values of $D$ between 2.5 and 8 × 10⁻⁴ /Pa; $\hat D$ is the minimum of
   a parabola through the lowest points.
 
-21S: 4,969 vessels fitted; $\hat D$ = 4.3 × 10⁻⁴ /Pa.
+21S: 5,232 vessels fitted; $\hat D$ = 4.1 × 10⁻⁴ /Pa (4.3 with the earlier method).
 
 ## Figures
 
 `scripts/make_figure6.py` (clock synchronisation, phase field) and `scripts/make_figure7.py` (reconstructed field
-against the RC network) read the three result files above; see [FIGURES.md](../FIGURES.md).
+against the RC network) read the result files above; see [FIGURES.md](../FIGURES.md).
 
 ## Earlier methods in the code
 

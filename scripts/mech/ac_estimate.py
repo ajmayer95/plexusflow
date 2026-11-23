@@ -1,9 +1,10 @@
 """Wall distensibility D (η optional) from the pulsatile field: loss of plexusmech.ac.profile on a grid of D.
 
-METHOD SINCE 2026-11-20 (--method measured, the default): the reconciled field of scripts/pulse_field.py (ac_field_v8) on the mean
+METHOD (--method measured, the default): the reconciled field of scripts/pulse_field.py (ac_field_v9) on the mean
 flow dc_reconciled_v3; boundary forcing taken from the field as measured (no group corrections fitted), tile clocks fixed (no
 latent tile gauge); per-vessel variance = the variance of the averaged coefficient (fit residual) + one common variance fitted
-per loss term (H1 phase, H2 phase, H1 amplitude) — the reliability model is not used.  Writes results/ac_estimate_v9.json.
+per loss term (H1 phase, H2 phase, H1 amplitude) — the reliability model is not used.  Writes results/ac_estimate_v10.json
+(--field ac_field_v8, the earlier clocks, writes ac_estimate_v9.json: the sensitivity comparison).
 --method profiled --field ac_field_v7 --dc dc_reconciled_v2 --out ac_estimate_v8 reproduces the previous fit, described below.
 
 
@@ -47,15 +48,16 @@ def main():
     ap.add_argument("--method", choices=("measured", "profiled"), default="measured",
                     help="measured (default): boundary forcing as measured, clocks fixed, common extra variance; profiled: the previous fit "
                          "(boundary group corrections and tile gauge re-fitted at each D, reliability-model variance)")
-    ap.add_argument("--out", default=None, help="results/<out>.json (default ac_estimate_v9; ac_estimate_v8 with --method profiled)")
-    ap.add_argument("--field", default=None, help="results/<field>.pkl (default ac_field_v8 = scripts/pulse_field.py; ac_field_v7 with --method profiled)")
+    ap.add_argument("--out", default=None, help="results/<out>.json (default ac_estimate_v10; ac_estimate_v9 for --field ac_field_v8; ac_estimate_v8 with --method profiled)")
+    ap.add_argument("--field", default=None, help="results/<field>.pkl (default ac_field_v9 = scripts/pulse_field.py; ac_field_v8 = its --previous clocks; ac_field_v7 with --method profiled)")
     ap.add_argument("--dc", default=None, help="results/<dc>.pkl (default dc_reconciled_v3; dc_reconciled_v2 with --method profiled)")
     ap.add_argument("--gauge-block", default=None, help="tiles sharing one extra gauge offset with a flat prior, e.g. 15,18,19,20,29,30,31,32,33,34")
     ap.add_argument("--topo", default="flux", choices=("sealed", "flux", "supernode"),
                     help="pulsatile closure of topology-uncertain regions (plexusmech.ac.model.build_context); sensitivity, none primary")
     ap.add_argument("--supernode-scale", type=float, default=1.0, help="supernode compliance × this (region volume uncertain)")
     a = ap.parse_args(); measured = a.method == "measured"
-    a.out = a.out or ("ac_estimate_v9" if measured else "ac_estimate_v8"); a.field = a.field or ("ac_field_v8" if measured else "ac_field_v7")
+    a.field = a.field or ("ac_field_v9" if measured else "ac_field_v7")
+    a.out = a.out or (("ac_estimate_v9" if a.field == "ac_field_v8" else "ac_estimate_v10") if measured else "ac_estimate_v8")
     a.dc = a.dc or ("dc_reconciled_v3" if measured else "dc_reconciled_v2")
     from plexusflow.config import StageConfig
     _cfg = StageConfig.load(paths.STAGE)                     # per-stage defaults (plexusflow.yaml)

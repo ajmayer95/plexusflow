@@ -2,7 +2,8 @@
 
   a  heart rate of each tile in acquisition order; the band of retained tiles (within ± 21 % of the reference tile) is shaded,
      the tiles outside it (21S: tiles 1–6) are excluded
-  b  the tile clocks: tiles linked by the vessels they share (line width ∝ number of shared vessels), and one vessel recorded
+  b  the tile clocks: tiles linked by the vessels they share (line width ∝ number of clock measurements); tiles whose clock is
+     too uncertain are drawn open; one vessel recorded
      in several tiles before and after its recordings are shifted by their tile clocks (each curve divided by its own mean)
   c  waveform agreement of repeated recordings: per vessel, the RMS difference between its clock-aligned recordings and their
      weighted mean (fraction of the mean flow), against the heart-rate spread of the tiles that recorded it.  For this panel
@@ -10,8 +11,9 @@
   d  fundamental (H1) phase field: delay of every reconstructed vessel behind the vitelline-vein waveform, with isochrones of
      the smoothed field (Gaussian, σ = 250 µm; display only)
 
-Everything is read from the pipeline: recordings and clocks from plexusflow.ac.pulse, the reconstructed field from
-results/ac_field_v8.pkl (scripts/pulse_field.py).  Writes figures/fig6/fig6.{png,pdf,tif}; nothing to any graph.
+Everything is read from the pipeline: flux recordings from plexusflow.ac.pulse, the clock measurements from
+results/speed_pairs_v1.pkl (scripts/speed_pairs.py), the clocks and the reconstructed field from results/ac_field_v9.pkl
+(scripts/pulse_field.py).  Writes figures/fig6/fig6.{png,pdf,tif}; nothing to any graph.
 """
 from __future__ import annotations
 import sys
@@ -38,8 +40,8 @@ from plexusflow.analyze.geometry import load_tile_geometry
 from plexusflow.reconcile import carved_domain
 from plexusflow.reconcile.dc import K_FIT
 from plexusflow.reconcile.harmonics import phasors, coherence
-from plexusflow.ac.field import da_stub_edges
-from plexusflow.ac.pulse import FIELD, recordings, orient_to_majority, tile_clocks
+from plexusflow.ac.pulse import FIELD, recordings, tile_clocks
+from plexusflow.ac.speed import RESULT as PAIRS_RESULT
 from mosaic_display import load_mosaic, show_mosaic
 
 EXAMPLE = (57695, 57893)        # 21S: recorded in tiles 12, 13, 22, 23; its RMS difference is typical for its heart-rate spread
@@ -56,17 +58,6 @@ def distinct_tiles(rs):
 def repeated(recs):
     """vessels recorded in at least two tiles"""
     return {e: rs for e, rs in recs.items() if len(distinct_tiles(rs)) >= 2}
-
-
-def tile_links(recs):
-    """{(tile a, tile b): number of vessels recorded in both}"""
-    links = {}
-    for rs in recs.values():
-        ts = distinct_tiles(rs)
-        for a in range(len(ts)):
-            for b in range(a + 1, len(ts)):
-                links[(ts[a], ts[b])] = links.get((ts[a], ts[b]), 0) + 1
-    return links
 
 
 def waveform_disagreement(recs, psi):
@@ -107,19 +98,20 @@ def main():
     ALLT = sorted(tf0); OUTT = [t for t in ALLT if t not in band]; N = np.arange(1, K_FIT + 1)
     dom = carved_domain(G); assert [tuple(e) for e in dom["edges"]] == E
 
-    # recordings of every tile (the excluded ones too, for panel c), as the pipeline reads them; aorta segments as in the clock fit
-    extra = [tuple(e) for e in da_stub_edges(G) if tuple(e) not in eix]
-    rec_all, _ = orient_to_majority(recordings(G, E + extra, set(ALLT)), extra)
+    # clock measurements of every tile pair (scripts/speed_pairs.py); flux recordings of every tile for the waveforms of b and c
+    SPp = pickle.loads((P.RESULTS / f"{PAIRS_RESULT}.pkl").read_bytes()); good = ~np.asarray(SPp["reversing"], bool); excl = set(A.get("excluded_tiles") or [])
+    lo, hi = np.minimum(SPp["a"], SPp["b"])[good], np.maximum(SPp["a"], SPp["b"])[good]
+    links_all = {(int(x), int(y)): int(n) for (x, y), n in zip(*np.unique(np.c_[lo, hi], axis=0, return_counts=True))}
+    links = {k: n for k, n in links_all.items() if k[0] in psi and k[1] in psi}; TILES = sorted(psi)
+    psi_all, _ = tile_clocks({k: np.asarray(SPp[k])[good] for k in ("a", "b", "d", "var", "vessel")}, ref)      # all tiles, for panel c only
+    rec_all = recordings(G, E, set(ALLT)); rec_all = {e: [r for r in rs if r["t"] in psi_all] for e, rs in rec_all.items()}
     rec = {e: [r for r in rs if r["t"] in psi] for e, rs in rec_all.items()}; rec = {e: rs for e, rs in rec.items() if rs}
-    multi = repeated(rec); TILES = sorted({t for rs in multi.values() for t in distinct_tiles(rs)}); links = tile_links(multi)
-    psi_all, _ = tile_clocks(rec_all, ref)
-    rec_all = {e: [r for r in rs if r["t"] in psi_all] for e, rs in rec_all.items()}
-    links_all = tile_links(repeated(rec_all)); dis = waveform_disagreement(rec_all, psi_all)
+    dis = waveform_disagreement(rec_all, psi_all)
     shift = np.degrees(np.abs(np.angle(np.exp(1j * np.array([psi_all[t] - psi[t] for t in TILES])))))
     spread = lambda ts: (max(tf0[t] for t in ts) - min(tf0[t] for t in ts)) / np.mean([tf0[t] for t in ts])
     d_in = [d for e, (d, ts) in dis.items() if e in eix and not any(t in OUTT for t in ts)]
-    print(f"[fig6] {len(TILES)} tile clocks from {len(multi)} vessels recorded in ≥ 2 tiles; clock fit with the excluded tiles added moves the "
-          f"retained clocks by median {np.median(shift):.1f}°, max {shift.max():.1f}°")
+    print(f"[fig6] {len(psi)} tile clocks from {int(good.sum())} speed-pulse pairs ({sum(links.values())} between retained tiles); not synchronised: {sorted(excl)}; "
+          f"clock fit with the out-of-band tiles added moves the retained clocks by median {np.median(shift):.1f}°, max {shift.max():.1f}°")
     print(f"[fig6] RMS waveform difference: retained tiles median {100 * np.median(d_in):.1f} %; per excluded tile " +
           ", ".join(f"{t}: {100 * np.median([d for d, ts in dis.values() if t in ts]):.0f} %" for t in OUTT if any(t in ts for _, ts in dis.values())))
 
@@ -167,7 +159,7 @@ def main():
 
     # ---- b: tile clocks from shared vessels; one vessel before / after
     axb = ax = fig.add_subplot(B[:, 0]); show_mosaic(ax, MOS); ax.images[0].set_alpha(0.28); ax.axis("off")
-    C = {t: centre(t) for t in sorted(set(TILES) | set(OUTT))}; nmax = max(links.values())
+    C = {t: centre(t) for t in sorted(set(TILES) | set(OUTT) | excl)}; nmax = max(links.values())
     for (ta, tb), n in links.items():
         ax.plot([C[ta][0], C[tb][0]], [C[ta][1], C[tb][1]], color="0.55", lw=0.2 + 1.4 * np.sqrt(n / nmax), alpha=0.8, zorder=2)
     for (ta, tb), n in links_all.items():
@@ -177,6 +169,8 @@ def main():
         ax.plot(*C[t], "o", ms=4, mfc="0.78", mec="0.4", mew=0.4, zorder=3)
     for t in OUTT:
         ax.plot(*C[t], "o", ms=4, mfc=EXCOL, mec="0.3", mew=0.4, zorder=3)
+    for t in excl:                                             # clock too uncertain: not synchronised
+        ax.plot(*C[t], "o", ms=4, mfc="white", mec="0.4", mew=0.6, zorder=3)
     ax.plot(*C[ref], "o", ms=6, mfc="white", mec="k", mew=1.3, zorder=4)
     halo = [pe.withStroke(linewidth=2, foreground="white")]
     ax.text(C[ref][0] - 60, C[ref][1], "ref", fontsize=8, ha="right", va="center", zorder=6, path_effects=halo)
@@ -190,7 +184,7 @@ def main():
     if OUTT:
         oc = np.array([C[t] for t in OUTT]).mean(0)
         ax.text(oc[0], oc[1] - 230, f"{min(OUTT)}–{max(OUTT)} excluded", color=EXCOL, fontsize=8, ha="center", va="bottom", fontweight="bold", path_effects=halo, zorder=8)
-    ax.set_title(f"{len(TILES)} tile clocks from shared vessels", fontsize=8, pad=2)
+    ax.set_title(f"{len(psi)} tile clocks from shared vessels", fontsize=8, pad=2)
     curves = {rot: [(r["t"], wave(r["H"] / r["a0"] * (np.exp(-1j * N * psi[r["t"]]) if rot else 1))) for r in rex] for rot in (False, True)}
     yy = np.concatenate([y for cs in curves.values() for _, y in cs]); axw = []
     for k, rot in enumerate((False, True)):

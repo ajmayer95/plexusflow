@@ -1948,7 +1948,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._src_radio_rec.setChecked(self.current_source == 'reconciled')
         self._src_radio_rec.setEnabled(self._reconciliation_available())
         self._src_radio_rec.setToolTip(
-            "Conservative DC flow Q\u2032 and tile-aligned harmonics (results/dc_reconciled_v3.pkl, ac_field_v8.pkl)."
+            "Conservative DC flow Q\u2032 and tile-aligned harmonics (results/dc_reconciled_v3.pkl, ac_field_v9.pkl)."
             if self._reconciliation_available() else
             "No reconciliation found: run scripts/run_stage.sh for this stage.")
         self._src_radio_sim = QRadioButton("Sim (intact)")
@@ -4321,10 +4321,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             return {}
         import pickle as _pk
         try:
-            # current method (dc v3 + pulse field v8); else the previous one (dc v2 + ac_field v7 / v2) — a field goes with its own mean flow
+            # current method (dc v3 + pulse field v9, else v8); else the previous one (dc v2 + ac_field v7 / v2) — a field goes with its own mean flow
             cur = (res / 'dc_reconciled_v3.pkl').exists()
             D = _pk.loads((res / ('dc_reconciled_v3.pkl' if cur else 'dc_reconciled_v2.pkl')).read_bytes())
-            af = next((res / f for f in (('ac_field_v8.pkl',) if cur else ('ac_field_v7.pkl', 'ac_field_v2.pkl')) if (res / f).exists()), None)
+            af = next((res / f for f in (('ac_field_v9.pkl', 'ac_field_v8.pkl') if cur else ('ac_field_v7.pkl', 'ac_field_v2.pkl')) if (res / f).exists()), None)
             A = _pk.loads(af.read_bytes()) if af is not None else None
         except Exception as exc:
             print(f"  reconciliation: could not read {res}: {exc}")

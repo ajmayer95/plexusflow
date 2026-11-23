@@ -5,8 +5,8 @@
   b  loss of the distensibility fit against D (scripts/mech/ac_estimate.py, --method measured)
   c  one cardiac cycle of three vessels, reconstructed vs RC network, each normalised by its own mean; the relative error of
      the modelled mean flux is written in each panel
-Inputs: results/dc_reconciled_v3.pkl (scripts/dc_reconcile.py), results/ac_field_v8.pkl (scripts/pulse_field.py) and
-results/ac_estimate_v9.json (scripts/mech/ac_estimate.py).  Phase lags: H_n in each vessel's own flow direction, relative to the
+Inputs: results/dc_reconciled_v3.pkl (scripts/dc_reconcile.py), results/ac_field_v9.pkl (scripts/pulse_field.py) and
+results/ac_estimate_v10.json (scripts/mech/ac_estimate.py).  Phase lags: H_n in each vessel's own flow direction, relative to the
 vitelline-vein waveform.  The boundary-forcing panel of the earlier version is still built (for the node markers) but hidden.
 Writes figures/fig7/fig7.{png,pdf,tif}; nothing to any graph.
 """
@@ -55,8 +55,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--picks', default=PAPER_PICKS, help='three edges "u,v;u,v;…" for panel e (default: the paper\'s; "auto" = '
                     'good / typical / poor by harmonic-residual percentile 20/50/80 among well-measured vessels)')
-    ap.add_argument('--bc-json', default=None, help='distensibility fit (D, boundary forcing, loss over the D grid); default results/ac_estimate_v9.json')
-    ap.add_argument('--field', default='ac_field_v8', help='results/<field>.pkl (scripts/pulse_field.py)')
+    ap.add_argument('--bc-json', default=None, help='distensibility fit (D, boundary forcing, loss over the D grid); default results/ac_estimate_v10.json')
+    ap.add_argument('--field', default='ac_field_v9', help='results/<field>.pkl (scripts/pulse_field.py)')
     ap.add_argument('--abs-q', action='store_true', help='panel e in nL/s (each vessel in its own flow direction, own y axis) '
                     'instead of Q/Q̄; the model curve then also shows its mean-flow mismatch')
     args = ap.parse_args()
@@ -68,7 +68,7 @@ def main():
     D = pickle.loads((_paths.RESULTS / 'dc_reconciled_v3.pkl').read_bytes())
     A = pickle.loads((_paths.RESULTS / f'{args.field}.pkl').read_bytes())
     dom = carved_domain(G); assert dom['edges'] == D['edges'] == A['edges']
-    bc = Path(args.bc_json) if args.bc_json else _paths.RESULTS / 'ac_estimate_v9.json'
+    bc = Path(args.bc_json) if args.bc_json else _paths.RESULTS / 'ac_estimate_v10.json'
     J = json.loads(bc.read_text()) if bc.exists() else None
     if J is None:
         print(f'[fig7] {bc} not found: falling back to D = {D_MAIN:g}, no profile panel (run scripts/mech/ac_estimate.py)')
@@ -299,7 +299,8 @@ def main():
         if m.any():
             xy_ = np.array([nxy(j) for j in bnd[m]])
             for axm in (axF, axes_A[0, 2]):
-                axm.plot(xy_[:, 0], xy_[:, 1], '^' if g_ < 2 else 's', ms=3.5 if axm is axF else 3.0, mfc=GCOL[g_], mec='white', mew=0.4, ls='', zorder=9)
+                axm.plot(xy_[:, 0], xy_[:, 1], '^' if g_ < 2 else 's', ms=3.5 if axm is axF else 3.0, mfc=GCOL[g_] if axm is axF else ('#d7191c' if g_ < 2 else '#2c7bb6'),
+                         mec='white', mew=0.4, ls='', zorder=9)      # on the maps: arterial inflow red, venous outflow blue, as in Fig 6
     # insets: VL, VR (own stub waveform thin, shared forcing thick); two largest arterial sources per side (reconstructed thin, fitted thick)
     vnodes = list(np.asarray(dom['out'])); vside = list(dom['side_out'])
     big = {}
