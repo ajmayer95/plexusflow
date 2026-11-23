@@ -36,7 +36,10 @@ GAUGE_SD_MAX = 30.0     # deg: tiles with a less certain time gauge are greyed i
 OUT_DIR = None                                                     # set in main(): figures/fig7
 
 
-PAPER_PICKS = '67236,67239;36453,36993;93211,93245'   # 21S panel e vessels (auto rule on the 2026-11-02 field)
+# cyclic colour scale of the H2 phase-lag maps: plasma over the first three quarters of the cycle, returning through teal,
+# so that no part of the cycle is pale against the grey mosaic
+H2_CYCLE = ['#0d0887', '#9c179e', '#ed7953', '#f0f921', '#1b9e77', '#0d0887']
+PAPER_PICKS = '67236,67239;29115,29117;93211,93245'   # 21S panel e vessels; 2 = left plexus, ~545 px from the arterial boundary, median model agreement
 
 
 def auto_picks(segs, e, rho, Qp, n=6):
@@ -115,7 +118,9 @@ def main():
                         zr[k] += w_ * np.exp(1j * np.angle(np.sign(a0_) * H_[k - 1] * np.exp(-1j * k * (psi14 + d14))))
     phref = {k: np.angle(zr[k]) for k in (1, 2)}
     print(f'[fig7] phase reference (tile-14 DA/V stubs): H1 {np.degrees(phref[1]):.0f}°, H2 {np.degrees(phref[2]):.0f}°')
-    lag = lambda H, dc, k: (np.degrees(np.angle(np.exp(1j * phref[k]) * np.conj(H * np.sign(dc)))) + (90 if k == 1 else 30)) % 360 - (90 if k == 1 else 30)   # H1: [−90°, 270°), the wrap in the empty part of the distribution
+    # H1: [−60°, 300°) as in Fig 6d, the wrap in the empty part of the distribution.  H2: the phase lag is twice the H1 angle for
+    # the same time delay and passes a full cycle across the network, so it is cyclic, [0°, 360°), and drawn on a cyclic scale
+    lag = lambda H, dc, k: (np.degrees(np.angle(np.exp(1j * phref[k]) * np.conj(H * np.sign(dc)))) + (60 if k == 1 else 0)) % 360 - (60 if k == 1 else 0)
     pulsfrac = lambda H1, H2, dc: (np.abs(H1) ** 2 + np.abs(H2) ** 2) / np.maximum(np.abs(dc), 1e-30) ** 2
     pf_m, pf_s = pulsfrac(Hm_[1], Hm_[2], Qp), pulsfrac(Hs[1], Hs[2], Qdc_s)
     PI = lambda H, dc: H * np.sign(dc) / np.maximum(np.abs(dc), 1e-30)
@@ -187,7 +192,8 @@ def main():
     gE = bot[1].subgridspec(1, 3, wspace=0.32 if args.abs_q else 0.12)
 
     nPF = mcolors.LogNorm(0.05, 0.6); cPF = plt.cm.magma
-    nPH = mcolors.Normalize(0, 220); nPH2 = mcolors.Normalize(0, 330); cPH = plt.cm.plasma          # as Fig 7 (H1); H2 spans a full cycle
+    nPH = mcolors.Normalize(0, 220); cPH = plt.cm.plasma                                       # H1
+    nPH2 = mcolors.Normalize(0, 360); cPH2 = mcolors.LinearSegmentedColormap.from_list('h2cycle', H2_CYCLE, N=512)                             # H2: cyclic
     allmask = np.ones(nE, bool); axes_A = {}
     qa_ = np.abs(np.r_[Qp, Qdc_s]); qa_ = qa_[qa_ > 0]; nQ = mcolors.LogNorm(max(np.percentile(qa_, 2), 1e-4), np.percentile(qa_, 98)); cQ = plt.cm.viridis
     TT = ['Mean flow', 'Relative pulsatile power', 'H1 phase lag', 'H2 phase lag']
@@ -197,13 +203,14 @@ def main():
             ax = fig.add_subplot(gA[row, col]); bg(ax); axes_A[row, col] = ax
             if col == 0: edgemap(ax, np.abs(dcr), allmask & (np.abs(dcr) > 0), nQ, cQ, 0.45)
             elif col == 1: edgemap(ax, pf, mask, nPF, cPF, 0.45)
-            else: edgemap(ax, np.clip(lag(Hr[col - 1], dcr, col - 1), 0, None), pmask, nPH if col == 2 else nPH2, cPH, 0.4)
+            elif col == 2: edgemap(ax, np.clip(lag(Hr[1], dcr, 1), 0, None), pmask, nPH, cPH, 0.4)
+            else: edgemap(ax, lag(Hr[2], dcr, 2), pmask, nPH2, cPH2, 0.4)
             if row == 0:
                 ax.set_title(TT[col], fontsize=9, pad=3)
             if col == 0:
                 ax.text(-0.06, 0.5, side, transform=ax.transAxes, rotation=90, ha='center', va='center', fontsize=9)
     for col, (nrm, cm_, lab) in enumerate(((nQ, cQ, r'$|Q|$ (nL/s)'), (nPF, cPF, 'Pulsatile / mean power'),
-                                           (nPH, cPH, r'H1 delay ($^\circ$)'), (nPH2, cPH, r'H2 delay ($^\circ$)'))):
+                                           (nPH, cPH, r'H1 delay ($^\circ$)'), (nPH2, cPH2, r'H2 delay ($^\circ$, cyclic)'))):
         cax = axes_A[1, col].inset_axes([0.08, -0.08, 0.84, 0.035])
         cb = plt.colorbar(plt.cm.ScalarMappable(norm=nrm, cmap=cm_), cax=cax, orientation='horizontal')
         cb.set_label(lab, fontsize=8, labelpad=1); cb.ax.tick_params(labelsize=8); cb.outline.set_linewidth(0.4)
@@ -212,7 +219,7 @@ def main():
         elif nrm is nPH:
             cb.set_ticks([0, 90, 180])
         elif nrm is nPH2:
-            cb.set_ticks([0, 180])
+            cb.set_ticks([0, 180, 360])
 
     # c  pulsatile RMS scatter + statistics
     axC = fig.add_axes([0, 0, 0.01, 0.01]); axC.set_visible(False)

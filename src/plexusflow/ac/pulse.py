@@ -6,24 +6,28 @@ One uncertainty per recording: σ², the variance of its fitted mean from the re
 1. Fit.  Each recording (valid profile fit, tile inside the heart-rate band) is fitted with its mean and K_FIT = 2 harmonics at its
    tile's heart rate:  Q(t) ≈ Q̂_0 + Σ_n Re[Q̂_n e^{2πi n f_α t}].  (A text that writes Σ_n Q̂_n e^{inωt} + c.c. has coefficients half
    of these.)
-2. Tile clocks ψ_α (ψ_ref = 0) from the speed pulse of vessels seen in two tiles (``ac.speed``; pairs with a reversing recording
-   left out):  d = δ − (ψ_α − ψ_β), variance τ_α² + τ_β².  Weighted circular least squares over all clocks jointly,
-   min Σ_pairs [1 − cos d] / variance; spectral start (``ac.field._sync``), then a quasi-Newton minimisation (``tile_clocks``).
+2. Tile clocks ψ_α (ψ_ref = 0), from every vessel of the graph recorded in two tiles (network and open-region vessels alike),
+   first harmonic only (``flux_pairs`` → ``tile_clocks``).  Each recording is taken in its OWN mean-flow direction,
+   φ = arg(sgn(Q̂_0) Q̂_1): a recording that reads the flow the other way has its mean and its pulse negated together, so its
+   signed first harmonic would be half a cycle off while φ is not.  Pair:  d = (φ_α − ψ_α) − (φ_β − ψ_β), variance τ_α² + τ_β²,
+   τ² = 2σ²/|Q̂_1|².  Weighted circular least squares over all clocks jointly, min Σ_pairs [1 − cos d] / variance; spectral start
+   (``ac.field._sync``), then a quasi-Newton minimisation.
    Clock uncertainty: bootstrap over vessels.  It is conditional on the pair variances — not a complete uncertainty of the
    physiological phase.  Tiles whose clock SD exceeds MAX_CLOCK_SD_DEG are not synchronised: their recordings stay in the mean flow
    but are left out of the pulsatile field.
-3. Average.  Of a vessel's recordings in synchronised tiles, those whose mean flow has the direction of the reconciled mean flow are
-   averaged:  Q̂av_{e,n} = Σ_α Q̂_{α,n} e^{−inψ_α}/σ²_α / Σ_α 1/σ²_α  (n = 0, 1, 2; no rotation for n = 0).  A recording of the
-   opposite direction is not used and never sign-flipped: its harmonics are half a cycle off in the vessel's orientation.  On 21S
-   such recordings are mostly poorly focused ones (the opposite reading is in the image itself, not in the sign convention, the
-   stitching or the optical flow); a real reversal of flow between recordings cannot be excluded.  Vessels with recordings of both directions are flagged
-   (``inconsistent``).  The mean-flow reconciliation itself uses every recording.
-4. Rescale.  Ĥ_{e,n} = (Q̄*_e / Q̂av_{e,0}) Q̂av_{e,n}: the averaged waveform, rescaled so that its mean is the reconciled mean.
-   Not reconstructed where no recording agrees with the reconciled direction or the reconciled flow vanishes.
+3. Average.  Q̂av_{e,n} = Σ_α Q̂_{α,n} e^{−inψ_α}/σ²_α / Σ_α 1/σ²_α  (n = 1, 2) over all the vessel's recordings in synchronised
+   tiles, in the vessel's fixed orientation.  No recording is selected or sign-flipped by its direction.
+4. Rescale.  The waveform is scaled by Q̄*_e / Q̄av_e, the reconciled mean over the combined mean of ALL the vessel's mean-flow
+   measurements (the vessel input of the mean-flow reconciliation, dc["Qm"]):  Ĥ_{e,n} = (Q̄*_e / Q̄av_e) Q̂av_{e,n}.
+   Not reconstructed where the ratio is negative (reconciled and measured means of opposite direction) or undefined.
+   Vessels with recordings of both directions are flagged (``inconsistent``); such recordings are mostly ones whose direction is
+   not resolved (mean flux small against the scatter of a single frame; slow or poorly focused vessels).
+   Alternative, for the sensitivity comparison (``average="agree"``): average only the recordings whose mean flow has the reconciled
+   direction and rescale by their own mean.  It selects recordings by a direction they helped to determine; on 21S it adds about
+   200 vessels and changes D by 0.5 %.
 
-Earlier variant, kept for the sensitivity comparison (results/ac_field_v8; ``average="all"`` with clocks from ``flux_pairs``): clocks
-from the first harmonics of the fluxes of repeated vessels plus two dorsal-aorta segments oriented to their majority direction; all
-recordings averaged; rescaled by the combined mean of all mean-flow measurements, vessels with a negative ratio dropped.
+Earlier clocks, kept for the sensitivity comparison (results/ac_field_v8; ``clocks="previous"``): signed first harmonics, in the
+fixed vessel orientation, of repeated NETWORK vessels plus two dorsal-aorta segments oriented to their majority direction.
 
 The returned dict has the layout of ``build_ac_field`` (H is 3 × n_edges with a zero third row) so the network model and the
 viewers read it unchanged.  Driver: ``scripts/pulse_field.py`` → results/ac_field_v9.pkl.
@@ -76,9 +80,11 @@ def _fit_clocks(nT, iref, pa, pb, phase, w, x0):
     psi = np.zeros(nT); psi[free] = r.x; return psi, float(r.fun)
 
 
-def flux_pairs(recs, own_direction=False):
-    """Clock measurements from the first harmonics of the FLUX of vessels recorded in two tiles (the earlier method; same layout as
-    ``ac.speed.speed_pairs``).  recs: {vessel: [recording, …]} (``recordings``)."""
+def flux_pairs(recs, own_direction=True):
+    """Clock measurements from vessels recorded in two tiles: phase difference of the first harmonics of the two flux recordings,
+    each in its own mean-flow direction (own_direction=False: in the fixed vessel orientation, the earlier method).
+    recs: {vessel: [recording, …]} (``recordings``).  Returns arrays vessel (index), a, b (tiles), d (rad, estimating ψ_a − ψ_b),
+    var (rad²), one entry per (vessel, tile pair)."""
     rows = []
     for iv, rs in enumerate(recs.values()):
         for i in range(len(rs)):
@@ -91,14 +97,12 @@ def flux_pairs(recs, own_direction=False):
                     Ha, Hb = np.sign(ra["a0"]) * Ha, np.sign(rb["a0"]) * Hb
                 rows.append((iv, ra["t"], rb["t"], np.angle(Ha * np.conj(Hb)), 2.0 * ra["sigma2"] / abs(Ha) ** 2 + 2.0 * rb["sigma2"] / abs(Hb) ** 2))
     r = np.array(rows, float).reshape(-1, 5)
-    return dict(edges=list(recs), vessel=r[:, 0].astype(int), a=r[:, 1].astype(int), b=r[:, 2].astype(int), d=r[:, 3], var=r[:, 4],
-                reversing=np.zeros(len(r), bool))
+    return dict(vessel=r[:, 0].astype(int), a=r[:, 1].astype(int), b=r[:, 2].astype(int), d=r[:, 3], var=r[:, 4])
 
 
 def tile_clocks(pairs, ref_tile, n_boot=0, seed=0):
     """Tile clocks by weighted circular least squares (module docstring, step 2).  pairs: dict of arrays a, b (tiles), d (rad,
-    estimating ψ_a − ψ_b), var (rad²), vessel (index, for the bootstrap) — ``ac.speed.speed_pairs`` or ``flux_pairs``, already
-    restricted to the pairs to use.  Returns (psi {tile: rad} for the tiles linked to ref_tile, info) with info = dict(tiles,
+    estimating ψ_a − ψ_b), var (rad²), vessel (index, for the bootstrap) — ``flux_pairs``.  Returns (psi {tile: rad} for the tiles linked to ref_tile, info) with info = dict(tiles,
     components (largest first), n_pairs, objective, clock_sd_deg {tile: deg} (if n_boot))."""
     ta, tb = np.asarray(pairs["a"], int), np.asarray(pairs["b"], int); d = np.asarray(pairs["d"], float); w = 1.0 / np.asarray(pairs["var"], float)
     ves = np.asarray(pairs["vessel"], int); tiles = sorted(set(ta.tolist()) | set(tb.tolist())); ti = {t: k for k, t in enumerate(tiles)}; nT = len(tiles)
@@ -146,28 +150,27 @@ def orient_to_majority(recs, edges):
     return out, n
 
 
-def build_pulse_field(G, dc, pairs=None, ref_tile=REF_TILE, f0_band=CANONICAL_F0_BAND, average="agree", sync_extra_edges=(), n_boot=100,
+def build_pulse_field(G, dc, ref_tile=REF_TILE, f0_band=CANONICAL_F0_BAND, clocks="own_direction", average="all", n_boot=100,
                       max_clock_sd_deg=MAX_CLOCK_SD_DEG):
     """The reconciled pulsatile field on the edges of the mean-flow reconciliation `dc` (module docstring).
-    pairs: clock measurements (``ac.speed.speed_pairs``); pairs with a tile outside the heart-rate band or a reversing recording are
-    left out.  None: the earlier clocks, from the flux harmonics of repeated network vessels and of `sync_extra_edges` (edges outside
-    the network, oriented to their majority flow direction; "aorta" = ``da_stub_edges(G)``).
-    average: "agree" — recordings with the reconciled flow direction, rescaled by their own mean; "all" — every recording, rescaled by
-    the combined mean of all mean-flow measurements, vessels with a negative ratio dropped (the earlier method).
+    clocks: "own_direction" — every graph vessel recorded in two tiles, each recording in its own mean-flow direction;
+    "previous" — network vessels in the fixed orientation plus the dorsal-aorta segments oriented to their majority direction.
+    average: "all" — every recording, rescaled by the combined mean of all mean-flow measurements, vessels with a negative ratio
+    dropped; "agree" — only recordings with the reconciled flow direction, rescaled by their own mean (sensitivity).
     n_boot: bootstrap resamples for the clock SD (0: none, no tile excluded)."""
-    if average not in ("agree", "all"):
-        raise ValueError(f"unknown averaging rule {average!r}")
+    if average not in ("agree", "all") or clocks not in ("own_direction", "previous"):
+        raise ValueError(f"unknown option: average {average!r}, clocks {clocks!r}")
     sub = [tuple(e) for e in dc["edges"]]; eix = {e: i for i, e in enumerate(sub)}; Qp = np.asarray(dc["Qp"], float); nE = len(sub)
     Qm = np.asarray(dc["Qm"], float); imaged = np.asarray(dc["imaged"], bool)      # combined mean of all mean-flow measurements, per vessel
     band = heart_rate_band(G, ref_tile, f0_band); tf0 = G.graph["tile_f0_piv"]; n_reor = 0
-    extra = [tuple(e) for e in (da_stub_edges(G) if isinstance(sync_extra_edges, str) and sync_extra_edges == "aorta" else sync_extra_edges)
-             if tuple(e) not in eix]
-    raw = recordings(G, sub + extra, band)
-    if pairs is None:
-        raw, n_reor = orient_to_majority(raw, extra); use = flux_pairs(raw); clock_source = "flux harmonics of repeated vessels"
+    if clocks == "own_direction":
+        other = [tuple(e) for e in G.edges if tuple(e) not in eix and tuple(e)[::-1] not in eix]       # graph vessels outside the network
+        raw = recordings(G, sub + other, band); use = flux_pairs(raw, own_direction=True)
+        clock_source = "flux of every vessel recorded in two tiles, each recording in its own mean-flow direction"
     else:
-        m = np.isin(pairs["a"], sorted(band)) & np.isin(pairs["b"], sorted(band)) & ~np.asarray(pairs["reversing"], bool)
-        use = {k: np.asarray(pairs[k])[m] for k in ("a", "b", "d", "var", "vessel")}; clock_source = "speed pulse of vessels seen in two tiles"
+        extra = [tuple(e) for e in da_stub_edges(G) if tuple(e) not in eix]
+        raw, n_reor = orient_to_majority(recordings(G, sub + extra, band), extra); use = flux_pairs(raw, own_direction=False)
+        clock_source = "signed flux of repeated network vessels and the dorsal-aorta segments"
     psi_all, info = tile_clocks(use, ref_tile, n_boot=n_boot)
     sd = info.get("clock_sd_deg") or {t: 0.0 for t in psi_all}
     excluded = sorted(t for t in psi_all if sd[t] > max_clock_sd_deg); psi = {t: v for t, v in psi_all.items() if t not in excluded}
@@ -207,6 +210,6 @@ def build_pulse_field(G, dc, pairs=None, ref_tile=REF_TILE, f0_band=CANONICAL_F0
                 psi_all=psi_all, clock_sd_deg={int(t): float(v) for t, v in sd.items()}, excluded_tiles=excluded, max_clock_sd_deg=float(max_clock_sd_deg),
                 clock_source=clock_source, average=average, inconsistent=incons, n_inconsistent=int((incons & elig).sum()), n_no_agreeing=int(n_no_agree),
                 tile_links={(int(a), int(b)): int(n) for (a, b), n in zip(*np.unique(np.c_[np.minimum(use["a"], use["b"]), np.maximum(use["a"], use["b"])], axis=0, return_counts=True))} if len(use["a"]) else {},
-                n_sync_extra=len(extra), n_extra_reoriented=int(n_reor), n_negative_ratio=int(n_negative), n_undefined_ratio=int(n_undefined),
+                n_extra_reoriented=int(n_reor), n_negative_ratio=int(n_negative), n_undefined_ratio=int(n_undefined),
                 k_fit=K_FIT, n_recordings=int(sum(len(r) for r in raw.values())), n_pairs=info["n_pairs"], components=info["components"],
                 unsynchronised_tiles=sorted(set(band) - set(psi)))

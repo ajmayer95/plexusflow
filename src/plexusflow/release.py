@@ -18,9 +18,8 @@ Schema 2 (data-v2, 2026-10-15):
     fuse/organ_fusion_close.tif | organ_fusion.tif, stitch/positions.json
     results/{dc_reconciled_v2.pkl, ac_field_v2.pkl, reliability_model_v1.json, summary.json, *.csv}
 Schema 3 (2026-11-02): + figure inputs; results of the earlier method (ac_field_v7.pkl, ac_estimate_v8.json, validation JSONs).
-Schema 4 (2026-11-23, the paper): results/{dc_reconciled_v3.pkl, speed_pairs_v1.pkl, ac_field_v9.pkl, ac_estimate_v10.json, summary.json, *.csv}
-    — mean flow with residual-variance weights and equal left/right inflow; clock measurements between tiles from the speed pulse of shared vessels
-    (computed from the raw movies, which are not released); reconciled pulsatile field; distensibility fit.
+Schema 4 (2026-11-23, the paper): results/{dc_reconciled_v3.pkl, ac_field_v9.pkl, ac_estimate_v10.json, summary.json, *.csv}
+    — mean flow with residual-variance weights and equal left/right inflow; tile clocks from vessels recorded in two tiles; reconciled pulsatile field; distensibility fit.
 """
 from __future__ import annotations
 import csv
@@ -30,7 +29,7 @@ import pickle
 from functools import cached_property
 from pathlib import Path
 
-SCHEMA_VERSION = 4          # 4: paper results (dc v3, speed pairs, ac_field_v9, ac_estimate_v10); 3: earlier method (ac_field_v7, ac_estimate_v8); 2: data-v2
+SCHEMA_VERSION = 4          # 4: paper results (dc v3, ac_field_v9, ac_estimate_v10); 3: earlier method (ac_field_v7, ac_estimate_v8); 2: data-v2
 SUPPORTED_SCHEMAS = (2, 3, 4)
 _DC = {2: "dc_reconciled_v2.pkl", 3: "dc_reconciled_v2.pkl", 4: "dc_reconciled_v3.pkl"}
 _AC = {2: "ac_field_v2.pkl", 3: "ac_field_v7.pkl", 4: "ac_field_v9.pkl"}

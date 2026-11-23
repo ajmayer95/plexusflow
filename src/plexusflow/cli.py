@@ -80,7 +80,7 @@ def _analysis_summary(root: Path) -> list[str]:
     g = root / "graph" / "graph_vessels_piv.gpickle"
     out.append(f"    {'✓' if g.exists() else ' '} measured graph   {g}")
     res = root / "results"
-    for f in ("dc_reconciled_v3.pkl", "speed_pairs_v1.pkl", "ac_field_v9.pkl", "ac_estimate_v10.json"):
+    for f in ("dc_reconciled_v3.pkl", "ac_field_v9.pkl", "ac_estimate_v10.json"):
         out.append(f"    {'✓' if (res / f).exists() else ' '} results/{f}")
     vr = root / "videos_realtime"
     n_v = len(list(vr.glob("*.tif"))) if vr.is_dir() else 0

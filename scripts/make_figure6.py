@@ -9,11 +9,11 @@
      weighted mean (fraction of the mean flow), against the heart-rate spread of the tiles that recorded it.  For this panel
      only, the clock fit is repeated with the excluded tiles added, so their vessels can be scored
   d  fundamental (H1) phase field: delay of every reconstructed vessel behind the vitelline-vein waveform, with isochrones of
-     the smoothed field (Gaussian, σ = 250 µm; display only)
+     the smoothed field (Gaussian, σ = 250 µm, vessels weighted by the precision of their phase; display only).  No isochrones
+     are drawn where the vessel phases around a point do not agree with each other
 
-Everything is read from the pipeline: flux recordings from plexusflow.ac.pulse, the clock measurements from
-results/speed_pairs_v1.pkl (scripts/speed_pairs.py), the clocks and the reconstructed field from results/ac_field_v9.pkl
-(scripts/pulse_field.py).  Writes figures/fig6/fig6.{png,pdf,tif}; nothing to any graph.
+Everything is read from the pipeline: flux recordings and clock measurements from plexusflow.ac.pulse, the clocks and the
+reconstructed field from results/ac_field_v9.pkl (scripts/pulse_field.py).  Writes figures/fig6/fig6.{png,pdf,tif}; nothing to any graph.
 """
 from __future__ import annotations
 import sys
@@ -40,8 +40,7 @@ from plexusflow.analyze.geometry import load_tile_geometry
 from plexusflow.reconcile import carved_domain
 from plexusflow.reconcile.dc import K_FIT
 from plexusflow.reconcile.harmonics import phasors, coherence
-from plexusflow.ac.pulse import FIELD, recordings, tile_clocks
-from plexusflow.ac.speed import RESULT as PAIRS_RESULT
+from plexusflow.ac.pulse import FIELD, recordings, flux_pairs, tile_clocks
 from mosaic_display import load_mosaic, show_mosaic
 
 EXAMPLE = (57695, 57893)        # 21S: recorded in tiles 12, 13, 22, 23; its RMS difference is typical for its heart-rate spread
@@ -49,6 +48,11 @@ ZERO_TILE = 14                  # the tile that records both vitelline-vein outl
 EXCOL, EXAMPLE_COL = "#d95f02", "#c51b8a"
 TILE_COLS = ["#1b9e77", "#7570b3", "#e6ab02", "#666666"]
 SIGMA_UM = 250.0                # smoothing of the phase field for the isochrones (display only)
+WRAP_DEG = -60.0                # delays are shown in [−60°, 300°): on 21S almost no well-determined vessel lies between 270° and 330°
+PHASE_SD_FLOOR_DEG = 10.0       # the smoothed field weights each vessel by 1 / (phase variance + this floor²)
+MIN_LOCAL_AGREEMENT = 0.5       # no isochrones where the weighted vessel phases around a point disagree (mean resultant length below this)
+LABEL_CLEARANCE_PX = 120.0      # isochrone labels keep this distance (mosaic px) from the boundary markers
+LABEL_MIN_LENGTH_PX = 400.0     # isochrone pieces shorter than this get no label
 
 
 def distinct_tiles(rs):
@@ -98,19 +102,19 @@ def main():
     ALLT = sorted(tf0); OUTT = [t for t in ALLT if t not in band]; N = np.arange(1, K_FIT + 1)
     dom = carved_domain(G); assert [tuple(e) for e in dom["edges"]] == E
 
-    # clock measurements of every tile pair (scripts/speed_pairs.py); flux recordings of every tile for the waveforms of b and c
-    SPp = pickle.loads((P.RESULTS / f"{PAIRS_RESULT}.pkl").read_bytes()); good = ~np.asarray(SPp["reversing"], bool); excl = set(A.get("excluded_tiles") or [])
-    lo, hi = np.minimum(SPp["a"], SPp["b"])[good], np.maximum(SPp["a"], SPp["b"])[good]
+    # clock measurements of every tile pair, out-of-band tiles included (for panel c), exactly as the pipeline forms them
+    excl = set(A.get("excluded_tiles") or []); every = E + [tuple(e) for e in G.edges if tuple(e) not in eix and tuple(e)[::-1] not in eix]
+    FP = flux_pairs(recordings(G, every, set(ALLT))); lo, hi = np.minimum(FP["a"], FP["b"]), np.maximum(FP["a"], FP["b"])
     links_all = {(int(x), int(y)): int(n) for (x, y), n in zip(*np.unique(np.c_[lo, hi], axis=0, return_counts=True))}
     links = {k: n for k, n in links_all.items() if k[0] in psi and k[1] in psi}; TILES = sorted(psi)
-    psi_all, _ = tile_clocks({k: np.asarray(SPp[k])[good] for k in ("a", "b", "d", "var", "vessel")}, ref)      # all tiles, for panel c only
+    psi_all, _ = tile_clocks(FP, ref)                                                                    # all tiles, for panel c only
     rec_all = recordings(G, E, set(ALLT)); rec_all = {e: [r for r in rs if r["t"] in psi_all] for e, rs in rec_all.items()}
     rec = {e: [r for r in rs if r["t"] in psi] for e, rs in rec_all.items()}; rec = {e: rs for e, rs in rec.items() if rs}
     dis = waveform_disagreement(rec_all, psi_all)
     shift = np.degrees(np.abs(np.angle(np.exp(1j * np.array([psi_all[t] - psi[t] for t in TILES])))))
     spread = lambda ts: (max(tf0[t] for t in ts) - min(tf0[t] for t in ts)) / np.mean([tf0[t] for t in ts])
     d_in = [d for e, (d, ts) in dis.items() if e in eix and not any(t in OUTT for t in ts)]
-    print(f"[fig6] {len(psi)} tile clocks from {int(good.sum())} speed-pulse pairs ({sum(links.values())} between retained tiles); not synchronised: {sorted(excl)}; "
+    print(f"[fig6] {len(psi)} tile clocks from {sum(links.values())} vessel pairs between retained tiles ({len(FP['d'])} with the out-of-band tiles); not synchronised: {sorted(excl)}; "
           f"clock fit with the out-of-band tiles added moves the retained clocks by median {np.median(shift):.1f}°, max {shift.max():.1f}°")
     print(f"[fig6] RMS waveform difference: retained tiles median {100 * np.median(d_in):.1f} %; per excluded tile " +
           ", ".join(f"{t}: {100 * np.median([d for d, ts in dis.values() if t in ts]):.0f} %" for t in OUTT if any(t in ts for _, ts in dis.values())))
@@ -122,8 +126,8 @@ def main():
     # field: delay behind the vitelline veins, H1 in each vessel's own flow direction
     ok = np.asarray(A["elig"], bool); g1 = np.where(ok, A["H"][0] / Qp, np.nan + 0j)
     zV, nV = vein_reference(G, dom, psi, tf0)
-    lag = (np.degrees(np.angle(np.exp(1j * zV) * np.conj(g1))) + 90) % 360 - 90      # [−90°, 270°): the wrap sits in the empty part of the distribution
-    rho_e = np.nan_to_num(np.asarray(A["rho"], float))
+    lag = (np.degrees(np.angle(np.exp(1j * zV) * np.conj(g1))) - WRAP_DEG) % 360 + WRAP_DEG      # [WRAP_DEG, WRAP_DEG + 360): the wrap sits in the empty part of the distribution
+    w_e = 1.0 / (np.nan_to_num(np.asarray(A["var_phi"], float)[0], nan=np.inf) + np.radians(PHASE_SD_FLOOR_DEG) ** 2)      # precision of each vessel's H1 phase
     print(f"[fig6] field on {ok.sum()} vessels; zero = {nV} vein recordings in tile {ZERO_TILE}; delay in [0°, 180°) for {100 * np.mean((lag[ok] >= 0) & (lag[ok] < 180)):.0f} %")
 
     MOS = load_mosaic(P.STAGE); Hm = MOS["outside"].shape[0]; geom = load_tile_geometry(StageConfig.load(P.STAGE))
@@ -222,7 +226,7 @@ def main():
 
     # ---- d: phase field — vessel delays and isochrones of the smoothed field
     um_px = 1.7 * geom.downsample; stp = 6.0; nx, ny = int((x1 - x0) / stp) + 1, int((y1 - y0) / stp) + 1
-    Zg = np.zeros((ny, nx), complex); Cg = np.zeros((ny, nx)); segs, cl = [], []; foot_out = [footprint(t) for t in OUTT]; n_hidden = 0
+    Zg = np.zeros((ny, nx), complex); Cg = np.zeros((ny, nx)); Wg = np.zeros((ny, nx)); segs, cl = [], []; foot_out = [footprint(t) for t in OUTT]; n_hidden = 0
     for i in np.flatnonzero(ok):
         p_ = G.edges[E[i]].get("path")
         if p_ is None:
@@ -233,21 +237,32 @@ def main():
             n_hidden += 1; continue
         segs.append(q); cl.append(lag[i])
         ix = np.clip(((q[:, 0] - x0) / stp).astype(int), 0, nx - 1); iy = np.clip(((q[:, 1] - y0) / stp).astype(int), 0, ny - 1)
-        np.add.at(Zg, (iy, ix), rho_e[i] * np.exp(1j * np.radians(lag[i]))); np.add.at(Cg, (iy, ix), 1.0)
+        np.add.at(Zg, (iy, ix), w_e[i] * np.exp(1j * np.radians(lag[i]))); np.add.at(Wg, (iy, ix), w_e[i]); np.add.at(Cg, (iy, ix), 1.0)
     print(f"[fig6] d: {n_hidden} vessels inside the excluded tiles not shown")
     sg = SIGMA_UM / um_px / stp; Zs = gaussian_filter(Zg.real, sg) + 1j * gaussian_filter(Zg.imag, sg); Cs = gaussian_filter(Cg, sg)
+    coh = np.abs(Zs) / np.maximum(gaussian_filter(Wg, sg), 1e-30)       # local agreement of the vessel phases (1 = all equal, 0 = scattered)
     gx = x0 + stp * np.arange(nx); gy = y0 + stp * np.arange(ny)
     outside = MOS["outside"][np.clip(gy.astype(int), 0, MOS["outside"].shape[0] - 1)][:, np.clip(gx.astype(int), 0, MOS["outside"].shape[1] - 1)]
     cov = gaussian_filter(Cg, 60.0 / um_px / stp)
-    hide = (Cs <= 0.15 * np.percentile(Cs[Cs > 0], 75)) | binary_dilation(outside, iterations=3) | (cov < 0.05 * np.percentile(cov[cov > 0], 75))
-    F = np.ma.masked_where(hide, (np.degrees(np.angle(Zs)) + 90) % 360 - 90)
+    hide = (Cs <= 0.15 * np.percentile(Cs[Cs > 0], 75)) | binary_dilation(outside, iterations=3) | (cov < 0.05 * np.percentile(cov[cov > 0], 75)) | (coh < MIN_LOCAL_AGREEMENT)
+    F = np.ma.masked_where(hide, (np.degrees(np.angle(Zs)) - WRAP_DEG) % 360 + WRAP_DEG)
     vtop = 20 * np.ceil(np.percentile(np.ma.compressed(np.ma.masked_where(Cs <= 0.15 * np.percentile(Cs[Cs > 0], 75), F.data)), 98) / 20)
     norm = mcolors.Normalize(0, vtop); cmap = plt.cm.plasma
     axd = ax = fig.add_axes([xd0, mb / Hf, xd1 - xd0, mh / Hf]); show_mosaic(ax, MOS); ax.images[0].set_alpha(0.2); ax.axis("off")
     ax.imshow(F, cmap=cmap, norm=norm, extent=(gx[0], gx[-1], gy[-1], gy[0]), origin="upper", alpha=0.2, zorder=1, interpolation="bilinear")
     ax.add_collection(LineCollection(segs, colors=cmap(norm(np.clip(cl, 0, vtop))), linewidths=0.75, zorder=2))
     levels = list(np.arange(30, vtop + 1, 30)); cs = ax.contour(gx, gy, F, levels=levels, colors="0.1", linewidths=0.7, alpha=0.85, zorder=3)
-    labels = ax.clabel(cs, levels=levels, fmt=lambda v: f"{v:.0f}°", fontsize=8, inline=True, inline_spacing=3)
+    # one label per isochrone piece, at the vertex farthest from the boundary markers (never on top of them)
+    marks = np.array([[G.nodes[dom["nodes"][j]]["x"], Hm - G.nodes[dom["nodes"][j]]["y"]] for j in list(dom["inj"]) + list(dom["out"])]); spots = []
+    for segs_l in cs.allsegs:
+        for sg_ in segs_l:
+            if len(sg_) < 8 or np.sum(np.hypot(*np.diff(sg_, axis=0).T)) < LABEL_MIN_LENGTH_PX:
+                continue
+            k = np.arange(len(sg_) // 6, len(sg_) - len(sg_) // 6); dm = np.min(np.hypot(sg_[k, None, 0] - marks[None, :, 0], sg_[k, None, 1] - marks[None, :, 1]), axis=1)
+            good = k[dm >= LABEL_CLEARANCE_PX]
+            if len(good):
+                spots.append(tuple(sg_[good[np.argmin(np.abs(good - len(sg_) // 2))]]))       # the clear vertex nearest the middle of the piece
+    labels = ax.clabel(cs, levels=levels, fmt=lambda v: f"{v:.0f}°", fontsize=8, inline=True, inline_spacing=3, manual=spots)
     for t_ in labels:
         t_.set_fontweight("bold"); t_.set_path_effects([pe.withStroke(linewidth=1.8, foreground="white")])
     ax.set_xlim(x0, x1); ax.set_ylim(y1, y0); ax.set_anchor("N"); ax.set_aspect("auto")

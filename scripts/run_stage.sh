@@ -28,9 +28,6 @@ echo "stage $PLEXUSFLOW_STAGE → results $RES"
 run scripts/dc_reconcile.py                 # mean flow: 1/σ² average, conservation, left = right inflow → dc_reconciled_v3.pkl
 run scripts/dc_qc.py                        # review list: gross-error tests, loops, hotspots            → dc_qc.csv, dc_qc.json
 if [[ $AC == 1 ]]; then
-  if [[ ! -f "$RES/speed_pairs_v1.pkl" ]]; then
-    run scripts/speed_pairs.py              # clock measurements between tiles (raw movies)             → speed_pairs_v1.pkl
-  fi
   run scripts/pulse_field.py                # reconciled pulsatile field (plexusflow.ac.pulse)           → ac_field_v9.pkl
   run scripts/mech/ac_estimate.py           # distensibility fit, forcing as measured                    → ac_estimate_v10.json
 fi
