@@ -442,7 +442,7 @@ def legacy_normalize(stage_root: Path = typer.Argument(...),
                     help='Optional output tag.  Inserted into the output '
                           '.gpickle filename as "<stem>_<tag>.gpickle".'),
               ) -> None:
-    """LEGACY: run the 2026-09 tile_normalize on the PIV-analyzed graph (superseded by scripts/dc_reconcile.py + scripts/ac_field.py).
+    """LEGACY: run the 2026-09 tile_normalize on the PIV-analyzed graph (superseded by scripts/dc_reconcile.py + scripts/pulse_field.py).
 
     Applies per-tile CO_rel + phi_H1 gauges + sign resolution, then
     aggregates per-tile phasors into edge-level `_h_*_norm` fields.

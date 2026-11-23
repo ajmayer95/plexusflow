@@ -51,7 +51,7 @@ QUASI-LIKELIHOOD (frozen 2026-11-12; superseded 2026-11-19):
 Before 2026-11-03 step 2 was a damped iteratively re-weighted projection whose iterates settle into a small limit cycle
 (21S, 27S); Q' was the average of the last 100 iterates over 8 perturbed runs.  Both estimators have the same
 stationary equations ((q − y)/V(q) is the IRLS correction term) and validate identically against independent repeat
-recordings (scripts/dc_validate_weighting.py); the explicit objective replaced the cycle average.
+recordings; the explicit objective replaced the cycle average.
 """
 from __future__ import annotations
 import numpy as np

@@ -87,8 +87,7 @@ unmeasured flows, grouped into hotspots ranked by the flow involved; for review 
 automatically), `pulse_field.py` (tile clocks and pulsatile field) and `mech/ac_estimate.py` (distensibility fit); the method is
 in [method.md](method.md).  Set `PLEXUSFLOW_RESULTS` to write
 results elsewhere.  The read-only viewer shows the measured graph and, when `results/` holds them, the reconstructed mean
-flow and pulsatile field.  Region tags can be revised in the workbench at any time; rerun step 13 afterwards
-(`scripts/dc_topology_sensitivity.py` compares the field with and without the topology regions).
+flow and pulsatile field.  Region tags can be revised in the workbench at any time; rerun step 13 afterwards.
 
 **Editing an analysed graph.**  After changing the graph (step 8) on a stage that is already measured: `plexusflow condense
 STAGE`, `plexusflow carry-measurements STAGE` (copies measurements of unchanged vessels), `plexusflow analyze STAGE

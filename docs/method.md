@@ -88,6 +88,5 @@ against the RC network) read the three result files above; see [FIGURES.md](../F
 ## Earlier methods in the code
 
 `plexusflow.reconcile` still contains the earlier mean-flow estimators (quasi-likelihood with a fitted reliability
-model; heartbeat-block variances) and `plexusflow.ac.field` the earlier synchronisation; `scripts/dc_validate_*.py`,
-`dc_junction_calibration.py`, `dc_withholding_curve.py`, `dc_ablation.py`, `ac_field.py` and the benchmark and SI
-figure scripts belong to them. They are not part of the paper chain and read the earlier result files.
+model; heartbeat-block variances) and `plexusflow.ac.field` the earlier synchronisation. No script in the paper chain
+uses them; their drivers, validation runs and figure scripts were removed on 2026-11-23 and are in the git history.

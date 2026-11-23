@@ -24,7 +24,7 @@ import plexusflow.paths as paths
 from plexusflow.release import SCHEMA_VERSION
 
 RESULTS = ("dc_reconciled_v3.pkl", "ac_field_v8.pkl", "ac_estimate_v9.json")
-RESULTS_OPTIONAL = ("reliability_model_v1.json", "dc_synthetic_benchmark.json", "dc_async_benchmark.json", "dc_ablation.json", "dc_uncertainty_models.json", "dc_qc.json", "dc_qc.csv")
+RESULTS_OPTIONAL = ("reliability_model_v1.json", "dc_qc.json", "dc_qc.csv")
 # inputs of the paper figures (scripts/make_figure*.py), copied as-is from the stage (core tier)
 FIGURE_INPUTS = ("fuse/organ_fusion.tif", "fuse/maxmed.tif", "fuse/probs_logit.tif", "mask/mask.tif", "tiles/maxmed", "assets")
 FIG3_TILE = 36                # its representative raw frame is stored (raw recordings are not released)

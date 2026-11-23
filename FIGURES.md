@@ -11,7 +11,7 @@ stage config (`raw_video_dir`). To run: `PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S
 |---|---|---|---|
 | 1 | Acquisition: imaging setup, per-tile 250 fps movies → projection, registration of one tile (best rigid vs manual affine), stitched mosaic + acquisition order | `make_figure1.py` | `assets/fig1_setup.png` (drawing), `videos_realtime/`, `tiles/maxmed/`, `stitch/positions.json`, `fuse/organ_fusion.tif` |
 | 2 | Mosaic → vessel graph: whole-organ mosaic / probability / mask / graph; mapping into one tile's frame (A⁻¹) | `make_figure2.py` | `fuse/maxmed.tif`, `fuse/probs_logit.tif`, `mask/mask.tif`, canonical graph |
-| 3 | Flow in one vessel: optical flow, parabolic profile fits, Q(t) with its two-harmonic fit, fraction of measured power in the mean and the first two harmonics (per-section flux and fixed-radius profiles → SI `make_figure_S_flux_estimator.py`) | `make_figure3.py` | `batch_kl_inputs/tile_36.pkl.gz`, raw tile movie, canonical graph |
+| 3 | Flow in one vessel: optical flow, parabolic profile fits, Q(t) with its two-harmonic fit, fraction of measured power in the mean and the first two harmonics | `make_figure3.py` | `batch_kl_inputs/tile_36.pkl.gz`, raw tile movie, canonical graph |
 | 4 | Simultaneously recorded vessel pairs: relative first-harmonic amplitude increases / decreases along a path | `make_figure4.py` | canonical graph (`measurements_piv`), `videos_realtime/` |
 | 5 | Effective vascular domain: anatomy cartoon, true boundaries (V₁, V₂, dorsal aorta), effective arterial cuts | `make_figure5.py` | `assets/fig5_anatomy.png` (drawing), canonical graph, `fuse/organ_fusion.tif` |
 | 6 | One cardiac clock: heart rate per tile and the retained band, tile clocks from shared vessels with one vessel before / after, waveform agreement of repeated recordings against heart-rate spread, H1 phase field with isochrones | `make_figure6.py` | `results/ac_field_v8.pkl`, canonical graph, `fuse/organ_fusion.tif` |
@@ -19,5 +19,4 @@ stage config (`raw_video_dir`). To run: `PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S
 
 After re-rendering, `python3 scripts/collect_figures.py` copies Figs 1–7 to `$PLEXUSFLOW_STAGE/figures/latest/` (Fig1–Fig7 .tif/.pdf/.png + README with render dates).
 
-`make_figureN.py` draws Fig N. The `make_figure_S_*.py` scripts draw supplementary figures of the earlier mean-flow method
-(reliability-weighted) and are not part of the paper chain. Superseded figure scripts are in the git history.
+`make_figureN.py` draws Fig N. There are no supplementary-figure scripts yet; superseded figure scripts are in the git history.

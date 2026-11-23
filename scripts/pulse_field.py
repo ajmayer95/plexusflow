@@ -3,7 +3,7 @@
 Needs results/dc_reconciled_v3.pkl (scripts/dc_reconcile.py).  Each recording is fitted with its mean and two harmonics and
 weighted by 1/σ² (σ² from the fit residual); the tile clocks are fitted jointly on repeatedly recorded network vessels;
 recordings are averaged and the waveform is rescaled to the reconciled mean flow.  Writes results/ac_field_v8.pkl (the input of scripts/mech/ac_estimate.py).
-The previous synchronisation (seam continuity, dorsal-aorta anchor, one recording per vessel) is scripts/ac_field.py → ac_field_v7.
+The previous synchronisation (seam continuity, dorsal-aorta anchor, one recording per vessel) is plexusflow.ac.field.build_ac_field (its driver is in the git history).
 """
 import sys
 from pathlib import Path

@@ -17,7 +17,7 @@ analysis drivers and the scripts that produce every figure of the paper.
 |---|---|
 | `src/plexusflow/` | reconstruction: tile preprocessing and stitching, mosaic fusion, mask → graph (`mve`, `vectorize`), per-vessel optical-flow flux (`analyze`), mean-flow reliability model and conservative reconciliation (`reconcile`), tile-synchronised harmonic field (`ac`), known-truth Stokes benchmark (`synthetic`), data-release loader (`release`), napari viewer (`viewer`) |
 | `src/plexusmech/` | modelling: two-port RC / transmission-line network (`ac.model`, `tl`), composite likelihood and profiled fit of wall distensibility (`ac.profile`) |
-| `scripts/` | analysis drivers (`dc_reconcile.py`, `ac_field.py`, `mech/ac_estimate.py`; `run_stage.sh` runs them for any stage), figure scripts (`make_figure*.py`, see [FIGURES.md](FIGURES.md)), benchmark drivers (`benchmark/`), `reproduce_paper.sh` |
+| `scripts/` | analysis drivers (`dc_reconcile.py`, `pulse_field.py`, `mech/ac_estimate.py`; `run_stage.sh` runs them for any stage), figure scripts (`make_figure*.py`, see [FIGURES.md](FIGURES.md)), benchmark drivers (`benchmark/`), `reproduce_paper.sh` |
 | `docs/` | methods notes: [pipeline](docs/pipeline.md), **[the method](docs/method.md)**, [synthetic validation](docs/synthetic_validation.md) |
 | `AGENTS.md` | guide for AI coding agents and new contributors (setup, data, commands, conventions) |
 | `tests/` | unit and regression tests (`pytest`) |

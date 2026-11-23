@@ -1950,7 +1950,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._src_radio_rec.setToolTip(
             "Conservative DC flow Q\u2032 and tile-aligned harmonics (results/dc_reconciled_v3.pkl, ac_field_v8.pkl)."
             if self._reconciliation_available() else
-            "No reconciliation found: run scripts/dc_reconcile.py and scripts/ac_field.py for this stage.")
+            "No reconciliation found: run scripts/run_stage.sh for this stage.")
         self._src_radio_sim = QRadioButton("Sim (intact)")
         self._src_radio_sim.setChecked(self.current_source == 'sim')
         self._src_radio_sim.setEnabled(self._sim_active)

@@ -7,7 +7,7 @@ per loss term (H1 phase, H2 phase, H1 amplitude) — the reliability model is no
 --method profiled --field ac_field_v7 --dc dc_reconciled_v2 --out ac_estimate_v8 reproduces the previous fit, described below.
 
 
-Needs results/dc_reconciled_v2.pkl, results/ac_field_v2.pkl (scripts/ac_field.py, with the per-winner a0 / var_phi /
+Needs results/dc_reconciled_v2.pkl, results/ac_field_v2.pkl (plexusflow.ac.field, with the per-winner a0 / var_phi /
 var_logpi fields), results/reliability_model_v1.json.
 Defaults = the frozen 2026-10-19 method: measurement-supported vessels (|Q'|/|a0| ≤ 5); carve forcing = local measured
 ratio with L/R group corrections; veins pinned to the stub waveforms (--veins mean: one shared waveform, 21S; own: each
@@ -66,7 +66,7 @@ def main():
     G = paths.load_graph(); D = pickle.loads((paths.RESULTS / f"{a.dc}.pkl").read_bytes())
     A = pickle.loads((paths.RESULTS / f"{a.field}.pkl").read_bytes())
     if "var_phi" not in A:
-        sys.exit("results/ac_field_v2.pkl predates the per-beat uncertainties — rerun scripts/ac_field.py")
+        sys.exit("results/ac_field_v2.pkl predates the per-beat uncertainties — rebuild the field")
     model = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text()); model["c_T"] = {int(k): v for k, v in model["c_T"].items()}
     dom = carved_domain(G); sup = supported(A); Am = dict(A, elig=sup)
     C0 = build_context(D, Am, dom, topo=a.topo, supernode_scale=a.supernode_scale)

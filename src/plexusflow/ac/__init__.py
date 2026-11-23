@@ -6,6 +6,6 @@ Modules:
                        Per winner: own mean a0 and per-beat phase / pulsatility uncertainty; ``supported``
                        = the measurement-supported fit set (|Q'|/|a0| ≤ 5).
 
-Driver: ``scripts/ac_field.py``.  The network model and wall-property inference built on this field live in
+Current method: ``plexusflow.ac.pulse`` (driver ``scripts/pulse_field.py``); ``ac.field`` is the earlier synchronisation.  The network model and wall-property inference built on this field live in
 ``plexusmech.ac``.
 """

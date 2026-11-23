@@ -13,7 +13,7 @@ The representative vessel (edge 75489–75638) in its own tile (36), the tile of
      harmonic drawn about it, Q̂_0 + Q̂_n cos(2πn f0 t + φ_n), at half the fit's line width. right: every beat folded on the
      cardiac phase (mean ± SD) against the model.
 The per-section flux along the vessel and the fixed-radius peak/trough profiles are in the SI figure
-(make_figure_S_flux_estimator.py), which reuses load_vessel() from here.
+(script in the git history), which reused load_vessel() from here.
 
 Inputs: batch_kl_inputs/tile_36.pkl.gz, tiles/maxmed/vid36_maxmed.tif, the canonical graph (measurements_piv Q_t,
 tile_f0_piv).  Writes figures/fig3/fig3.{png,pdf,tif}.
