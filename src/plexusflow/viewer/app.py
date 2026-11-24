@@ -2964,8 +2964,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         view_layout.addWidget(info)
 
         # Assemble the tabbed panel
-        tabs.addTab(view_panel, "View")
-        tabs.addTab(ts_panel, "Time series")
+        from qtpy.QtCore import Qt as _Qt
+        for _panel, _name in ((view_panel, "View"), (ts_panel, "Time series")):   # scroll when the window is short
+            _sa = QScrollArea(); _sa.setWidgetResizable(True); _sa.setWidget(_panel)
+            _sa.setHorizontalScrollBarPolicy(_Qt.ScrollBarAlwaysOff); _sa.setFrameShape(QScrollArea.NoFrame)
+            tabs.addTab(_sa, _name)
         # Wrap the Simulate tab in a scroll area so the Run button is always
         # reachable even when optional sections are expanded.
         _sim_scroll = QScrollArea()
@@ -4481,6 +4484,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             lay.invalidate()
         for w in tabs.findChildren(QWidget):
             w.updateGeometry()
+        from qtpy.QtWidgets import QScrollArea
+        for sa in tabs.findChildren(QScrollArea):          # wide enough for the content: scroll vertically only
+            if sa.widget() is not None:
+                sa.setMinimumWidth(sa.widget().sizeHint().width() + sa.verticalScrollBar().sizeHint().width() + 4)
 
     def _require_workbench(self, what: str) -> bool:
         """Guard for anything that writes or recomputes; the read-only viewer refuses."""
