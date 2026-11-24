@@ -1,6 +1,6 @@
 """Option-A AC field on the carved network, from the measured graph and the DC reconciliation.
 
-1. Per Kloosterman-valid measurement in the f0 band: a0, H1..H3 (LSQ at the tile f0; Q_t signed along the
+1. Per profile-valid measurement in the f0 band: a0, H1..H3 (LSQ at the tile f0; Q_t signed along the
    oriented path u→v), per-beat H1 scatter, coherence ρ, waveform repeatability (harmonics.beat_uncertainty).
 2. Tile time gauge ψ_t: angular synchronisation of H1 over edges measured in ≥ 2 in-band tiles (ρ ≥ 0.1);
    leading eigenvector of Σ_e u_a ū_b (u = unit H1), ψ_ref = 0.  Applied coherently: H_k → e^{−ikψ_t} H_k.
@@ -126,7 +126,7 @@ def build_ac_field(G, dc, n_jobs=10, ref_tile=REF_TILE, f0_band=F0_BAND, n_boot=
     items = []
     for e in list(sub) + [e for e in (sync_extra_edges or []) if e not in eix]:
         for m in G.edges[e].get("measurements_piv") or []:
-            if (m.get("quality") or {}).get("kl_ok") and m["tile_id"] in band and m.get("Q_t") is not None:
+            if (m.get("quality") or {}).get("profile_ok") and m["tile_id"] in band and m.get("Q_t") is not None:
                 items.append((e, m["tile_id"], m["Q_t"]))
     res = Parallel(n_jobs=n_jobs)(delayed(_measure)(q, tf0[t]) for e, t, q in items)
     meas = {}

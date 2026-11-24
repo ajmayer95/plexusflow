@@ -1,4 +1,4 @@
-"""Reliability scale of a Kloosterman-valid measurement, calibrated on same-tile junction balance.
+"""Reliability scale of a profile-valid measurement, calibrated on same-tile junction balance.
 
     c_e = c0 + c_cv · cv_e,            σ_e = √((|Q_e| c_e)² + σ0²)          (production since 2026-11-18 evening, PROFILE_TERM "cv")
     c_e = c0 + c_a (1 − align_e)                                            (PROFILE_TERM "none", 2026-11-18; sensitivity)
@@ -13,14 +13,14 @@ cv     temporal noise of the recording's own flux trace: SD of Q(t) after removi
        21S, no HR gain: held-out recording error ×1.779 all / ×1.455 trusted vs alignment ×1.792 / ×1.442; 25 % withheld
        ×1.488 vs ×1.487; inflow 6.49 vs 6.53; junction held-out NLL −12926 vs −13224 (alignment better calibrated)
        (sandbox/quality_timeseries.py).
-p      parabolicity: mean over all Kloosterman cross-sections of clip(R², 0, 1), unfitted sections 0 (quality.p;
-       analyze.kloosterman.parabolicity).  Profile term since 2026-11-10 (PROFILE_TERM); before, f = fraction of
+p      parabolicity: mean over all profile-fit cross-sections of clip(R², 0, 1), unfitted sections 0 (quality.p;
+       analyze.profile_flux.parabolicity).  Profile term since 2026-11-10 (PROFILE_TERM); before, f = fraction of
        cross-sections kept (quality.f).  p and f rank recordings almost identically (Spearman 0.97 / 0.95) but p predicts
        held-out same-tile junction imbalance better (5-fold tile CV ΔNLL 21S −21.9, 27S −24.0, same number of parameters);
        f adds nothing once p is in (sandbox/parabolicity.py).  Old model files (no "profile_term") use f.
 align  speed-weighted |cos θ| between the time-mean OF vector and the centreline tangent within ±R_seg
        (quality.align; missing → 1)
-Fitted by maximum likelihood on junctions where every incident edge has a Kloosterman-valid measurement from the
+Fitted by maximum likelihood on junctions where every incident edge has a profile-valid measurement from the
 same tile: net flux Σ s·Q ~ N(0, Σ Q² c² + σ0²).  c is an empirical reliability scale, not a standard error.
 """
 from __future__ import annotations
@@ -58,14 +58,14 @@ def _term(model):
 
 
 def measurement_table(G, gain="default"):
-    """{(tile, (u, v)): row} for every Kloosterman-valid measurement; Q is the time-mean flux signed u→v.
+    """{(tile, (u, v)): row} for every profile-valid measurement; Q is the time-mean flux signed u→v.
     gain: "default" → reconcile.gain.DEFAULT ("hr": fluxes normalised to the reference heart rate, the fit stored in
     LAST_GAIN[id(G)]); None → raw fluxes."""
     M = {}
     for u, v, d in G.edges(data=True):
         for m in d.get("measurements_piv") or []:
             q = m.get("quality") or {}
-            if not q.get("kl_ok"):
+            if not q.get("profile_ok"):
                 continue
             mq = (m.get("harm") or {}).get("mean_Q")
             if mq is None or not np.isfinite(mq):
@@ -74,7 +74,7 @@ def measurement_table(G, gain="default"):
             a = q.get("align")
             M[(int(m["tile_id"]), (u, v))] = dict(tile=int(m["tile_id"]), Q=float(Q), f=float(q["f"]), p=float(q["p"]) if np.isfinite(q.get("p", np.nan)) else float(q["f"]),   # p missing (no cached inputs): f
                                                    align=float(a) if a is not None and np.isfinite(a) else np.nan,
-                                                   R_kl_um=m.get("R_kl_um"), none=1.0, cv=temporal_cv(m), n_frames=_n_frames(m))
+                                                   R_profile_um=m.get("R_profile_um"), none=1.0, cv=temporal_cv(m), n_frames=_n_frames(m))
     cvs = [r["cv"] for r in M.values() if np.isfinite(r["cv"])]
     cv_fill = float(np.median(cvs)) if cvs else 1.0
     for r in M.values():                                   # no Q(t) (rare): the median recording

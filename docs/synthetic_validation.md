@@ -1,6 +1,6 @@
 # Known-truth validation of the per-vessel flux estimator (2026-10-09)
 
-The question: how accurate is the production per-vessel measurement — Farnebäck optical flow → Kloosterman per-slice
+The question: how accurate is the production per-vessel measurement — Farnebäck optical flow → profile-fit per-slice
 Poiseuille flux — and does the DC reliability scale *c* describe its real errors?  Same-tile junction balance (used to fit
 *c*) cannot see errors shared by all vessels at a junction, so this needs ground truth.  We built synthetic videos with
 exactly known, exactly conserving flow and ran them through the unchanged production code.
@@ -38,7 +38,7 @@ photon-transfer fit (variance vs mean).  The pipeline receives the **segmented**
 
 **Junction ensemble** — 27 real junctions (26 tiles) × 5 splits × 5 speeds × 2 seeds; 4080 edge measurements:
 
-| True branch speed (px/frame) | n | Q̂/Q_true (median) | robust scatter (log) | Kloosterman fail |
+| True branch speed (px/frame) | n | Q̂/Q_true (median) | robust scatter (log) | profile-fit fail |
 |---|---|---|---|---|
 | < 0.05 | 281 | 0.61 | 0.56 | 38 % |
 | 0.05–0.1 | 620 | 0.78 | 0.22 | 17 % |
@@ -58,9 +58,9 @@ log(Q̂/Q) rises 0.24 → 0.30 → 0.43 → 0.68 over c < 0.3, 0.3–0.5, 0.5–
 synthetic truth has the same form, log|error| = −1.82 + 1.09(1−f) + 2.83(1−align) + 0.36 log v, alignment dominant —
 independent support for how *c* is constructed.
 
-**Flow-estimator comparison** (6 junctions × 3 speeds; same downstream Kloosterman code for every method):
+**Flow-estimator comparison** (6 junctions × 3 speeds; same downstream profile-fit code for every method):
 
-| Method | Q̂/Q at v 0.1 / 0.3 / 0.9 | scatter | Kloosterman fail | H1 amplitude ratio / phase error |
+| Method | Q̂/Q at v 0.1 / 0.3 / 0.9 | scatter | profile-fit fail | H1 amplitude ratio / phase error |
 |---|---|---|---|---|
 | Farnebäck, lag 1 (production) | 0.64 / 0.77 / 0.57 | 0.25–0.48 | 0–22 % | 0.93–0.99 / 3–11° |
 | Farnebäck, lag 2 | 0.84 / 0.75 / 0.58 | 0.24–0.40 | 0–6 % | 0.83–0.96 / 3–5° |
@@ -69,7 +69,7 @@ independent support for how *c* is constructed.
 | Phase-binned ensemble PIV, 32 px | — | — | 78–94 % | window ≥ vessel |
 
 Instantaneous correlation PIV fails at this tracer density (≈ 1 tracer per 8 px window).  Phase-binned ensemble PIV has the
-lowest scatter but over-reads (window smoothing inflates the fitted radius) and often fails the Kloosterman gates — both
+lowest scatter but over-reads (window smoothing inflates the fitted radius) and often fails the profile-fit gates — both
 profile-fit problems, not velocity problems.  Farnebäck at lag 2 helps slow vessels.
 
 **Cross-section shape** (single vessels, 48 geometries × 3 speeds × 2 seeds).  Flattening (depth/width ε) over-reads by

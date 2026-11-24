@@ -12,7 +12,7 @@ what the rest of the data predicts for it, standardised by its calibrated uncert
                 direction-resolved signs → 'repeat_sign'.
   nodal         raw imbalance of the measured inputs at an interior junction whose incident vessels are all measured,
                 z = Σ s y / √Σ σ², σ at the input: where conservation fails locally (phantom branch, missing outlet).
-  radius        log(median Kloosterman radius / segmentation radius) as a robust z within radius classes (mis-segmentation,
+  radius        log(median profile-fit radius / segmentation radius) as a robust z within radius classes (mis-segmentation,
                 merged or doubled centrelines), and vessels more than ×2 thicker than every neighbour at both ends.
   structural    (no redundancy) flow on directed loops (cycle cancelling: impossible for a pressure-driven mean flow) and
                 unmeasured vessels carrying more than the radius class's 99th percentile of measured flux.
@@ -95,10 +95,10 @@ def nodal_test(D, dom):
 
 
 def radius_test(G, D, px_um=1.7):
-    """Robust z of log(median R_kl / R_graph) within radius classes; and 'thicker than every neighbour by ×2' (bool)."""
+    """Robust z of log(median R_profile / R_graph) within radius classes; and 'thicker than every neighbour by ×2' (bool)."""
     es = [tuple(e) for e in D["edges"]]; rg = np.array([G.edges[e]["radius"] for e in es], float); lr = np.full(len(es), np.nan)
     for i, e in enumerate(es):
-        rk = [m["R_kl_um"] / px_um for m in G.edges[e].get("measurements_piv") or [] if m.get("R_kl_um") and np.isfinite(m["R_kl_um"])]
+        rk = [m["R_profile_um"] / px_um for m in G.edges[e].get("measurements_piv") or [] if m.get("R_profile_um") and np.isfinite(m["R_profile_um"])]
         if rk:
             lr[i] = np.log(np.median(rk) / rg[i])
     z = np.full(len(es), np.nan); edges_q = np.quantile(rg, [0, .2, .4, .6, .8, 1.0])
@@ -156,7 +156,7 @@ def run_qc(G, D, dom, M, model, loops=True, z_flag=Z_FLAG, loop_min=0.05, big_pc
     zr, lr, thick = radius_test(G, D)
     for i in np.flatnonzero((np.abs(np.nan_to_num(zr)) > z_flag) | thick):
         rows.append(dict(kind="radius", edge=es[i], z=float(zr[i]) if np.isfinite(zr[i]) else np.nan, R_graph_px=float(rg[i]),
-                         R_kl_over_graph=float(np.exp(lr[i])) if np.isfinite(lr[i]) else np.nan, thicker_than_neighbours=bool(thick[i])))
+                         R_profile_over_graph=float(np.exp(lr[i])) if np.isfinite(lr[i]) else np.nan, thicker_than_neighbours=bool(thick[i])))
     thr = np.full(len(es), np.inf); q = np.quantile(rg, [0, .2, .4, .6, .8, 1.0])
     for lo, hi in zip(q[:-1], q[1:]):
         s = (rg >= lo) & (rg <= hi) & im & (y != 0)

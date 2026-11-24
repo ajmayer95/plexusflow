@@ -20,6 +20,7 @@ A candidate lives in ``graph/patches/pending/<stamp>/``:
 """
 from __future__ import annotations
 
+from ..compat import loads_graph
 import datetime
 import json
 import pickle
@@ -166,19 +167,19 @@ def evaluate(stage_root: Path, pending: Path, *, measure: bool = True, workers: 
         require_numpy1()                      # the measurement rewrites the candidate pickle
     pending = Path(pending); meta = json.loads((pending / "meta.json").read_text())
     cfg = StageConfig.load(Path(stage_root)); graph_path = Path(meta["graph"]); cand = pending / "candidate.gpickle"
-    G0 = pickle.loads(graph_path.read_bytes()); poly = np.asarray(meta["polygon"], float)
+    G0 = loads_graph(graph_path.read_bytes()); poly = np.asarray(meta["polygon"], float)
     tiles = tiles_for_region(G0, poly)
     if measure:
-        Gc = pickle.loads(cand.read_bytes())
+        Gc = loads_graph(cand.read_bytes())
         todo = [e for e in Gc.edges if Gc.edges[e].get("spliced") and not Gc.edges[e].get("measurements_piv")]
         log(f"[refine] measuring {len(todo)} new vessels on tiles {tiles}")
         if todo and tiles:
             from ..analyze import analyze_stage
             analyze_stage(cfg, tile_ids=tiles, skip_analyzed=True, out_path=cand, n_workers=workers, local=True,
                           mask_path=(pending / "mask.tif") if meta.get("mask_edited") else None)
-    G1 = pickle.loads(cand.read_bytes())
+    G1 = loads_graph(cand.read_bytes())
     new = [e for e in G1.edges if G1.edges[e].get("spliced")]
-    n_meas = sum(1 for e in new if any((m.get("quality") or {}).get("kl_ok") for m in G1.edges[e].get("measurements_piv") or []))
+    n_meas = sum(1 for e in new if any((m.get("quality") or {}).get("profile_ok") for m in G1.edges[e].get("measurements_piv") or []))
     model = json.loads((paths.RESULTS / "reliability_model_v1.json").read_text())
     log("[refine] fitting current graph …"); F0 = quick_fit(G0, model)
     import networkx as _nx
@@ -191,7 +192,7 @@ def evaluate(stage_root: Path, pending: Path, *, measure: bool = True, workers: 
     log("[refine] fitting candidate …"); F1 = quick_fit(G1, model)
     r0, r1 = near_region(G0, poly), near_region(G1, poly)
     res = dict(
-        tiles=tiles, new_vessels=len(new), new_measured_kl_ok=n_meas,
+        tiles=tiles, new_vessels=len(new), new_measured_profile_ok=n_meas,
         current=dict(inflow=F0["inflow"], left=F0["left"], out_L=F0["out_L"], out_R=F0["out_R"], n_reversals=len(F0["reversals"]),
                      local=_local(G0, F0, r0), junctions=junction_balance(G0, F0["M"], model, r0)),
         candidate=dict(inflow=F1["inflow"], left=F1["left"], out_L=F1["out_L"], out_R=F1["out_R"], n_reversals=len(F1["reversals"]),
@@ -210,8 +211,8 @@ def format_result(res: dict) -> str:
     j = lambda x: (f"{x['junctions']['median']:.2f} (n {x['junctions']['n']}, >0.5: {x['junctions']['gt_half']:.0%})"
                    if x["junctions"]["n"] else "none")
     return "\n".join([
-        f"new vessels {res['new_vessels']} (measured, Kloosterman-valid: {res['new_measured_kl_ok']}); tiles {res['tiles']}",
-        f"                      current      candidate",
+        f"new vessels {res['new_vessels']} (measured, profile-valid: {res['new_measured_profile_ok']}); tiles {res['tiles']}",
+        "                      current      candidate",
         f"inflow (nL/s)         {a['inflow']:8.2f}    {b['inflow']:8.2f}",
         f"left share            {a['left']:8.1%}    {b['left']:8.1%}",
         f"outflow L / R         {a['out_L']:+.2f}/{a['out_R']:+.2f}  {b['out_L']:+.2f}/{b['out_R']:+.2f}",
@@ -231,8 +232,8 @@ def accept(pending: Path, *, mask_path: Optional[Path] = None, note: Optional[st
     pending = Path(pending); meta = json.loads((pending / "meta.json").read_text()); gp = Path(meta["graph"]); st = gp.stat()
     if st.st_size != meta["base_size"] or abs(st.st_mtime - meta["base_mtime"]) > 1e-3:
         raise RuntimeError("the stage graph changed since this candidate was staged — re-run the splice on the current graph")
-    G0 = G_current if G_current is not None else pickle.loads(gp.read_bytes())
-    G1 = pickle.loads((pending / "candidate.gpickle").read_bytes())
+    G0 = G_current if G_current is not None else loads_graph(gp.read_bytes())
+    G1 = loads_graph((pending / "candidate.gpickle").read_bytes())
     mb = ma = None
     if meta.get("mask_edited"):
         import tifffile

@@ -4,7 +4,7 @@ manual review.
 
 Writes through the stage patch log (plexusflow.edit.patches, graph/patches/): the change is recorded as a reversible
 patch of kind 'consolidate' (revert it from the workbench Refine tab or PatchLog.revert), and the stage mask gets the
-filled pillar holes (journaled in mask/edits; --keep-mask leaves mask.tif unchanged).  batch_kl_inputs/ is copied
+filled pillar holes (journaled in mask/edits; --keep-mask leaves mask.tif unchanged).  batch_profile_inputs/ is copied
 (suffix .pre_consolidate_<date>).  Records G.graph['consolidation'], writes graph/consolidation_review.json (regions left
 for manual review + the old→new edge map) and mask/mask_consolidated.tif (the mask the paths were drawn on).
 Refuses to run twice.
@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import numpy as np
 import tifffile
+from plexusflow.compat import sidecar_dir
 import plexusflow.paths as paths
 from plexusflow.edit.consolidate import consolidate, LT_MAX, SLIVER, K_SPAN
 
@@ -52,9 +53,9 @@ def main():
             n_cleared += len(d.get("measurements_piv") or []); d["measurements_piv"] = []
             for k in [k for k in d if k.startswith("_h_") or k in ("harmonic_class", "_meas_dissipation")]:
                 d.pop(k)
-    date = datetime.date.today().strftime("%Y%m%d"); gp = paths.GRAPH; kl = paths.STAGE / "batch_kl_inputs"
-    if kl.exists():
-        shutil.copytree(kl, str(kl) + f".pre_consolidate_{date}", dirs_exist_ok=True)
+    date = datetime.date.today().strftime("%Y%m%d"); gp = paths.GRAPH; prof = sidecar_dir(paths.STAGE)
+    if prof.exists():
+        shutil.copytree(prof, str(prof) + f".pre_consolidate_{date}", dirs_exist_ok=True)
     H.graph["consolidation"] = dict(date=date, lt_max=LT_MAX, sliver=SLIVER, k_span=K_SPAN, holes_filled=rep["holes_filled"],
                                     one_vessel=rep["one_vessel"], junction=rep["junction"], review=len(rep["review"]),
                                     recordings_cleared=n_cleared, all_cleared=bool(a.clear_all_recordings), mask_updated=not a.keep_mask)

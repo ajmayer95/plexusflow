@@ -1,4 +1,4 @@
-"""Run the PRODUCTION per-vessel measurement (optical flow → Kloosterman Poiseuille flux) on a synthetic video."""
+"""Run the PRODUCTION per-vessel measurement (optical flow → profile-fit Poiseuille flux) on a synthetic video."""
 from __future__ import annotations
 
 import numpy as np
@@ -15,14 +15,14 @@ def run_measurement(vid, cl, R_seg, f0, mask, fdt=FDT, **of_overrides):
 
 
 def flux_record(u, R_used_default):
-    """Mean flux, Kloosterman kept fraction, slices, radius and the batch quality numbers from one measurement."""
+    """Mean flux, profile-fit kept fraction, slices, radius and the batch quality numbers from one measurement."""
     from ...analyze.mosaic_piv import _flow_quality
-    from ...analyze.kloosterman import parabolicity
-    q = float(u.get("Q_kloosterman", np.nan))
-    psq = np.asarray(u.get("Q_kloosterman_per_slice", []), float)
-    return dict(Q_kl=q, f=float(u.get("Q_kloosterman_valid_frac", 0.0)) if np.isfinite(q) else 0.0, n_slices=int(psq.size),
-                p=parabolicity(u.get("R2_kloosterman_per_slice", [])) if np.isfinite(q) else 0.0,
-                R_kl=float(u.get("R_kloosterman", np.nan)), Q_t=np.asarray(u.get("Q_pois_t", []), np.float32),
+    from ...analyze.profile_flux import parabolicity
+    q = float(u.get("Q_profile", np.nan))
+    psq = np.asarray(u.get("Q_profile_per_slice", []), float)
+    return dict(Q_profile=q, f=float(u.get("Q_profile_valid_frac", 0.0)) if np.isfinite(q) else 0.0, n_slices=int(psq.size),
+                p=parabolicity(u.get("R2_profile_per_slice", [])) if np.isfinite(q) else 0.0,
+                R_profile=float(u.get("R_profile", np.nan)), Q_t=np.asarray(u.get("Q_pois_t", []), np.float32),
                 **_flow_quality(u.get("vfield_mean"), u.get("cl_used"), float(u.get("R_used", R_used_default))))
 
 

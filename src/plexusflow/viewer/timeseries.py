@@ -827,17 +827,18 @@ class TimeseriesMixin:
 
     def _get_edge_harmonics(self, u, v, source):
         """Return [Z_DC, Z_H1, Z_H2, Z_H3] complex phasors for an edge in
-        a given source ∈ {'measured', 'reconciled', 'sim', 'sim_carved'}.
+        a given source ∈ {'measured', 'reconciled', 'model', 'sim', 'sim_carved'}.
         Returns None if the source has no data for this edge.
         Convention matches compare_waveforms.py: Q(t) = Re(Z0) + Σ Re(Zk·e^{iωkt})."""
         d = self.G.edges[u, v]
         Z = [None, None, None, None]
-        if source == 'reconciled':
-            a0 = d.get('_h_amp_DC_rec')
+        if source in ('reconciled', 'model') or (source == 'measured' and self._pre_active()):
+            sfx = {'reconciled': '_rec', 'model': '_mod', 'measured': '_pre'}[source]
+            a0 = d.get(f'_h_amp_DC{sfx}')
             if a0 is not None and np.isfinite(a0):
                 Z[0] = complex(float(a0), 0.0)
             for k in (1, 2, 3):
-                a = d.get(f'_h_amp_H{k}_rec'); p = d.get(f'_h_phase_H{k}_rec')
+                a = d.get(f'_h_amp_H{k}{sfx}'); p = d.get(f'_h_phase_H{k}{sfx}')
                 if a is not None and p is not None and np.isfinite(a) and np.isfinite(p):
                     Z[k] = complex(float(a) * np.exp(1j * float(p)))
         elif source == 'sim':
@@ -971,11 +972,17 @@ class TimeseriesMixin:
         #   'reconciled' → reconciled waveform (Q\u2032 + aligned harmonics) with the per-tile raw traces
         #   'measured'   → the standard 3-row Q(t) + harmonic decomp + FFT
         src = getattr(self, 'current_source', 'measured')
+        if self._compare_active():
+            self._plot_selected_compare_qt()
+            return
         if src == 'sim':
             self._plot_selected_sim_qt()
             return
         if src == 'reconciled':
             self._plot_selected_reconciled_qt()
+            return
+        if src == 'model':
+            self._plot_selected_model_qt()
             return
         u, v = self._selected_edge
         meas = self.G.edges[u, v].get('measurements_piv') or []
@@ -1371,7 +1378,7 @@ class TimeseriesMixin:
         # per-tile raw mean flow, oriented u→v, vs the reconciled value
         rows = []
         for m in d.get('measurements_piv') or []:
-            qm = m.get('Q_kl', m.get('mean_Q'))
+            qm = m.get('Q_profile', m.get('mean_Q'))
             if qm is None or not np.isfinite(qm):
                 continue
             sgn = 1.0 if (m.get('flow_from'), m.get('flow_to')) != (v, u) else -1.0
@@ -1382,6 +1389,34 @@ class TimeseriesMixin:
             ax2.set_yticks(range(len(rows))); ax2.set_yticklabels([f"tile {r[0]}" for r in rows], fontsize=8)
         ax2.axvline(dc, color='#2ca02c', lw=2); ax2.axvline(0, color='0.6', lw=0.6)
         ax2.set_xlabel('raw per-tile mean Q (nL/s, u→v)'); ax2.set_title('measurements', fontsize=10)
+        fig.tight_layout(); fig.show()
+
+
+    def _plot_selected_model_qt(self):
+        """Model waveform of the selected edge at the current D (mean flow + H1 + H2) over two cycles, with the
+        reconciled waveform for comparison, each normalised by its own mean flow (Q/Q̄, as Fig 7c)."""
+        if self._selected_edge is None:
+            return
+        u, v = self._selected_edge
+        d = self.G.edges[u, v]
+        if d.get('_h_amp_DC_mod') is None or d.get('_h_amp_H1_mod') is None:
+            from qtpy.QtWidgets import QMessageBox
+            QMessageBox.information(self.viewer.window._qt_window, "No model",
+                                    f"Edge ({u}, {v}) is not in the carved network (porous region or DA stub).")
+            return
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(8, 4.2), facecolor='white')
+        for src, col, ls, lab in (('reconciled', '#2ca02c', '-', 'reconciled'),
+                                  ('model', '#d62728', '--', f'RC network, D = {self._model_D * 1e4:.2f}×10⁻⁴ /Pa')):
+            Z = self._get_edge_harmonics(u, v, src)
+            if Z[0] is None or Z[0] == 0:
+                continue
+            Z = [Z[0], Z[1], Z[2], None]                              # the model has H1 and H2 only
+            t, q = self._reconstruct_qt(Z)
+            ax.plot(t, q / np.real(Z[0]), color=col, ls=ls, lw=2.0, label=lab)
+        ax.axhline(1.0, color='0.6', lw=0.6)
+        ax.set_xlabel('cycles'); ax.set_ylabel('Q / Q̄'); ax.grid(alpha=0.3); ax.legend(loc='best', fontsize=9)
+        ax.set_title(f"Edge ({u}, {v})   model mean flow {d['_h_amp_DC_mod']:+.3f} nL/s (u→v)", fontsize=11)
         fig.tight_layout(); fig.show()
 
 

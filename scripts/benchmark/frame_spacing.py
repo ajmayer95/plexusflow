@@ -39,9 +39,9 @@ def run(bundle_root, cond, name, seed):
     order = list(speeds) if C.get("order") == "asc" else sorted(speeds, reverse=True)   # fastest first = direction reference
     rows = vessel_case(Bundle(bundle_root), name, speeds, seed, nf=NF, f0=F0, background=C["bg"], contrast=C["contrast"],
                        jitter=C["jitter"], dts=dts, speed_order=order)
-    ref = next((r for r in rows if r["v"] == max(speeds) and r["dt"] == 1 and np.isfinite(r["Q_kl"])), None)
+    ref = next((r for r in rows if r["v"] == max(speeds) and r["dt"] == 1 and np.isfinite(r["Q_profile"])), None)
     for r in rows:
-        r["cond"] = cond; r["ref_sign"] = np.sign(ref["Q_kl"]) if ref else None
+        r["cond"] = cond; r["ref_sign"] = np.sign(ref["Q_profile"]) if ref else None
     print(f"  {cond} {name} s{seed}: done", flush=True)
     return rows
 
@@ -57,9 +57,9 @@ def main():
     for cond in conds:
         R = [r for r in rows if r["cond"] == cond]; speeds = sorted({r["v"] for r in R}); dts = list(dict.fromkeys(r["dt"] for r in R))
         for title, fn in (("signed Q / Q_true  (median; negative = wrong direction)",
-                           lambda rs: np.nanmedian([r["ref_sign"] * r["Q_kl"] / r["Q_true"] if r["ref_sign"] else np.nan for r in rs])),
+                           lambda rs: np.nanmedian([r["ref_sign"] * r["Q_profile"] / r["Q_true"] if r["ref_sign"] else np.nan for r in rs])),
                           ("wrong direction (fraction)",
-                           lambda rs: np.nanmean([float(np.sign(r["Q_kl"]) != r["ref_sign"]) if np.isfinite(r["Q_kl"]) and r["ref_sign"] else np.nan for r in rs])),
+                           lambda rs: np.nanmean([float(np.sign(r["Q_profile"]) != r["ref_sign"]) if np.isfinite(r["Q_profile"]) and r["ref_sign"] else np.nan for r in rs])),
                           ("|H1/DC| measured / true", lambda rs: np.nanmedian([abs(r["h1"]) / A1 for r in rs])),
                           ("H1 phase error (deg)", lambda rs: np.nanmedian([abs(np.degrees(np.angle(r["h1"]))) for r in rs]))):
             print(f"\n[{cond}] {title}\n v_max   " + "".join(f"{str(d):>7s}" for d in dts))

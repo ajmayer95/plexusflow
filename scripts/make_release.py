@@ -11,7 +11,7 @@ Writes <out>/ (default: <stage>_release_v2 next to the stage folder), in two tie
     README.md, MANIFEST.json   contents, sha256 checksums and tier per file, code commit, measurement-batch provenance
   extras (optional)
     videos_realtime/           every tile downsampled SPATIAL× in space, ~N_FRAMES frames (viewer playback only)
-    batch_kl_inputs/           Kloosterman sidecars (re-run the Kloosterman step / refit the reliability model)
+    batch_profile_inputs/           profile-fit sidecars (re-run the profile-fit step / refit the reliability model)
 With --pack, also writes <out>.core.tar.gz and <out>.extras.tar.gz (same root folder; extract both to merge).
 Usage: python scripts/make_release.py [--out PATH] [--version v2] [--spatial 4] [--frames 90] [--no-sidecars] [--pack]
 Run with numpy < 2 (system python3) so every environment can read the gpickle.
@@ -20,6 +20,7 @@ import sys, json, csv, shutil, hashlib, pickle, subprocess, datetime, argparse
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import numpy as np
+from plexusflow.compat import sidecar_dir
 import plexusflow.paths as paths
 from plexusflow.release import SCHEMA_VERSION
 
@@ -28,12 +29,12 @@ RESULTS_OPTIONAL = ("reliability_model_v1.json", "dc_qc.json", "dc_qc.csv")
 # inputs of the paper figures (scripts/make_figure*.py), copied as-is from the stage (core tier)
 FIGURE_INPUTS = ("fuse/organ_fusion.tif", "fuse/maxmed.tif", "fuse/probs_logit.tif", "mask/mask.tif", "tiles/maxmed", "assets")
 FIG3_TILE = 36                # its representative raw frame is stored (raw recordings are not released)
-EXTRAS = ("videos_realtime", "batch_kl_inputs")
+EXTRAS = ("videos_realtime", "batch_profile_inputs")
 NODE_KEYS = ("x", "y", "boundary_type", "side")
 EDGE_KEYS = ("radius", "length", "radial_uncertain", "in_carved_network")
-MEAS_SCALARS = ("tile_id", "flow_from", "flow_to", "Q_kl", "Q_kl_valid_frac", "Q_kl_n_valid", "R_kl_um", "V_CL_kl_ums",
+MEAS_SCALARS = ("tile_id", "flow_from", "flow_to", "Q_profile", "Q_profile_valid_frac", "Q_profile_n_valid", "R_profile_um", "V_CL_profile_ums",
                 "Q_pois_seg", "Q_ridge_mean", "Q_direct", "Q_pois_free")
-QUALITY_KEYS = ("kl_ok", "f", "n_slices", "n_kept", "slice_cv", "R_ratio_med", "align", "consist", "centre")
+QUALITY_KEYS = ("profile_ok", "f", "n_slices", "n_kept", "slice_cv", "R_ratio_med", "align", "consist", "centre")
 
 
 def sha256(p, chunk=1 << 22):
@@ -110,8 +111,8 @@ Coordinates are in the fused-mosaic graph frame (pixels; ~1.7 µm/px at 10×).
   Centreline polylines: `paths.npz`, key `e<edge_id>`, (N, 2) [x, y].
 - **measurements.csv** — one row per (edge, tile) optical-flow measurement. `flow_from`/`flow_to` give the direction of the
   positive mean flow; `mean_Q` (nL/s) is the DC of the harmonic fit (magnitude; sign from flow_from/flow_to); `H*_amp`/`H*_phase`
-  the harmonic fit at the tile heart rate `f0_hz`; `Q_kl` Kloosterman flux (nL/s), `R_kl_um` its fitted radius, `V_CL_kl_ums`
-  centreline speed; `q_*` the per-measurement quality record (`q_kl_ok`, kept-slice fraction `q_f`, `q_align` flow/centreline
+  the harmonic fit at the tile heart rate `f0_hz`; `Q_profile` profile-fit flux (nL/s), `R_profile_um` its fitted radius, `V_CL_profile_ums`
+  centreline speed; `q_*` the per-measurement quality record (`q_profile_ok`, kept-slice fraction `q_f`, `q_align` flow/centreline
   alignment …) from which the reliability scale c is computed (results/reliability_model_v1.json).
   Flux time series Q(t) (250 Hz, nL/s): `traces.npz`, key `m<meas_id>` (the only copy; the gpickle refers to it).
 - **tiles.csv** — per-tile heart rate `f0_hz` used for the harmonic fits, and where reviewed, its status
@@ -235,7 +236,7 @@ def main():
             shutil.copy2(paths.RESULTS / f, out / "results" / f)
     export_results(paths.RESULTS, out / "results")
     if not a.no_sidecars:
-        shutil.copytree(st / "batch_kl_inputs", out / "batch_kl_inputs")
+        shutil.copytree(sidecar_dir(st), out / "batch_profile_inputs")
     cfg = (st / "plexusflow.yaml").read_text().splitlines()
     cfg = [("# " + l if l.startswith("external_") else l) for l in cfg]
     (out / "plexusflow.yaml").write_text("# Frozen release: raw videos are not included (viewer is read-only; fresh optical flow disabled).\n"
@@ -247,7 +248,7 @@ Self-contained snapshot of the {st.name.replace("PlexusFlow", "")} yolk-sac vess
 everything the read-only viewer needs, the final DC / AC results and the inputs of every paper figure.  No raw videos — the graph is frozen.
 
 Two downloads, same root folder (extract both to merge): **core** (graph, exports, mosaic, results, figure inputs) is all
-the analysis needs; **extras** adds the per-tile realtime videos (viewer playback, Figs 1 and 4) and the Kloosterman inputs
+the analysis needs; **extras** adds the per-tile realtime videos (viewer playback, Figs 1 and 4) and the profile-fit inputs
 (Figs 3 and 6, refitting the reliability model).  All ten paper figures need both.
 
 | folder | tier | contents |
@@ -258,7 +259,7 @@ the analysis needs; **extras** adds the per-tile realtime videos (viewer playbac
 | `fuse/`, `mask/`, `tiles/maxmed/`, `assets/` | core | mosaic projections, segmentation probability and mask, per-tile projections, figure drawings |
 | `acquisition_times.json`, `tile_video_shapes.json`, `raw_subset/` | core | recording times and frame sizes of every tile (from the raw recordings) and the representative raw frame of tile 36 (Fig 3) |
 | `videos_realtime/` | extras | every tile's realtime video as used by the figures and the viewer |
-| `batch_kl_inputs/` | extras | Kloosterman sidecars (time-mean flow per vessel) — refit the reliability model without videos |
+| `batch_profile_inputs/` | extras | profile-fit sidecars (time-mean flow per vessel) — refit the reliability model without videos |
 
 **Use** (code: https://github.com/ajmayer95/plexusflow, commit `{commit}`; Python ≥ 3.10).  Paste-safe commands:
 ```bash

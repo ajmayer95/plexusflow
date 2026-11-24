@@ -1,7 +1,7 @@
-"""Anatomical radius R(s) from the mask (reconcile.radius) and the Kloosterman section rule (no flow-rate band)."""
+"""Anatomical radius R(s) from the mask (reconcile.radius) and the profile-fit section rule (no flow-rate band)."""
 import numpy as np
 
-from plexusflow.analyze.kloosterman import kloosterman_scalar, PRODUCTION_KW
+from plexusflow.analyze.profile_flux import profile_flux_scalar, PRODUCTION_KW
 from plexusflow.reconcile.radius import mask_edt, boundary_profile, summarize
 
 
@@ -34,11 +34,11 @@ def test_sections_outside_old_band_are_kept_but_reversed_ones_are_not():
     vx[:, 120:150] *= 2.2                                       # a fast stretch: > 1.5× the median section flux
     flow = np.stack([vx, np.zeros_like(vx)], axis=-1)
     cl = np.column_stack([np.full(170, 30.0), np.arange(25, 195, dtype=float)])
-    new = kloosterman_scalar(flow, cl, R, **PRODUCTION_KW)
-    old = kloosterman_scalar(flow, cl, R, **{**PRODUCTION_KW, "outlier_mode": "median_band", "median_lo": 0.5, "median_hi": 1.5})
+    new = profile_flux_scalar(flow, cl, R, **PRODUCTION_KW)
+    old = profile_flux_scalar(flow, cl, R, **{**PRODUCTION_KW, "outlier_mode": "median_band", "median_lo": 0.5, "median_hi": 1.5})
     assert new["n_valid"] > old["n_valid"] and new["Q_char"] > old["Q_char"]
     flow2 = flow.copy(); flow2[:, 60:80, 0] *= -1                # a reversed stretch is still rejected
-    rev = kloosterman_scalar(flow2, cl, R, **PRODUCTION_KW)
+    rev = profile_flux_scalar(flow2, cl, R, **PRODUCTION_KW)
     assert any(r == "sign_flip" for r in rev["per_slice_reason"]) and rev["Q_char"] > 0
 
 
@@ -50,7 +50,7 @@ def test_contradictory_sections_give_no_flux():
     vx = np.where(np.abs(rho) <= R, 1 - (rho / R) ** 2, 0.0)
     flow = np.stack([vx, np.zeros_like(vx)], axis=-1); flow[:, 102:, 0] *= -1
     cl = np.column_stack([np.full(4, 30.0), np.arange(100, 104, dtype=float)])
-    r = kloosterman_scalar(flow, cl, R, **PRODUCTION_KW)
+    r = profile_flux_scalar(flow, cl, R, **PRODUCTION_KW)
     assert r["reason"] == "too_few_consistent_slices" and np.isnan(r["Q_char"]) and r["Q_char_valid_frac"] == 0.0
     assert "ok" not in list(r["per_slice_reason"])
 
@@ -85,9 +85,9 @@ def test_tube_radii_resistance_compliance_and_fallback():
     assert T["resistance"][1] == T["compliance"][1] == 4.0      # unprofiled: stored radius for both
 
 
-def test_kloosterman_operator_time_mean_equals_q_char():
+def test_profile_flux_operator_time_mean_equals_q_char():
     """Per-frame flux from the frozen time-mean fit: its time mean equals Q_char of the time-mean field (linear operator)."""
-    from plexusflow.analyze.kloosterman import kloosterman_operator
+    from plexusflow.analyze.profile_flux import profile_flux_operator
     rng = np.random.default_rng(0)
     H, W, R = 60, 160, 6.0
     yy, xx = np.mgrid[:H, :W].astype(float); rho = yy - 30
@@ -98,9 +98,9 @@ def test_kloosterman_operator_time_mean_equals_q_char():
     frames[..., 1] = 0.05 * rng.standard_normal((T, H, W))
     mean = frames.mean(axis=0)
     cl = np.column_stack([np.full(120, 30.0), np.arange(20, 140, dtype=float)])
-    r = kloosterman_scalar(mean, cl, R, **PRODUCTION_KW)
+    r = profile_flux_scalar(mean, cl, R, **PRODUCTION_KW)
     assert np.isfinite(r["Q_char"])
-    w = kloosterman_operator(r, cl, mean.shape, slice_window=PRODUCTION_KW["slice_window"])
+    w = profile_flux_operator(r, cl, mean.shape, slice_window=PRODUCTION_KW["slice_window"])
     q_t = np.array([(w @ f.ravel())[0] for f in frames])
     assert abs(q_t.mean() - r["Q_char"]) < 1e-9 * abs(r["Q_char"])
     assert abs(np.corrcoef(q_t, s)[0, 1]) > 0.99                    # follows the waveform

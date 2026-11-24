@@ -286,7 +286,7 @@ def ridge_track_centerline(flow_avg, cl_prior, R_prior, H, W, mask=None,
                 # Mask gate — leave a[j] = NaN for bins outside the vessel
                 # mask so the centroid can't be pulled by a companion vessel
                 # or spillover flow within the ±sample_frac·R window.  Same
-                # gate kloosterman_scalar already applies for its profile
+                # gate profile_flux_scalar already applies for its profile
                 # sampling; ridge-track was silently omitting it.
                 if mask is not None:
                     mr, mc = int(round(rr)), int(round(cc))

@@ -59,7 +59,7 @@ def recordings(G, edges, tiles, K=K_FIT):
         e = tuple(e)
         for m in G.edges[e].get("measurements_piv") or []:
             t = int(m["tile_id"])
-            if not ((m.get("quality") or {}).get("kl_ok") and t in tiles and m.get("Q_t") is not None):
+            if not ((m.get("quality") or {}).get("profile_ok") and t in tiles and m.get("Q_t") is not None):
                 continue
             q = np.asarray(m["Q_t"], float); f0 = float(tf0[t]); a0, H = phasors(q, f0, K=K); s2 = residual_variance(q, f0, K=K)
             if not (np.isfinite(a0) and a0 != 0 and np.all(np.isfinite(H)) and abs(H[0]) > 0 and np.isfinite(s2) and s2 > 0):

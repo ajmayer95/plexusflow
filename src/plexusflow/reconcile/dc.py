@@ -23,8 +23,8 @@ QUASI-LIKELIHOOD (frozen 2026-11-12; superseded 2026-11-19):
    removed as mass-conserving black boxes (one conservation row per region; reconcile.regions).  Both are graph tags set
    in the workbench viewer; a stage without tags reconstructs on the whole network minus the DA anchors.
 
-1. Per edge the 1/c²-weighted average of its Kloosterman-valid recordings with weighted-RMS reliability (vessel_input;
-   before 2026-11-10 the single recording with the smallest c), Q signed u→v.  Kloosterman-failed / unmeasured edges are unimaged.
+1. Per edge the 1/c²-weighted average of its profile-valid recordings with weighted-RMS reliability (vessel_input;
+   before 2026-11-10 the single recording with the smallest c), Q signed u→v.  profile-fit-failed / unmeasured edges are unimaged.
 2. Q' minimises the quasi-likelihood of the measured flows under exact interior conservation,
 
        Q' = argmin_q  Σ_imaged ℓ_k(q_k) / m  +  (ε/2) Σ_unimaged q_k²      s.t.  B_I q = 0,
@@ -44,9 +44,9 @@ QUASI-LIKELIHOOD (frozen 2026-11-12; superseded 2026-11-19):
 3. Emergent boundary f = B Q'; passive comparison with K = r⁴/ℓ.  ``radius`` picks r (also handed to the AC model):
    "tube" (default since 2026-11-17) = the uncalibrated tube-interior segmentation radius (reconcile/radius.tube_radii on
    <stage>/mask/mask.tif): median walled half-width for resistance, volume-equivalent √⟨a²⟩ for compliance (returned as
-   ``radius_compliance`` for the AC model); "consensus" = √(R_graph · median R_kl) (sensitivity analysis; default before
+   ``radius_compliance`` for the AC model); "consensus" = √(R_graph · median R_profile) (sensitivity analysis; default before
    2026-11-17); "anatomical" = the calibrated segmentation radius (results/anatomical_radius.pkl); or an array (used for
-   both).  The flux estimator is not affected: it keeps the free-radius Kloosterman fit.
+   both).  The flux estimator is not affected: it keeps the free-radius profile fit.
 
 Before 2026-11-03 step 2 was a damped iteratively re-weighted projection whose iterates settle into a small limit cycle
 (21S, 27S); Q' was the average of the last 100 iterates over 8 perturbed runs.  Both estimators have the same
@@ -359,7 +359,7 @@ def reconcile_dc(G, model, M, dom=None, topology=True, tol=1e-10, max_iter=500, 
                     for r in dom.get("regions", [])]
     rg = np.array([G.edges[e]["radius"] for e in sub], float)
     def _median_rkl(e):
-        r = [m["R_kl_um"] / PX_UM for m in G.edges[e].get("measurements_piv") or [] if m.get("R_kl_um") and np.isfinite(m["R_kl_um"])]
+        r = [m["R_profile_um"] / PX_UM for m in G.edges[e].get("measurements_piv") or [] if m.get("R_profile_um") and np.isfinite(m["R_profile_um"])]
         return float(np.median(r)) if r else np.nan
     rt = np.array([_median_rkl(e) for e in sub])
     r_cons = np.sqrt(rg * np.where(np.isfinite(rt), rt, rg)); L = np.maximum(np.array([G.edges[e]["length"] for e in sub], float), 1.0)   # ≥ 1 px: zero-length splice artefacts

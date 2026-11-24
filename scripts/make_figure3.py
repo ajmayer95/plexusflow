@@ -8,14 +8,14 @@ The representative vessel (edge 75489–75638) in its own tile (36), the tile of
      section's fit used are drawn (per_slice_fit_bins): the cross-section sampling reaches past the vessel edge, and at
      section 1 the mask also covers a neighbouring vessel's lumen — those samples never enter the flux (2026-11-19).
   c  pulsatile flux: per-frame Q(t) = (π/2)⟨R_s² U_s(t)⟩_s (geometry frozen from the time-mean fit, centreline speed U_s
-     per frame; kloosterman.per_frame operator) with its truncated Fourier series Q_N(t) = Q̂_0 + Σ_{n=1..N} Q̂_n cos(2πn f0 t + φ_n), N = 3 (the fit),
+     per frame; profile_flux.per_frame operator) with its truncated Fourier series Q_N(t) = Q̂_0 + Σ_{n=1..N} Q̂_n cos(2πn f0 t + φ_n), N = 3 (the fit),
      A_k = |H_k|, φ_k = arg H_k (Q̂_n = |H_n|, φ_n = arg H_n, H_n the complex amplitude); in the background the modes: Q̂_0 and each
      harmonic drawn about it, Q̂_0 + Q̂_n cos(2πn f0 t + φ_n), at half the fit's line width. right: every beat folded on the
      cardiac phase (mean ± SD) against the model.
 The per-section flux along the vessel and the fixed-radius peak/trough profiles are in the SI figure
 (script in the git history), which reused load_vessel() from here.
 
-Inputs: batch_kl_inputs/tile_36.pkl.gz, tiles/maxmed/vid36_maxmed.tif, the canonical graph (measurements_piv Q_t,
+Inputs: batch_profile_inputs/tile_36.pkl.gz, tiles/maxmed/vid36_maxmed.tif, the canonical graph (measurements_piv Q_t,
 tile_f0_piv).  Writes figures/fig3/fig3.{png,pdf,tif}.
 """
 from __future__ import annotations
@@ -30,8 +30,9 @@ import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src")); sys.path.insert(0, str(Path(__file__).resolve().parent))
+from plexusflow.compat import sidecar_dir, sidecar_inputs
 import plexusflow.paths as _paths
-from plexusflow.analyze.kloosterman import kloosterman_scalar, PRODUCTION_KW
+from plexusflow.analyze.profile_flux import profile_flux_scalar, PRODUCTION_KW
 from plexusflow.analyze.centerline import _centerline_geometry
 from plexusflow.analyze.constants import PX_SIZE_UM, FRAME_DT_S
 from plexusflow.reconcile.harmonics import phasors, FS
@@ -49,9 +50,9 @@ HALO = [pe.withStroke(linewidth=1.6, foreground="black")]
 def load_vessel():
     """Everything both Fig 3 and its SI companion need for the representative vessel."""
     P = _paths.STAGE; G = _paths.load_graph(); tf0 = G.graph["tile_f0_piv"]
-    ki = (pickle.load(gzip.open(P / "batch_kl_inputs" / f"tile_{TILE}.pkl.gz"))["kl_inputs"]).get(EDGE)
+    ki = sidecar_inputs(pickle.load(gzip.open(sidecar_dir(P) / f"tile_{TILE}.pkl.gz"))).get(EDGE)
     vf = np.asarray(ki["vfield_mean"], float); cl = np.asarray(ki["cl_used"], float); R0 = float(ki["R_prior_px"]); off = np.asarray(ki["roi_offset"], float)
-    res = kloosterman_scalar(vf, cl, R0, mask=ki.get("ridge_mask_roi"), **KW)
+    res = profile_flux_scalar(vf, cl, R0, mask=ki.get("ridge_mask_roi"), **KW)
     valid = np.asarray(res["valid_mask"], bool); conv = float(ki["conv"])
     m = next(x for x in G.edges[EDGE]["measurements_piv"] if x["tile_id"] == TILE)
     q = np.asarray(m["Q_t"], float); f0 = float(tf0[TILE]); t = np.arange(len(q)) / FS
@@ -77,7 +78,7 @@ def truncated_power_fractions(G, K=3):
     for _, _, d in G.edges(data=True):
         Pv, Tv = [], []
         for m in d.get("measurements_piv") or []:
-            if not ((m.get("quality") or {}).get("kl_ok") and m["tile_id"] in band and m.get("Q_t") is not None):
+            if not ((m.get("quality") or {}).get("profile_ok") and m["tile_id"] in band and m.get("Q_t") is not None):
                 continue
             q = np.asarray(m["Q_t"], float); t = np.arange(len(q)) / FS; ok = np.isfinite(q)
             if ok.sum() < 200:

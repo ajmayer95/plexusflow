@@ -112,7 +112,7 @@ def main():
     for n_ in list(dom['V']):                                   # zero = vitelline veins, as Fig 7
         for e_ in G.edges(n_):
             for m in G.edges[e_].get('measurements_piv') or []:
-                if int(m['tile_id']) == ZT and m.get('Q_t') is not None and (m.get('quality') or {}).get('kl_ok'):
+                if int(m['tile_id']) == ZT and m.get('Q_t') is not None and (m.get('quality') or {}).get('profile_ok'):
                     a0_, H_ = _phz(m['Q_t'], tf0[ZT]); w_ = max(_coh(m['Q_t'], tf0[ZT]), 0)
                     for k in (1, 2):
                         zr[k] += w_ * np.exp(1j * np.angle(np.sign(a0_) * H_[k - 1] * np.exp(-1j * k * (psi14 + d14))))

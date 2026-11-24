@@ -83,12 +83,24 @@ plexusflow condense    STAGE        # one edge per vessel
 plexusflow analyze     STAGE        # optical flow → Q(t) → harmonics per vessel and tile
 plexusflow workbench   STAGE        # mark aorta/vein anchors and tag open / topology-uncertain regions
 bash scripts/run_stage.sh STAGE     # mean flow, pulsatile field, distensibility fit
-plexusflow view        STAGE        # read-only viewer (measured and reconciled flow, video overlay)
+plexusflow view        STAGE        # read-only viewer: measured / reconciled flow, RC-network model with a distensibility slider, time series
 plexusflow info        STAGE        # which artefacts exist
 ```
 
 See [docs/pipeline.md](docs/pipeline.md) for every step, the per-stage settings in `plexusflow.yaml`, and the coordinate
 frames and outputs.
+
+### Data written by earlier versions
+
+Graphs, sidecars and releases written before 2026-11-24 use older names for the per-vessel flux estimator (parabolic
+profile fits per cross-section).  They are read as they are: every loader passes stored data through
+`plexusflow.compat`, the only module that knows the old names, and a new batch writes only the current ones
+(`Q_profile`, `quality.profile_ok`, `batch_profile_inputs/`, …).  To rewrite a stage folder in the current names
+(optional; the graph is backed up first, run with system python3 / numpy < 2):
+
+```bash
+python3 -m plexusflow.compat "$PLEXUSFLOW_STAGE"
+```
 
 ## Tests
 

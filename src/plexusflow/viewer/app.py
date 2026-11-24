@@ -23,7 +23,7 @@ Or from Python:
 """
 from __future__ import annotations
 
-from ._common import (  # noqa: F401 - re-exported: app.py was the single viewer module
+from ._common import (WORKBENCH_ONLY_PROPERTIES,   # noqa: F401 - re-exported: app.py was the single viewer module
     _note_suppressed,
     CATEGORICAL_FIELDS,
     DEFAULT_FIELDS,
@@ -80,14 +80,19 @@ from .edit import EditMixin
 from .refine import RefineMixin
 from .optical_flow import OpticalFlowMixin
 from .timeseries import TimeseriesMixin
+from .model import ModelMixin
+from .compare import CompareMixin
+from .vessel_panel import VesselPanelMixin
 
 
-class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMixin, TimeseriesMixin):
+class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMixin, TimeseriesMixin, ModelMixin, CompareMixin, VesselPanelMixin):
     """napari-based mosaic viewer with field colouring + edge inspection.
 
     Two capability levels (``mode``):
       'view'      — purely for viewing: never writes any file, no fresh optical flow, no tagging or boundary
-                    editing, no simulations.  The default, and the only mode allowed on a frozen release.
+                    editing.  Sources: Measured, Reconciled and Model (the Fig 7 RC network at an adjustable
+                    distensibility, driven by the reconciled boundary fluxes; in memory only).  The default, and the
+                    only mode allowed on a frozen release.
       'workbench' — adds fresh OF on a selected vessel, radial-uncertainty tagging, boundary marking (Edit tab)
                     and saving those to the stage graph; the Simulate tab appears only if `plexusmech` is installed.
     """
@@ -150,6 +155,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self.G = self._load_graph()
         # Reconciliation outputs (DC Q', AC field) from the stage/release results folder; the
         # 'Reconciled' data source reads them.  In-memory only (`_h_*_rec` edge attrs).
+        self._rec_D = self._rec_A = None      # set by _load_reconciliation
         self._rec = self._load_reconciliation()
         self.mosaic = self._load_tiff() if self.tiff_path else None
         self.tiles = self._load_tile_positions() if self.tile_positions_path else {}
@@ -171,11 +177,14 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         # statistically resolved cardiac harmonics).  Stored on the
         # in-memory graph only — never written back to the gpickle.
         # Cheap enough to do once at startup (~30 s for ~6k edges).
-        self._precompute_harmonic_classes()
-        # Precompute measured viscous dissipation per edge from PIV
-        # Q_t + geometry.  Stored as `_meas_dissipation` (W) on edge
-        # attrs, in-memory only.
-        self._precompute_measured_dissipation()
+        # The read-only viewer needs neither when the reconciliation is loaded: Measured comes from the combined
+        # pre-projection field, and harmonic class / dissipation are workbench-only properties.
+        if self.workbench or not getattr(self, '_pre_available', False):
+            self._precompute_harmonic_classes()
+            # Precompute measured viscous dissipation per edge from PIV
+            # Q_t + geometry.  Stored as `_meas_dissipation` (W) on edge
+            # attrs, in-memory only.
+            self._precompute_measured_dissipation()
         # ── Four-selector field model ──────────────────────────────
         # Source already added below as `self.current_source`.
         # Quantity: 'Q' or 'P'.  P only valid in Simulated source.
@@ -203,7 +212,6 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._kcl_layer = None
         self.show_bnd_levels = False
         self._bnd_levels_layer = None
-        self._rec_D = None
         self._rec_sym_fb = None        # node → net inflow under the 50 %-left fit (cached)
         self._edges_layer = None
         self._nodes_layer = None
@@ -602,17 +610,76 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             # Fallthrough: unsupported prop for sim_carved → None
             return None
 
+        # ── Model source: Fig 7 RC network at the slider's D (`_h_*_mod`, viewer/model.py); defined on every carved edge.
+        if src == 'model':
+            k_idx = HARMONIC_KEYS.index(self.current_harmonic)
+            if k_idx > 2:
+                return None
+            if prop in ('radius', 'length'):
+                return _safe_float(d.get(prop))
+            if qty == 'P':                       # vessel-mean pressure (mean of its end nodes) and drop, Pa
+                tag = 'DC' if k_idx == 0 else f'H{k_idx}'
+                p, dp = d.get(f'_h_p_{tag}_mod'), d.get(f'_h_dp_{tag}_mod')
+                if p is None:
+                    return None
+                if prop == 'magnitude':
+                    return abs(p)
+                if prop == 'signed':
+                    return float(np.real(p))
+                if prop == 'phase':
+                    if not k_idx:
+                        return None
+                    ref = self._fig7_phref()
+                    if ref is None:
+                        return float(np.angle(p))
+                    from ..ac.display import phase_lag_deg
+                    return float(phase_lag_deg(p, 1.0, k_idx, ref))
+                if prop == 'drop':
+                    return abs(dp) if dp is not None else None
+                return None
+            if qty != 'Q':
+                return None
+            dc = _safe_float(d.get('_h_amp_DC_mod'))
+            if prop == 'pulse_power':
+                a1, a2 = _safe_float(d.get('_h_amp_H1_mod')), _safe_float(d.get('_h_amp_H2_mod'))
+                return (a1 ** 2 + a2 ** 2) / dc ** 2 if None not in (a1, a2, dc) and dc else None
+            if k_idx == 0:
+                if dc is None:
+                    return None
+                return dc if prop == 'signed' else (abs(dc) if prop == 'magnitude' else None)
+            if k_idx > 2:
+                return None
+            amp, ph = _safe_float(d.get(f'_h_amp_H{k_idx}_mod')), _safe_float(d.get(f'_h_phase_H{k_idx}_mod'))
+            if prop == 'magnitude':
+                return amp
+            if prop == 'signed':
+                return amp * np.cos(ph) if amp is not None and ph is not None else None
+            if prop == 'phase':
+                ref = self._fig7_phref()
+                if ph is None or ref is None:
+                    return ph
+                from ..ac.display import phase_lag_deg
+                return float(phase_lag_deg(np.exp(1j * ph), dc if dc else 1.0, k_idx, ref))
+            if prop == 'PI':
+                return 2.0 * abs(amp) / abs(dc) if amp is not None and dc else None
+            return None
+
         # ── Reconciled source: DC Q' + tile-aligned AC field (`_h_*_rec`, see _load_reconciliation).
         # Phases only where the winner tile's time gauge is determined (bootstrap SD ≤ 30°).
         if src == 'reconciled':
             if qty != 'Q':
                 return None
+            if prop in ('radius', 'length'):
+                return _safe_float(d.get(prop))
             k_idx = HARMONIC_KEYS.index(self.current_harmonic)
             if prop == 'rec_dc_sd':
                 sd, dc = _safe_float(d.get('_rec_Qp_sd')), _safe_float(d.get('_h_amp_DC_rec'))
                 return sd / abs(dc) if sd is not None and dc else None
             if prop == 'rec_gauge_sd':
                 return _safe_float(d.get('_rec_gauge_sd'))
+            if prop == 'pulse_power':
+                a1, a2, dc = (_safe_float(d.get(k_)) for k_ in ('_h_amp_H1_rec', '_h_amp_H2_rec', '_h_amp_DC_rec'))
+                return (a1 ** 2 + a2 ** 2) / dc ** 2 if None not in (a1, a2, dc) and dc else None
             tf = self.current_tile_filter
             tin = None
             if tf is not None:                                    # Tile filter: only this tile's recordings
@@ -659,7 +726,13 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 ph = _safe_float(d.get(f'_h_phase_H{k_idx}_rec'))
                 return amp * np.cos(ph) if amp is not None and ph is not None else None
             if prop == 'phase':
-                return _safe_float(d.get(f'_h_phase_H{k_idx}_rec')) if d.get('_rec_phase_ok') else None
+                if not d.get('_rec_phase_ok'):
+                    return None
+                ph, dc, ref = _safe_float(d.get(f'_h_phase_H{k_idx}_rec')), _safe_float(d.get('_h_amp_DC_rec')), self._fig7_phref()
+                if ph is None or ref is None or k_idx > 2:
+                    return ph
+                from ..ac.display import phase_lag_deg
+                return float(phase_lag_deg(np.exp(1j * ph), dc if dc else 1.0, k_idx, ref))
             if prop == 'PI':
                 dc = _safe_float(d.get('_h_amp_DC_rec'))
                 if amp is None or not dc:
@@ -674,6 +747,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         if (src == 'measured' and qty == 'Q'
                 and self.current_tile_filter is not None):
             return self._resolve_tile_filtered_value(u, v, d, prop)
+
+        # Read-only viewer: Measured = the combined measurement before the projection (`_attach_pre_projection`).
+        if (src == 'measured' and qty == 'Q' and self._pre_active()
+                and prop in ('magnitude', 'signed', 'phase', 'PI', 'pulse_power')):
+            return self._pre_value(d, prop)
 
         # BC-anchor phase override: for edges incident to a boundary
         # anchor node, use the tile-14-only measurement (raw φ +
@@ -1092,6 +1170,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         print(f"Loading graph: {self.graph_path}")
         with open(self.graph_path, 'rb') as f:
             G = pickle.load(f)
+            from ..compat import upgrade_graph; upgrade_graph(G)   # legacy key names → current
         from ..paths import attach_external_traces      # release graphs keep Q(t) in export/traces.npz
         G = attach_external_traces(G, self.graph_path)
         print(f"  {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
@@ -1868,6 +1947,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             if _ml is not None and self.viewer.layers.selection.active is _ml and str(_ml.mode) in ('paint', 'erase', 'fill'):
                 return
             row, col = self._world_to_mosaic_data(event.position)
+            col = self._compare_unshift(col)              # a click in a comparison panel → the same vessel
             # Edit-tab boundary marking takes priority — when a mode is
             # active, every click is a node-tag action.
             if getattr(self, '_edit_mode', None):
@@ -1967,21 +2047,35 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         if not self._src_radio_sim_carved.isEnabled():
             self._src_radio_sim_carved.setToolTip(
                 "Run the porous-carved sim in the Carved Sim tab to enable.")
+        self._src_radio_model = QRadioButton("Model")
+        self._src_radio_model.setChecked(self.current_source == 'model')
+        self._src_radio_model.setEnabled(self._model_available())
+        self._src_radio_model.setToolTip(
+            "Fig 7 RC network at an adjustable wall distensibility, driven by the reconciled boundary fluxes."
+            if self._model_available() else
+            "Needs plexusmech and results/dc_reconciled_v3.pkl, ac_field_v9.pkl, ac_estimate_v11.json.")
         self._src_button_group = QButtonGroup(src_group)
         self._src_button_group.addButton(self._src_radio_measured)
         self._src_button_group.addButton(self._src_radio_rec)
+        self._src_button_group.addButton(self._src_radio_model)
         self._src_button_group.addButton(self._src_radio_sim)
         self._src_button_group.addButton(self._src_radio_sim_carved)
         self._src_radio_measured.toggled.connect(self._on_source_change)
         self._src_radio_rec.toggled.connect(self._on_source_change)
+        self._src_radio_model.toggled.connect(self._on_source_change)
         self._src_radio_sim.toggled.connect(self._on_source_change)
         self._src_radio_sim_carved.toggled.connect(self._on_source_change)
         src_lay.addWidget(self._src_radio_measured)
         src_lay.addWidget(self._src_radio_rec)
+        src_lay.addWidget(self._src_radio_model)
         src_lay.addWidget(self._src_radio_sim)
         src_lay.addWidget(self._src_radio_sim_carved)
+        for _r in (self._src_radio_sim, self._src_radio_sim_carved):     # simulations: workbench only
+            _r.setVisible(self.workbench)
         src_lay.addStretch(1)
         layout.addWidget(src_group)
+        layout.addWidget(self._build_model_controls())
+        layout.addWidget(self._build_compare_controls())
 
         # Field selector — four small combos compose the colormap.
         fld_group = QGroupBox("Color edges by")
@@ -2082,6 +2176,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._tag_class = TOPOLOGY
         _cls_lay.addWidget(self._tag_class_combo)
         _ru_lay.addWidget(_cls_row)
+        self._tag_class_row = _cls_row
 
         # Click-to-tag mode: while ON, every click on a vessel toggles
         # its tag instead of showing info.  Much faster for bulk tagging.
@@ -2210,6 +2305,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             "color: #aaaaaa; font-size: 11px;")
         _fm_lay.addWidget(self._flow_mismatch_status_lbl)
         fld_lay.addWidget(_fm_row)
+        self._flow_mismatch_row = _fm_row
         self._compute_flow_mismatch_edges()   # initial status + cache
 
         # Colour-bound controls — two modes selectable by the combo:
@@ -2232,6 +2328,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._bounds_mode_combo.currentIndexChanged.connect(
             self._on_bounds_mode_change)
         b_lay.addWidget(self._bounds_mode_combo)
+        b_lay.addStretch(1)
+        fld_lay.addWidget(bounds_row)
+        bounds_row = QWidget()                      # second line: the numbers (percentiles or manual limits)
+        b_lay = QHBoxLayout(bounds_row); b_lay.setContentsMargins(16, 0, 0, 0)
         # Percentile spinboxes (visible when mode == 'Percentile')
         self._pct_lo_lbl = QLabel(' lo pct:')
         b_lay.addWidget(self._pct_lo_lbl)
@@ -2327,6 +2427,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         pr_lay.addWidget(self._phase_zero_boundary_chk)
         pr_lay.addStretch(1)
         fld_lay.addWidget(phase_row)
+        self._phase_offset_row = phase_row
 
         # Colour bar toggle — overlays a floating colorbar on top of the
         # napari canvas (right side, vertically centred).  No embedded
@@ -2392,6 +2493,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         tspct_lay.addWidget(self._tspct_filter_spin)
         tspct_lay.addStretch(1)
         fld_lay.addWidget(tspct_row)
+        self._snr_h1_row = tspct_row
 
         # H2 fundamental SNR percentile filter — same shape as H1 above.
         tspct_h2_row = QWidget()
@@ -2413,12 +2515,14 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         tspct_h2_lay.addWidget(self._tspct_h2_filter_spin)
         tspct_h2_lay.addStretch(1)
         fld_lay.addWidget(tspct_h2_row)
+        self._snr_h2_row = tspct_h2_row
 
         # Percentile filter on viscous dissipation Φ — gates measured-Q
         # fields by network-wide percentile of `_meas_dissipation` (W).
         # Tooltip shows the actual distribution so the user knows what
         # cut they're applying in absolute terms.  0 = no filtering.
         diss_row = QWidget()
+        self._dissipation_row = diss_row
         diss_lay = QHBoxLayout(diss_row)
         diss_lay.setContentsMargins(0, 0, 0, 0)
         diss_lay.addWidget(QLabel('Hide bottom % by dissipation Φ:'))
@@ -2623,10 +2727,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             "Only with Tile filter = All tiles and no video: the extra window that puts every recording\n"
             "on a common cardiac phase.  Off (default): Q/Q̄ (pulsatility visible).  On: (Q − Q̄)/|H1| (shape only).")
         self._aligned_norm_chk.toggled.connect(lambda c: setattr(self, '_aligned_norm_mean', not c))
-        inspect_lay.addWidget(self._aligned_norm_chk)
         # ── Overlay: compare current source with a second source ────────
         _cmp_row = QHBoxLayout()
-        _cmp_row.addWidget(QLabel("Compare current source with:"))
+        self._overlay_label = QLabel("Compare current source with:")
+        _cmp_row.addWidget(self._overlay_label)
         from qtpy.QtWidgets import QComboBox
         self._overlay_source_combo = QComboBox()
         self._overlay_source_combo.addItem("(none)", None)
@@ -2713,7 +2817,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         # Comprehensive stage-by-stage OF pipeline walkthrough for the last
         # fresh OF run.  ('Compute fresh PIV/OF' already pops it automatically;
         # this button re-opens it.)  Folds in what used to be three separate
-        # popups — the 4-panel diagnostic, the Kloosterman per-slice figure,
+        # popups — the 4-panel diagnostic, the profile-fit per-slice figure,
         # and the vessel-quality verdict — into one single figure driven by
         # one data path.
         self._of_pipeline_btn = QPushButton("Show OF pipeline walkthrough")
@@ -2723,7 +2827,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             "fresh OF run: ROI selection, background subtraction, mean flow "
             "field, centerline refinement (coarse shift → per-slice snap → "
             "offset smoothing), vessel mask + tangent, radial-profile binning, "
-            "the three radii + how each is chosen, the Kloosterman per-slice "
+            "the three radii + how each is chosen, the profile-fit per-slice "
             "gate with reject reasons, Q-estimator comparison, and Q(t) — plus "
             "an overall PASS / CROP / RAILING verdict.")
         self._of_pipeline_btn.clicked.connect(self._show_of_pipeline_figures)
@@ -2748,6 +2852,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._clear_comp_btn.setEnabled(False)
         self._clear_comp_btn.clicked.connect(self._clear_comparison)
         inspect_lay.addWidget(self._clear_comp_btn)
+        inspect_lay.addWidget(self._aligned_norm_chk)
         self._edge_card_btn = QPushButton("Edge flux card (recordings \u2192 input \u2192 Q\u2032)")
         self._edge_card_btn.setToolTip(
             "For the selected edge: every tile recording, the single averaged input Q\u0304 the\n"
@@ -2851,7 +2956,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         # Info label (View tab footer)
         _mode_txt = ("<b>Workbench</b> — fresh OF, tagging and boundary edits; saves go to the stage graph."
                      if self.workbench else
-                     "<b>Viewer</b> — read-only: nothing is written, no OF re-runs."
+                     "<b>Viewer</b> — read-only: nothing is written, no OF re-runs; the Model source is recomputed in memory."
                      + (" (frozen release)" if self.is_release else ""))
         info = QLabel(
             f"<small>{self.G.number_of_edges()} edges, "
@@ -2860,8 +2965,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         view_layout.addWidget(info)
 
         # Assemble the tabbed panel
-        tabs.addTab(view_panel, "View")
-        tabs.addTab(ts_panel, "Time series")
+        from qtpy.QtCore import Qt as _Qt
+        for _panel, _name in ((view_panel, "View"), (ts_panel, "Vessel")):   # scroll when the window is short
+            _sa = QScrollArea(); _sa.setWidgetResizable(True); _sa.setWidget(_panel)
+            _sa.setHorizontalScrollBarPolicy(_Qt.ScrollBarAlwaysOff); _sa.setFrameShape(QScrollArea.NoFrame)
+            tabs.addTab(_sa, _name)
         # Wrap the Simulate tab in a scroll area so the Run button is always
         # reachable even when optional sections are expanded.
         _sim_scroll = QScrollArea()
@@ -2889,7 +2997,9 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 print(f"  (Refine tab unavailable: {_e})")
         self._edit_mode = None
         self._apply_capabilities()
+        self._compact_panel(tabs)
         self.viewer.window.add_dock_widget(tabs, name="Controls", area='right')
+        self._build_vessel_dock()
         self._selected_edge: Optional[Tuple[int, int]] = None
         # Radial-uncertainty tagging: viewer-editable per-edge flag
         # (``radial_uncertain=True``) that overrides the edge colour with
@@ -3092,7 +3202,12 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         else:
             finite_arr = np.array(
                 [v for v in vals if v is not None], dtype=float)
-            if len(finite_arr) == 0:
+            _sty = self._fig7_style()
+            if _sty is not None:                      # Fig 7 scale: fixed norm and colormap, values already final
+                cmap, norm = _sty['cmap'], _sty['norm']
+                self._last_vmin, self._last_vmax = float(norm.vmin), float(norm.vmax)
+                colors = [NO_DATA_COLOR if v_ is None else mcolors.to_hex(cmap(norm(v_))) for v_ in vals]
+            elif len(finite_arr) == 0:
                 colors = [NO_DATA_COLOR] * len(lines)
             else:
                 # Signed / cyclic fields render on a fixed linear scale —
@@ -3218,6 +3333,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                             v_use = v_
                         colors.append(mcolors.to_hex(cmap(norm(v_use))))
 
+        # Compare side by side: every panel (this one included) on one colour scale (viewer/compare.py).
+        if self._compare_active() and not is_categorical:
+            colors = self._compare_recolour(colors)
+
         # Radial-uncertainty highlight override.  Runs LAST so it wins
         # over the field-driven colormap.  Only applies when the user
         # has the highlight toggle on.
@@ -3267,6 +3386,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 edge_width=widths,
                 name='Edges', opacity=0.7,
             )
+        if self._compare_active() and not is_categorical:
+            self._compare_draw(lines, widths)
+        else:
+            self._compare_clear(); self._compare_mark_selection()
         n_usable = sum(1 for v in vals if v is not None)
         print(f"  Drew {len(lines)} edges  "
               f"({n_usable} coloured by {field}, "
@@ -3345,7 +3468,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 vhi = vlo + 1e-9
             cmap = (plt.get_cmap('hsv') if 'phase' in field
                     else plt.get_cmap('viridis'))
-            if 'phase' in field:
+            _sty = self._fig7_style()
+            if _sty is not None:
+                cmap, norm = _sty['cmap'], _sty['norm']
+                face = [NO_DATA_COLOR if not np.isfinite(v_) else mcolors.to_hex(cmap(norm(v_))) for v_ in arr]
+            elif 'phase' in field:
                 # π-unified: fold onto [0, π] (see edge phase pipeline)
                 norm = mcolors.Normalize(vmin=0.0, vmax=float(np.pi))
                 _ph_offset_node = float(np.radians(
@@ -3368,9 +3495,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 norm = mcolors.Normalize(vmin=float(vlo), vmax=float(vhi))
                 _ph_offset_node = 0.0
                 _ph_bnd_offset_node = 0.0
-            face = []
+            if _sty is None:
+                face = []
             _is_phase = 'phase' in field
-            for v_ in arr:
+            for v_ in (arr if _sty is None else []):
                 if not np.isfinite(v_):
                     face.append(NO_DATA_COLOR)
                 else:
@@ -3517,12 +3645,23 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             return  # nothing meaningful to draw
         is_phase = (self.current_property == 'phase')
         use_log = bool(self.log_scale) and not is_phase
+        _sty = self._fig7_style()
         # Compose colorbar label from the selectors so it always reads
         # cleanly: "Magnitude |·|  (Q, H₁)", "Pulsatility index  (P)", …
         label = self._current_field_label()
         # Build the matplotlib figure (Agg, transparent bg, white text).
         dpi = 100
-        if is_phase:
+        if _sty is not None:                          # Fig 7 scale: horizontal bar with the paper's ticks
+            fig, ax = plt.subplots(figsize=(3.6, 0.95), dpi=dpi)
+            sm = plt.cm.ScalarMappable(cmap=_sty['cmap'], norm=_sty['norm']); sm.set_array([])
+            cbar = fig.colorbar(sm, cax=ax, orientation='horizontal')
+            cbar.set_ticks(list(_sty['ticks'])); cbar.ax.minorticks_off()
+            cbar.set_ticklabels([f"{t:g}" for t in _sty['ticks']])
+            cbar.set_label(_sty['label'], color='white', fontsize=11, labelpad=4)
+            cbar.ax.xaxis.set_tick_params(color='white', labelcolor='white', labelsize=10, width=1.5, length=4)
+            fig.patch.set_facecolor((0, 0, 0, 0)); ax.patch.set_alpha(0)
+            fig.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.55)
+        elif is_phase:
             # Half-circle color wheel for π-unified phase (matches
             # the [0, π] fold applied in the display pipeline).
             fig_sz = 2.8
@@ -3565,6 +3704,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             fig.subplots_adjust(left=0.05, right=0.35, top=0.97, bottom=0.03)
         fig.canvas.draw()
         buf = np.asarray(fig.canvas.buffer_rgba()).copy()
+        _nz = np.argwhere(buf[..., 3] > 0)                 # trim the transparent margin so the bar sits at the edge
+        if _nz.size:
+            (r0, c0), (r1, c1) = _nz.min(0), _nz.max(0)
+            buf = np.ascontiguousarray(buf[max(r0 - 2, 0):r1 + 3, max(c0 - 2, 0):c1 + 3])
         plt.close(fig)
         h, w, _ = buf.shape
         qimg = QImage(buf.data, w, h, 4 * w, QImage.Format_RGBA8888)
@@ -3579,11 +3722,12 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         overlay.setStyleSheet("background: transparent;")
         overlay.raise_()
         # Position: right edge, vertically centred.
+        _horizontal = _sty is not None
         def _reposition():
             pw = canvas_widget.width()
             ph = canvas_widget.height()
-            x = max(0, pw - w - 20)
-            y = max(0, (ph - h) // 2)
+            x = max(0, pw - w - 8)                        # flush right
+            y = max(0, ph - h - 12) if _horizontal else max(0, (ph - h) // 2)   # horizontal bar: bottom right
             overlay.move(x, y)
         _reposition()
         overlay.show()
@@ -3798,6 +3942,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             return
         u, v = self.edge_list[i]
         self._selected_edge = (u, v)
+        self._compare_mark_selection()
         self._plot_qt_btn.setEnabled(True)
         if hasattr(self, '_plot_overlay_btn'):
             self._plot_overlay_btn.setEnabled(True)
@@ -3884,11 +4029,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 f0_ = MeasurementView(mm).harm.f0_hz
                 mv_ = MeasurementView(mm); ff_, ft_ = mv_.flow_from, mv_.flow_to
                 dir_ = f", flow {ff_}\u2192{ft_}" if ff_ is not None and ft_ is not None else ""
-                if q_.get('kl_ok'):
-                    info.append(f"    Kloosterman |Q|: {abs(float(mm.get('Q_kl', float('nan')))):.4g} nL/s{dir_}"
+                if q_.get('profile_ok'):
+                    info.append(f"    profile-fit |Q|: {abs(float(mm.get('Q_profile', float('nan')))):.4g} nL/s{dir_}"
                                 f"   (alignment {float(q_.get('align', float('nan'))):.2f}, parabolicity {float(q_.get('p', float('nan'))):.2f})")
                 else:
-                    info.append("    Kloosterman: no flux (fit failed)")
+                    info.append("    profile-fit: no flux (fit failed)")
                 if mo_:
                     info.append(f"    motion: z_DC {float(mo_.get('z_dc', float('nan'))):.1f}, cardiac p {float(mo_.get('p_ac', float('nan'))):.1e}"
                                 + (f", f0 {float(f0_):.2f} Hz" if f0_ else ""))
@@ -3944,6 +4089,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 info.append(f"  Resolved: {_harmonic_class_label(klass)} "
                             f"(threshold Z > {HARMONIC_SNR_THRESHOLD:.0f})")
         self._info_box.setPlainText("\n".join(info))
+        self._on_vessel_selected()
 
 
     def _show_edge_card(self):
@@ -4032,7 +4178,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         q_p_item = qmodel.item(1)  # 'P' entry
         if q_p_item is not None:
             flags = q_p_item.flags()
-            if sim_active and self.current_source == 'sim':
+            if (sim_active and self.current_source == 'sim') or self.current_source == 'model':
                 q_p_item.setFlags(flags | Qt.ItemIsEnabled
                                     | Qt.ItemIsSelectable)
             else:
@@ -4054,6 +4200,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 continue
             ok = _combo_valid(self.current_source, self.current_quantity,
                                key, self.current_harmonic)
+            listed = (_combo_valid(self.current_source, self.current_quantity, key, 'H1')
+                      or _combo_valid(self.current_source, self.current_quantity, key, 'DC'))
+            self._property_combo.view().setRowHidden(
+                i, not listed or (not self.workbench and key in WORKBENCH_ONLY_PROPERTIES))
+            ok = ok and (self.workbench or key not in WORKBENCH_ONLY_PROPERTIES)
             flags = item.flags()
             if ok:
                 item.setFlags(flags | Qt.ItemIsEnabled
@@ -4071,6 +4222,12 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 self._property_combo.blockSignals(True)
                 self._property_combo.setCurrentIndex(first_valid_idx)
                 self._property_combo.blockSignals(False)
+        # The Model has H1 and H2 only.
+        _two = self.current_source == 'model' or (self.current_source == 'measured' and self._pre_active())
+        self._harmonic_combo.view().setRowHidden(3, _two)
+        if _two and self.current_harmonic == 'H3':
+            self.current_harmonic = 'H2'
+            self._harmonic_combo.blockSignals(True); self._harmonic_combo.setCurrentIndex(2); self._harmonic_combo.blockSignals(False)
         # Harmonic combo: enabled only for harmonic-keyed properties.
         pdef = next((p for p in PROPERTY_DEFS
                       if p[0] == self.current_property), None)
@@ -4215,7 +4372,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         radios = [self._src_radio_measured,
                   getattr(self, '_src_radio_rec', None),
                   self._src_radio_sim,
-                  getattr(self, '_src_radio_sim_carved', None)]
+                  getattr(self, '_src_radio_sim_carved', None),
+                  getattr(self, '_src_radio_model', None)]
         checked = [r for r in radios if r is not None and r.isChecked()]
         if len(checked) != 1:
             return  # transient state during exclusive-group switch
@@ -4227,11 +4385,18 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         elif (getattr(self, '_src_radio_rec', None) is not None
               and self._src_radio_rec.isChecked()):
             new_src = 'reconciled'
+        elif (getattr(self, '_src_radio_model', None) is not None
+              and self._src_radio_model.isChecked()):
+            new_src = 'model'
         else:
             new_src = 'measured'
         if new_src == self.current_source:
             return
         self.current_source = new_src
+        if getattr(self, '_model_box', None) is not None:
+            self._model_box.setVisible(new_src == 'model' or 'model' in self._compare_panels())
+        if new_src == 'model':
+            self._enter_model_source()
         # Re-sync enablement; the selection may need to fall back.
         self._sync_field_combos()
         # Refresh carve boundary markers if they're on (colours follow
@@ -4275,6 +4440,58 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 d.update(kv)
 
 
+    # Shorter labels for the side panel (full wording moves to the tooltip).
+    _SHORT_LABELS = {
+        "Highlight tagged regions (orange = open, cyan = topology)": "Highlight tagged regions",
+        "Boundary node fluxes (tiles | input | Q′ | 50 %)": "Boundary node fluxes",
+        "Show colour bar (overlaid on canvas)": "Show colour bar",
+        "Show Kirchhoff residuals (tile mode)": "Kirchhoff residuals (tile)",
+        "Aligned-waveform window: shape only, (Q − Q̄)/|H1|, instead of Q/Q̄": "Aligned window: shape only",
+        "Plot KCL sum at boundary (selected edge's boundary node)": "Plot boundary KCL sum",
+        "Edge flux card (recordings → input → Q′)": "Edge flux card",
+        "Compare side by side (one colour scale)": "Compare side by side",
+        "Highlight flow-direction mismatches (magenta)": "Flow-direction mismatches",
+        "bounds:": "Range", " lo pct:": "lo %", " hi pct:": "hi %", " vmin:": "min", " vmax:": "max",
+    }
+
+    def _compact_panel(self, tabs):
+        """Keep the side panel narrow: drop-downs no wider than ~14 characters (their lists still show full names),
+        long labels wrapped or shortened (full text in the tooltip)."""
+        from qtpy.QtWidgets import QComboBox, QLabel, QCheckBox, QPushButton, QGroupBox
+        for cb in tabs.findChildren(QComboBox):
+            longest = max((len(cb.itemText(i)) for i in range(cb.count())), default=4)
+            cb.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            cb.setMinimumContentsLength(min(14, max(3, longest)))
+            cb.view().setMinimumWidth(cb.view().sizeHintForColumn(0) + 24)
+        for w in tabs.findChildren((QCheckBox, QPushButton)):
+            full = w.text()
+            if full in self._SHORT_LABELS:
+                w.setText(self._SHORT_LABELS[full])
+                w.setToolTip(full + ("\n\n" + w.toolTip() if w.toolTip() else ""))
+        for g in tabs.findChildren(QGroupBox):
+            if g.title() in self._SHORT_LABELS:
+                g.setToolTip(g.title()); g.setTitle(self._SHORT_LABELS[g.title()])
+        from qtpy.QtWidgets import QAbstractSpinBox
+        for sb in tabs.findChildren(QAbstractSpinBox):
+            sb.setFixedWidth(64)
+        for cb in tabs.findChildren(QComboBox):
+            cb.setMaximumWidth(110 if cb is getattr(self, '_bounds_mode_combo', None) else 170)
+        for lb in tabs.findChildren(QLabel):
+            t = lb.text()
+            if t in self._SHORT_LABELS:
+                lb.setText(self._SHORT_LABELS[t])
+            elif len(t) > 40:
+                lb.setWordWrap(True)
+        from qtpy.QtWidgets import QLayout, QWidget
+        for lay in tabs.findChildren(QLayout):           # sizes changed after layout: recompute before docking
+            lay.invalidate()
+        for w in tabs.findChildren(QWidget):
+            w.updateGeometry()
+        from qtpy.QtWidgets import QScrollArea
+        for sa in tabs.findChildren(QScrollArea):          # wide enough for the content: scroll vertically only
+            if sa.widget() is not None:
+                sa.setMinimumWidth(sa.widget().sizeHint().width() + sa.verticalScrollBar().sizeHint().width() + 4)
+
     def _require_workbench(self, what: str) -> bool:
         """Guard for anything that writes or recomputes; the read-only viewer refuses."""
         if self.workbench:
@@ -4288,11 +4505,122 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         if self.workbench:
             return
         for name in ('_click_to_tag_chk', '_radial_btn_row', '_region_row',
-                     '_run_of_btn', '_of_merge_chk', '_of_refine_chk', '_clear_of_region_btn'):
+                     '_run_of_btn', '_of_merge_chk', '_of_refine_chk', '_clear_of_region_btn',
+                     '_tag_class_row', '_flow_mismatch_row', '_dissipation_row', '_edge_labels_all_chk',
+                     '_phase_offset_row', '_snr_h1_row', '_snr_h2_row',
+                     '_overlay_label', '_overlay_source_combo', '_plot_overlay_btn',
+                     '_of_pipeline_btn', '_plot_bnd_kcl_btn'):
             w = getattr(self, name, None)
             if w is not None:
                 w.setVisible(False)
+        if getattr(self, '_edge_labels_chk', None) is not None:
+            self._edge_labels_chk.setText("Show edge value labels")
+            self._edge_labels_chk.setToolTip("Show the current value at each edge's midpoint (every edge that has one).\n"
+                                             "Text is a fixed screen size: zoom in to read it.")
 
+
+    def _attach_pre_projection(self, D, A, edges):
+        """Measured, before the projection (docs/method.md steps 2.1 and 3.4), on the carved network, in memory:
+        `_h_amp_DC_pre` = Q̄ (1/σ²-weighted mean of every recording's fitted mean), `_h_{amp,phase}_H{k}_pre` = the
+        1/σ²-weighted average of the recordings of synchronised tiles on the common clock (harmonic n rotated by
+        e^{-inψ_tile}), before rescaling to the reconciled mean.  Reconciled = (Q′/Q̄) × this on reconstructed vessels."""
+        self._pre_available = False
+        meas, psi = A.get('_meas'), A.get('psi')
+        if not meas or not psi:
+            return
+        eix = {e: i for i, e in enumerate(edges)}; N = np.arange(1, 3)
+        Qm = np.asarray(D.get('Qm', np.full(len(edges), np.nan)), float); imd = np.asarray(D.get('imaged', np.isfinite(Qm)), bool)
+        for i, (u, v) in enumerate(edges):
+            if imd[i] and np.isfinite(Qm[i]):
+                self.G.edges[u, v]['_h_amp_DC_pre'] = float(Qm[i])
+        n = 0
+        for e, recs in meas.items():
+            i = eix.get(tuple(e))
+            rs = [(t, r) for t, r in recs.items() if t in psi] if i is not None else []
+            if not rs:
+                continue
+            w = np.array([1.0 / r['sigma2'] for _, r in rs])
+            Hb = sum(wi * np.asarray(r['H'])[:2] * np.exp(-1j * N * psi[t]) for wi, (t, r) in zip(w, rs)) / w.sum()
+            d = self.G.edges[edges[i]]
+            for k in (1, 2):
+                d[f'_h_amp_H{k}_pre'] = float(abs(Hb[k - 1])); d[f'_h_phase_H{k}_pre'] = float(np.angle(Hb[k - 1]))
+            n += 1
+        self._pre_available = True
+        print(f"  measured before projection: mean flow on {int(imd.sum())} vessels, pulse on {n} (synchronised tiles)")
+
+    def _pre_value(self, d, prop):
+        """Measured (pre-projection) value of `prop` for the current harmonic; None where not measured."""
+        k_idx = HARMONIC_KEYS.index(self.current_harmonic)
+        dc = _safe_float(d.get('_h_amp_DC_pre'))
+        if prop == 'pulse_power':
+            a1, a2 = _safe_float(d.get('_h_amp_H1_pre')), _safe_float(d.get('_h_amp_H2_pre'))
+            return (a1 ** 2 + a2 ** 2) / dc ** 2 if None not in (a1, a2, dc) and dc else None
+        if k_idx == 0:
+            if dc is None:
+                return None
+            return dc if prop == 'signed' else (abs(dc) if prop == 'magnitude' else None)
+        if k_idx > 2:
+            return None
+        amp, ph = _safe_float(d.get(f'_h_amp_H{k_idx}_pre')), _safe_float(d.get(f'_h_phase_H{k_idx}_pre'))
+        if amp is None:
+            return None
+        if prop == 'magnitude':
+            return amp
+        if prop == 'signed':
+            return amp * np.cos(ph)
+        if prop == 'PI':
+            return 2.0 * amp / abs(dc) if dc else None
+        if prop == 'phase':
+            ref = self._fig7_phref()
+            if ref is None:
+                return ph
+            from ..ac.display import phase_lag_deg
+            return float(phase_lag_deg(np.exp(1j * ph), dc if dc else 1.0, k_idx, ref))
+        return None
+
+    def _pre_active(self) -> bool:
+        """Measured shows the pre-projection field: read-only viewer, all tiles (a tile filter shows that tile's recording)."""
+        return (not self.workbench and self.current_source == 'measured' and getattr(self, '_pre_available', False)
+                and self.current_tile_filter is None)
+
+    def _fig7_phref(self):
+        """Fig 7's phase reference (vitelline-vein stubs of tile 14, in the field's clock); None if unavailable.  Cached."""
+        if getattr(self, '_phref_cache', 'unset') != 'unset':
+            return self._phref_cache
+        self._phref_cache = None
+        A = getattr(self, '_rec_A', None)
+        if A is not None:
+            try:
+                import json
+                from ..reconcile import carved_domain
+                from ..ac.display import vein_phase_reference
+                fit = self._model_fit_path()
+                gcorr = json.loads(fit.read_text()).get('gauge_correction_deg') if fit is not None else None
+                self._phref_cache = vein_phase_reference(self.G, A, carved_domain(self.G), gauge_correction_deg=gcorr)
+                print(f"  phase reference (vitelline-vein stubs, tile 14): H1 {np.degrees(self._phref_cache[1]):.0f}°, "
+                      f"H2 {np.degrees(self._phref_cache[2]):.0f}°")
+            except Exception as exc:
+                print(f"  phase reference unavailable ({exc!r}); phases shown raw")
+        return self._phref_cache
+
+    def _fig7_style(self):
+        """Colormap / norm / ticks of Fig 7 for the current selection (Reconciled or Model phase lag and relative pulsatile
+        power), else None (the viewer's general colouring applies)."""
+        if self.current_source not in ('reconciled', 'model') and not (self.current_source == 'measured' and self._pre_active()):
+            return None
+        import matplotlib.colors as mcolors
+        from ..ac import display as dsp
+        prop = self.current_property
+        if prop == 'phase' and self.current_harmonic in ('H1', 'H2') and self._fig7_phref() is not None:
+            k = 1 if self.current_harmonic == 'H1' else 2; spec = dsp.PHASE_LAG[k]
+            what = 'pressure' if self.current_quantity == 'P' else 'flow'
+            return dict(cmap=dsp.cmap(spec['cmap']), norm=mcolors.Normalize(spec['vmin'], spec['vmax'], clip=True),
+                        ticks=spec['ticks'], label=f"H{k} {what} phase lag (deg) behind the vitelline veins")
+        if prop == 'pulse_power' and self.current_quantity == 'Q':
+            spec = dsp.PULSE_POWER
+            return dict(cmap=dsp.cmap(spec['cmap']), norm=mcolors.LogNorm(spec['vmin'], spec['vmax'], clip=True),
+                        ticks=spec['ticks'], label="Pulsatile / mean power")
+        return None
 
     def _reconciliation_available(self) -> bool:
         """True if reconciliation outputs were found and attached to the graph."""
@@ -4339,6 +4667,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         sd = np.asarray(D.get('Qp_sd', np.full(len(edges), np.nan)), float)
         uns = np.asarray(D.get('unstable', np.zeros(len(edges), bool)), bool)
         self._rec_D = D
+        self._rec_A = A
         Qm = np.asarray(D.get('Qm', np.full(len(edges), np.nan)), float)
         cc = np.asarray(D.get('c', np.full(len(edges), np.nan)), float)
         imd = np.asarray(D.get('imaged', np.isfinite(Qm)), bool)
@@ -4381,6 +4710,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                     d[f'_h_amp_H{k + 1}_rec'] = abs(h); d[f'_h_phase_H{k + 1}_rec'] = float(np.angle(h))
                 d['_rec_tile'] = t; d['_rec_gauge_sd'] = float(gsd.get(t, np.nan)); d['_rec_phase_ok'] = bool(ph_ok[i])
                 n_ac += 1; n_ph += int(ph_ok[i])
+            self._attach_pre_projection(D, A, edges)
         try:
             nds = D['nodes']
             self.G.graph['_rec_boundary'] = {nds[i] for i in np.r_[np.asarray(D['inj'], int), np.asarray(D['out'], int)]}
@@ -4409,6 +4739,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
 
     def _on_edge_labels_toggle(self, checked: bool):
         self.show_edge_labels = bool(checked)
+        if not self.workbench:                  # read-only viewer: one checkbox labels every edge with a value
+            self.edge_labels_all_tiles = bool(checked)
         self._refresh_edge_labels()
 
 

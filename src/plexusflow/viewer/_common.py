@@ -154,16 +154,16 @@ PROPERTY_DEFS = [
     # (key,           display label,          is_harmonic_keyed, valid_in)
     ('magnitude',     'Magnitude |·|',        True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q'), ('reconciled', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
     # Signed value (real part, NO |·|) — sim only.  The point is DC pressure,
     # where the gauge can dip below 0; |·| would hide the sign.  Rendered on a
     # diverging colormap centred at 0.  (At AC harmonics this is the in-phase
     # component, whose sign depends on the solver phase reference.)
     ('signed',        'Signed (no |·|)',      True,
-        {('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q')}),
+        {('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P'), ('measured', 'Q')}),
     ('phase',         'Phase ∠·',             True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q'), ('reconciled', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
     # (Resolution Z = amp/SE removed — same ranking as SNR (dB) for
     # fixed-N, so redundant from the user's perspective.  Z is still
     # computed internally by _harmonic_fit_full and used by the
@@ -185,7 +185,7 @@ PROPERTY_DEFS = [
     # PI@H2 / PI@H3 measure higher-harmonic content as a fraction of mean.
     ('PI',            'Pulsatility index',    True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q'), ('reconciled', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q')}),
     # OSI (oscillation index, Q-form).  OSI_Q = ½·(1 − |∫Q|/∫|Q|) over
     # one period — aggregate (NOT harmonic-keyed).  0 = unidirectional;
     # ½ = perfectly bidirectional.  Reconstructed from DC + H1..H3.
@@ -195,6 +195,9 @@ PROPERTY_DEFS = [
     # attr set during analysis (== best measurement's f0); sim reads
     # the solver f0 it ran with.  Useful for spotting tiles where the
     # fit locked onto an aliased peak or a slightly different rate.
+    # Relative pulsatile power (|H1|² + |H2|²) / Q̄² — Fig 7's second column, same scale.
+    ('pulse_power',   'Relative pulsatile power (|H₁|²+|H₂|²)/Q̄²', False,
+        {('measured', 'Q'), ('reconciled', 'Q'), ('model', 'Q')}),
     ('frequency',     'Fundamental f₀ (Hz)',  False,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P')}),
     # Aggregate canonical SNRs (in dB).  These match the fit_harmonics
@@ -218,13 +221,13 @@ PROPERTY_DEFS = [
     ('pulse_frac',     '% pulsatile (AC / total energy)', False,
         {('measured', 'Q'), ('sim', 'Q')}),
     ('drop',          'Pressure drop',        False,
-        {('sim', 'P')}),
+        {('sim', 'P'), ('model', 'P')}),
     ('radius',        'Radius (px)',          False,
         {('measured', 'Q'), ('measured', 'P'),
-         ('sim', 'Q'), ('sim', 'P')}),
+         ('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
     ('length',        'Length (px)',          False,
         {('measured', 'Q'), ('measured', 'P'),
-         ('sim', 'Q'), ('sim', 'P')}),
+         ('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
     ('harmonic_class','Resolved-harmonic class', False,
         {('measured', 'Q')}),
     # Fraction of AC power in the selected harmonic:
@@ -356,6 +359,12 @@ def _osi_from_harmonics(dc, amps_phi, n_samples: int = 200):
     if mean_abs_Q < 1e-30 or not np.isfinite(mean_abs_Q):
         return None
     return 0.5 * (1.0 - abs(mean_Q) / mean_abs_Q)
+
+
+# Properties shown only in the workbench (legacy physics fields and measurement diagnostics superseded by the current
+# method); the read-only viewer lists the rest, and only those valid for the current source / quantity.
+WORKBENCH_ONLY_PROPERTIES = {'OSI', 'snr_ac', 'snr_total', 'dissipation', 'dissipation_ac', 'pulse_frac',
+                             'harmonic_class', 'harmonic_fraction', 'waveform_av'}
 
 
 def _combo_valid(source: str, quantity: str, prop_key: str,

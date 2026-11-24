@@ -28,7 +28,7 @@ def speck_loop_graph():
     for a, b in [("A", "L"), ("L", "T"), ("T", "R"), ("R", "Bt"), ("Bt", "L"), ("R", "B")]:
         pa, pb = np.array([pos[a][0], H_IMG - pos[a][1]], float), np.array([pos[b][0], H_IMG - pos[b][1]], float)
         G.add_edge(ids[a], ids[b], path=np.linspace(pa, pb, 20), radius=10.0, length=float(np.linalg.norm(pb - pa)))
-    G.edges[ids["A"], ids["L"]]["measurements_piv"] = [dict(tile_id=1, flow_from=ids["A"], flow_to=ids["L"], quality=dict(kl_ok=True, p=0.9))]
+    G.edges[ids["A"], ids["L"]]["measurements_piv"] = [dict(tile_id=1, flow_from=ids["A"], flow_to=ids["L"], quality=dict(profile_ok=True, p=0.9))]
     return G, ids
 
 

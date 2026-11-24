@@ -5,7 +5,8 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 # plexusflow files allowed to import plexusmech lazily (inside a function): the workbench's Simulate tab plugin
-MECH_HOOKS = {"plexusflow/viewer/app.py", "plexusflow/viewer/simulate.py"}   # Simulate tab (lazy, function-level)
+MECH_HOOKS = {"plexusflow/viewer/app.py", "plexusflow/viewer/simulate.py",   # Simulate tab (lazy, function-level)
+              "plexusflow/viewer/model.py"}                                # Model source (lazy; off without plexusmech)
 # plexusflow files allowed to import plexusflow.legacy lazily: the `legacy-normalize` CLI verb
 LEGACY_HOOKS = {"plexusflow/cli.py"}
 

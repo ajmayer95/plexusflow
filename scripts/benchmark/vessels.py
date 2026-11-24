@@ -1,6 +1,6 @@
 """Single-vessel known-truth sweep: shape (straight / arc / S-bend / taper) × size × flattening ε = depth/width × speed × seed.
 
-Prints Q̂/Q_true by flattening and speed (the depth-averaging bias ≈ 1/ε), by kind and by size; Kloosterman failures.
+Prints Q̂/Q_true by flattening and speed (the depth-averaging bias ≈ 1/ε), by kind and by size; profile-fit failures.
 Writes <out>/vessel_sweep.pkl.
 Usage: python scripts/benchmark/vessels.py --bundle PATH [--out DIR] [--jobs 6]
 """
@@ -40,7 +40,7 @@ def main():
     out = Path(a.out).expanduser(); out.mkdir(parents=True, exist_ok=True); t0 = time.time()
     res = sum(Parallel(n_jobs=a.jobs)(delayed(one)(a.bundle, k, s, e, SPEEDS) for k in KINDS for s in AS for e in EPS), [])
     (out / "vessel_sweep.pkl").write_bytes(pickle.dumps(res)); print(f"{len(res)} measurements in {time.time() - t0:.0f} s")
-    R = {k: np.array([r[k] for r in res], float) for k in ("a", "eps", "v", "ratio", "f", "R_kl_over_a", "align")}
+    R = {k: np.array([r[k] for r in res], float) for k in ("a", "eps", "v", "ratio", "f", "R_profile_over_a", "align")}
     kind = np.array([r["kind"] for r in res])
     med = lambda s: f"{np.exp(np.nanmedian(np.log(R['ratio'][s]))):.2f}" if np.isfinite(R["ratio"][s]).sum() >= 2 else "  — "
     print("\nQ̂/Q_true (median over seeds, sizes, kinds) by flattening ε = b/a and speed:")
@@ -56,7 +56,7 @@ def main():
     print("\ncircular vessels by size × speed:")
     for sz in AS:
         s = (R["eps"] == 1.0) & (R["a"] == sz)
-        print(f"  a {sz:2d} px  " + "   ".join(f"v {v}: {med(s & (R['v'] == v))}" for v in SPEEDS) + f"   R_kl/a {np.nanmedian(R['R_kl_over_a'][s]):.2f}")
+        print(f"  a {sz:2d} px  " + "   ".join(f"v {v}: {med(s & (R['v'] == v))}" for v in SPEEDS) + f"   R_profile/a {np.nanmedian(R['R_profile_over_a'][s]):.2f}")
 
 
 if __name__ == "__main__":

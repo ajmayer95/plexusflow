@@ -12,6 +12,7 @@ Matching is geometric, so it survives node renumbering and edge-orientation chan
 ``flow_from`` / ``flow_to`` are remapped to the edited graph's node IDs through the matched endpoints.
 """
 from __future__ import annotations
+from ..compat import sidecar_inputs, LEGACY_SIDECAR_KEY
 import copy
 import numpy as np
 
@@ -100,14 +101,15 @@ def carry_measurements(G_new, G_old, tol_px: float = 1.0):
 
 
 def remap_sidecars(sidecar_dir, edge_map):
-    """Rewrite Kloosterman sidecars so their keys use the edited graph's edge IDs; drop vessels that no longer exist."""
+    """Rewrite profile-fit sidecars so their keys use the edited graph's edge IDs; drop vessels that no longer exist."""
     import gzip, pickle
     from pathlib import Path
     n = 0
     for f in sorted(Path(sidecar_dir).glob("tile_*.pkl.gz")):
         with gzip.open(f, "rb") as fh:
             S = pickle.load(fh)
-        S["kl_inputs"] = {edge_map[e]: v for e, v in S.get("kl_inputs", {}).items() if e in edge_map}
+        inp = sidecar_inputs(S); S.pop(LEGACY_SIDECAR_KEY, None)
+        S["profile_inputs"] = {edge_map[e]: v for e, v in inp.items() if e in edge_map}
         with gzip.open(f, "wb") as fh:
             pickle.dump(S, fh, protocol=4)
         n += 1

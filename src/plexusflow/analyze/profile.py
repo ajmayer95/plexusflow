@@ -1,5 +1,5 @@
 """Full-vessel Farneback OF pipeline: video → cross-section velocity
-profile → Q (direct integration + Poiseuille fit) + Kloosterman scalar.
+profile → Q (direct integration + Poiseuille fit) + profile-fit scalar.
 
 Trimmed from PerTileFlow's ``pertile.analysis.of_profile`` — kept only
 the ``compute_of_profile_and_Q`` main entry, ``_rebin_profile`` helper,
@@ -19,7 +19,7 @@ from scipy.optimize import curve_fit
 from scipy.spatial import cKDTree
 
 from .centerline import _centerline_geometry, _refine_centerline
-from .kloosterman import kloosterman_scalar
+from .profile_flux import profile_flux_scalar
 
 
 # ── Preprocessing helpers ─────────────────────────────────────────────
@@ -247,7 +247,7 @@ def compute_of_profile_and_Q(
     mask_frac: float = 2.0,
     v_min_threshold: float = 0.03,
     # Resample the centerline to this fixed arc spacing (px) before anything,
-    # so the number of per-slice Kloosterman cross-sections scales with vessel
+    # so the number of per-slice profile-fit cross-sections scales with vessel
     # LENGTH instead of the arbitrary graph-path point density.  Short vessels
     # were getting only a handful of slices (whatever the graph stored) and
     # failing the R² gate.  0 disables.
@@ -261,25 +261,25 @@ def compute_of_profile_and_Q(
     # Tangent
     use_flow_tangent: bool = True,
     tangent_smooth_sigma: float = 5.0,
-    # Kloosterman: area from the per-slice FITTED radius (False) vs the mask
+    # profile-fit: area from the per-slice FITTED radius (False) vs the mask
     # R_prior (True).  Default False = fitted radius (the defensible choice).
-    kl_use_r_prior_area: bool = False,
+    profile_use_r_prior_area: bool = False,
     # Per-slice fitted-R sanity bounds as fractions of R_prior.  Kept LOOSE
     # (thesis: "fitted diameter ≤ 2× the cross-section linear dimension"); a fit
     # that rails at a bound is rejected (R_low / R_hi) — in practice none do
     # (2026-11-09: 0 % of rejections), shape (R²) failures dominate.
-    kl_r_slice_lo: float = 0.5,
-    kl_r_slice_hi: float = 2.0,
+    profile_r_slice_lo: float = 0.5,
+    profile_r_slice_hi: float = 2.0,
     # Velocity-relative inclusion threshold (fraction of centerline velocity)
     # for cross-section points — adaptive edge/mask-artifact rejection.
-    kl_v_incl_frac: float = 0.25,
-    # Generous geometric safety cap for the Kloosterman per-slice fit window
+    profile_v_incl_frac: float = 0.25,
+    # Generous geometric safety cap for the profile-fit per-slice fit window
     # (fraction of R_prior).  The velocity-transition walk is the real limiter;
     # this just stops the search from running past the sampled half-width.
-    kl_fit_fraction: float = 1.0,
+    profile_fit_fraction: float = 1.0,
     # Reject a slice whose measured cross-section isn't actually parabolic
     # (goodness-of-fit R² below this) — detects end/junction effects by SHAPE.
-    kl_min_r2: float = 0.5,
+    profile_min_r2: float = 0.5,
     # Cardiac phase (used to prefer systolic frames during CL refinement)
     f0_hz: Optional[float] = None,
     frame_dt_s: Optional[float] = None,
@@ -299,13 +299,13 @@ def compute_of_profile_and_Q(
     Runs OF pair-by-pair, projects onto the local tangent to get axial
     velocity per pixel, accumulates a ρ-binned cross-section profile,
     fits Poiseuille (both R-fixed and R-free), does the direct-integration
-    plug Q, and runs the Kloosterman per-slice scalar.
+    plug Q, and runs the profile-fit per-slice scalar.
 
     Returns a dict with the same keys the pertile version returned
     (backwards-compatible), including the four Q variants:
       * ``Q_plug_mean``     — direct pixel-integration of v_axial × π R²
       * ``Q_pois_mean``     — R-fixed Poiseuille ``v0_fixed × π R² / 2``
-      * ``Q_kloosterman``   — per-slice Poiseuille, shape-valid sign-matched sections averaged
+      * ``Q_profile``   — per-slice Poiseuille, shape-valid sign-matched sections averaged
       * plus the raw fit params: ``v0_fixed``, ``v0_free``, ``R_fit_free``,
         etc. — from which ``Q_pois_free = v0_free × π R_free² / 2`` can
         be computed downstream.
@@ -461,8 +461,8 @@ def compute_of_profile_and_Q(
             vfield_mean=np.zeros((H, W, 2)),
             n_vessel_px=n_vessel_px, fb_winsize=fb_winsize,
             roi_offset=(r0, c0),
-            Q_kloosterman=nan, R_kloosterman=nan, V_CL_kloosterman=nan,
-            Q_kloosterman_valid_frac=0.0, Q_kloosterman_n_valid=0,
+            Q_profile=nan, R_profile=nan, V_CL_profile=nan,
+            Q_profile_valid_frac=0.0, Q_profile_n_valid=0,
         )
 
     # ── 3. Per-frame OF loop ─────────────────────────────────────────
@@ -485,7 +485,7 @@ def compute_of_profile_and_Q(
 
     vfield_sum = np.zeros((H, W, 2), dtype=np.float64)
     vfield_cnt = np.zeros((H, W), dtype=np.float64)
-    flow_in_t = np.zeros((n_pairs, len(rr_in), 2), dtype=np.float32)   # per-frame field on the vessel pixels (Q_kl_t)
+    flow_in_t = np.zeros((n_pairs, len(rr_in), 2), dtype=np.float32)   # per-frame field on the vessel pixels (Q_profile_t)
 
     r_cut = R * fit_fraction
     _diag_t = (n_pairs // 2) if (return_diagnostics and n_pairs > 0) else -1
@@ -605,45 +605,45 @@ def compute_of_profile_and_Q(
     Q_plug_mean = float(np.nanmean(Q_plug_t))
     Q_pois_mean = float(np.nanmean(Q_pois_t))
 
-    # ── 7. Kloosterman scalar (uses already-dt-normalised vfield_mean) ─
+    # ── 7. profile-fit scalar (uses already-dt-normalised vfield_mean) ─
     try:
-        _kl = kloosterman_scalar(
+        _prof = profile_flux_scalar(
             vfield_mean, cl_used, R, dt=1,
-            slice_window=2, n_bins=n_bins, fit_fraction=kl_fit_fraction,
+            slice_window=2, n_bins=n_bins, fit_fraction=profile_fit_fraction,
             outlier_mode="sign",
-            R_slice_lo=kl_r_slice_lo, R_slice_hi=kl_r_slice_hi,
+            R_slice_lo=profile_r_slice_lo, R_slice_hi=profile_r_slice_hi,
             min_valid_slices=2,
-            use_r_prior_area=kl_use_r_prior_area,
-            v_incl_frac=kl_v_incl_frac,
-            min_r2=kl_min_r2,
+            use_r_prior_area=profile_use_r_prior_area,
+            v_incl_frac=profile_v_incl_frac,
+            min_r2=profile_min_r2,
             sample_frac=mask_frac,
             mask=_ridge_mask_roi,
         )
     except Exception as _e:
-        _kl = dict(Q_char=float("nan"), V_CL_char=float("nan"),
+        _prof = dict(Q_char=float("nan"), V_CL_char=float("nan"),
                     R_char=float("nan"), Q_char_valid_frac=0.0,
                     n_slices=0, n_valid=0, reason=f"err:{_e}")
 
-    # ── 8. Per-frame flux from the same Kloosterman fit (2026-11-17) ─────────────────────────────────────────────────
+    # ── 8. Per-frame flux from the same profile fit (2026-11-17) ─────────────────────────────────────────────────
     # The time-mean fit's geometry (accepted sections, fit bins, R_s, offsets) is frozen and only the centreline speed is
-    # refitted per frame — a linear operator w on the field (kloosterman.kloosterman_operator).  vfield_mean is the plain
-    # mean of the per-frame fields on the vessel pixels (zero elsewhere), so mean_t Q_kl_t = Q_kloosterman exactly; no
+    # refitted per frame — a linear operator w on the field (profile_flux.profile_flux_operator).  vfield_mean is the plain
+    # mean of the per-frame fields on the vessel pixels (zero elsewhere), so mean_t Q_profile_t = Q_profile exactly; no
     # rescaling of a second estimator.
-    Q_kl_t = np.array([])
-    if np.isfinite(_kl.get("Q_char", np.nan)):
+    Q_profile_t = np.array([])
+    if np.isfinite(_prof.get("Q_char", np.nan)):
         try:
-            from .kloosterman import kloosterman_operator
-            _w = kloosterman_operator(_kl, cl_used, vfield_mean.shape, mask=_ridge_mask_roi, slice_window=2)
+            from .profile_flux import profile_flux_operator
+            _w = profile_flux_operator(_prof, cl_used, vfield_mean.shape, mask=_ridge_mask_roi, slice_window=2)
             if _w is not None:
                 _w = _w.toarray().ravel(); _ix = (np.asarray(rr_in) * W + np.asarray(cc_in)) * 2
-                Q_kl_t = flow_in_t[:, :, 0].astype(np.float64) @ _w[_ix] + flow_in_t[:, :, 1].astype(np.float64) @ _w[_ix + 1]
+                Q_profile_t = flow_in_t[:, :, 0].astype(np.float64) @ _w[_ix] + flow_in_t[:, :, 1].astype(np.float64) @ _w[_ix + 1]
         except Exception:
-            Q_kl_t = np.array([])
+            Q_profile_t = np.array([])
 
     return dict(
         Q_plug_t=Q_plug_t,
         Q_pois_t=Q_pois_t,
-        Q_kl_t=Q_kl_t,
+        Q_profile_t=Q_profile_t,
         Q_plug_mean=Q_plug_mean,
         Q_pois_mean=Q_pois_mean,
         v0_fixed=v0_fixed,
@@ -663,15 +663,15 @@ def compute_of_profile_and_Q(
         fb_winsize=fb_winsize,
         roi_offset=(r0, c0),
         of_dt=int(dt), of_pilot_disp_px=of_pilot_disp,
-        # Kloosterman per-cross-section scalar Q
-        Q_kloosterman=_kl.get("Q_char", float("nan")),
-        R_kloosterman=_kl.get("R_char", float("nan")),
-        V_CL_kloosterman=_kl.get("V_CL_char", float("nan")),
-        Q_kloosterman_valid_frac=_kl.get("Q_char_valid_frac", 0.0),
-        Q_kloosterman_n_valid=_kl.get("n_valid", 0),
-        Q_kloosterman_per_slice=_kl.get("per_slice_Q", np.array([])),
-        R_kloosterman_per_slice=_kl.get("per_slice_R", np.array([])),
-        R2_kloosterman_per_slice=_kl.get("per_slice_r2", np.array([])),
+        # profile-fit per-cross-section scalar Q
+        Q_profile=_prof.get("Q_char", float("nan")),
+        R_profile=_prof.get("R_char", float("nan")),
+        V_CL_profile=_prof.get("V_CL_char", float("nan")),
+        Q_profile_valid_frac=_prof.get("Q_char_valid_frac", 0.0),
+        Q_profile_n_valid=_prof.get("n_valid", 0),
+        Q_profile_per_slice=_prof.get("per_slice_Q", np.array([])),
+        R_profile_per_slice=_prof.get("per_slice_R", np.array([])),
+        R2_profile_per_slice=_prof.get("per_slice_r2", np.array([])),
         # Time-resolved centreline velocity for downstream harmonic fits
         v0_fixed_t=per_frame_v0_fixed,
         R_used=R,
@@ -707,15 +707,15 @@ def compute_of_profile_and_Q(
             # Per-pixel axial-projection geometry (raw→smooth on a cross-section).
             rr_in=rr_in, cc_in=cc_in, rho_in=rho_in,
             t_row_in=t_row_in, t_col_in=t_col_in,
-            kl_use_r_prior_area=kl_use_r_prior_area,
-            kl_r_slice_lo=kl_r_slice_lo, kl_r_slice_hi=kl_r_slice_hi,
-            kl_v_incl_frac=kl_v_incl_frac, kl_min_r2=kl_min_r2,
+            profile_use_r_prior_area=profile_use_r_prior_area,
+            profile_r_slice_lo=profile_r_slice_lo, profile_r_slice_hi=profile_r_slice_hi,
+            profile_v_incl_frac=profile_v_incl_frac, profile_min_r2=profile_min_r2,
             # Neighbour-rejection: bins kept for the free-R fit vs thrown out as
             # a bleed-in adjacent vessel (for shading in the radial-profile panel).
             central_mask=_central,
             neighbour_mask=_neighbour,
-            # Full Kloosterman per-slice breakdown (v_CL, arc, reason, mask).
-            kl=_kl,
+            # Full profile-fit per-slice breakdown (v_CL, arc, reason, mask).
+            prof=_prof,
         ) if return_diagnostics else None),
     )
 

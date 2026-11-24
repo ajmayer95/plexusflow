@@ -32,7 +32,7 @@ def main():
         dom = carved_domain(G, topology=False); D = reconcile_dc(G, model, M, dom=dom, n_starts=0, n_shuffle=0); D.pop("dom", None)
     print(f"{paths.STAGE.name}: reviewing the field {'with' if a.topology else 'without'} topology-uncertain regions ({len(D['edges'])} vessels)")
     rows, hot, summ = run_qc(G, D, dom, M, model, loops=not a.no_loops, z_flag=a.z)
-    keys = ["hotspot", "kind", "edge", "node", "tile", "z", "y", "Qp", "redundancy", "loop_flow", "threshold", "R_graph_px", "R_kl_over_graph",
+    keys = ["hotspot", "kind", "edge", "node", "tile", "z", "y", "Qp", "redundancy", "loop_flow", "threshold", "R_graph_px", "R_profile_over_graph",
             "thicker_than_neighbours", "path_mid"]
     rows.sort(key=lambda r: (r["hotspot"] or 10 ** 6, r["kind"], -abs(r.get("z") or r.get("loop_flow") or r.get("Qp") or 0)))
     with open(paths.RESULTS / "dc_qc.csv", "w", newline="") as fh:

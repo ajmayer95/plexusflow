@@ -161,7 +161,7 @@ def consolidate(G, m, protect=(), log=None):
     log(f"[consolidate] {len(regions)} hole regions; finding junction clusters ({_time.time() - _t0:.0f} s)")
     # (b) junction clusters
     sub = [e for e in G.edges() if not region_class(G.edges[e]) and e[0] not in anchors and e[1] not in anchors]
-    measured = {e for e in sub if any((x.get("quality") or {}).get("kl_ok") for x in G.edges[e].get("measurements_piv") or [])}
+    measured = {e for e in sub if any((x.get("quality") or {}).get("profile_ok") for x in G.edges[e].get("measurements_piv") or [])}
     rep, _ = junction_clusters(G, sub, protect, measured); cl = {}
     for n, r in rep.items():
         cl.setdefault(r, set()).add(n)
@@ -228,7 +228,7 @@ def consolidate(G, m, protect=(), log=None):
         others = [w for _, w in ext]
         if len(ext) < 2 or len(set(others)) < len(others):
             report["skipped"] += 1; continue
-        n_int = sum(1 for a, b in internal for x in H.edges[a, b].get("measurements_piv") or [] if (x.get("quality") or {}).get("kl_ok"))
+        n_int = sum(1 for a, b in internal for x in H.edges[a, b].get("measurements_piv") or [] if (x.get("quality") or {}).get("profile_ok"))
         key = lambda a, b: (a, b) if H.has_edge(a, b) else (b, a)
         if len(ext) == 2:
             (na, wa), (nb, wb) = ext

@@ -199,7 +199,7 @@ class NormalizeParams:
     fringe_tile_cutoff: int = 5
 
     # Radius-consistency gate for the cross-tile aggregation. For each
-    # edge, compute the per-tile R_kl_um median across measurements that
+    # edge, compute the per-tile R_profile_um median across measurements that
     # already pass fringe_tile_cutoff, then drop tiles whose R deviates
     # from that median by more than this fraction. Rationale: Q ~ R²·V, so
     # a per-tile R inference error of X% inflates that tile's mean_Q and
@@ -1312,7 +1312,7 @@ def apply_gauges_to_graph(G,
             # DC and H_k by ~2× relative to the tile's true value.  If that
             # tile then happens to have high H1 SNR, it dominates the SNR-
             # weighted aggregate and biases the canonical waveform.  Compute
-            # per-edge R_kl_um median across tiles that pass fringe_tile_cutoff
+            # per-edge R_profile_um median across tiles that pass fringe_tile_cutoff
             # and skip aggregation for tiles whose R deviates by > threshold.
             _r_by_tid = {}
             for _mm in ms_norm:
@@ -1320,7 +1320,7 @@ def apply_gauges_to_graph(G,
                 if _tid is None: continue
                 if fringe_tile_cutoff and int(_tid) <= fringe_tile_cutoff:
                     continue
-                _r = _mm.get('R_kl_um')
+                _r = _mm.get('R_profile_um')
                 if _r is not None and np.isfinite(_r):
                     _r_by_tid[int(_tid)] = float(_r)
             _r_keep_tids = None    # None = no R filter (default open)

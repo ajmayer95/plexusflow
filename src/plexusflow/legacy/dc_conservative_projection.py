@@ -31,14 +31,14 @@ import scipy.sparse.linalg as spla
 
 # ─── signed DC extraction ─────────────────────────────────────────────────
 def _measured_direction(u, v, d) -> int:
-    """+1 if u→v, -1 if v→u, 0 if unresolved (Q_kl-weighted vote)."""
+    """+1 if u→v, -1 if v→u, 0 if unresolved (Q_profile-weighted vote)."""
     ms = d.get('measurements_piv') or []
     if not ms: return 0
     s = 0.0
     for m in ms:
         ff = m.get('flow_from'); ft = m.get('flow_to')
         if ff is None or ft is None: continue
-        w = abs(float(m.get('Q_kl') or 0.0))
+        w = abs(float(m.get('Q_profile') or 0.0))
         if ff == u and ft == v: s += w
         elif ff == v and ft == u: s -= w
     return 1 if s > 0 else -1 if s < 0 else 0

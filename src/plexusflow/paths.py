@@ -1,6 +1,6 @@
 """Machine-independent locations of the stage data and derived results.
 
-The stage folder (graph, Kloosterman sidecars, figures, results) lives outside the repo — typically in a
+The stage folder (graph, profile-fit sidecars, figures, results) lives outside the repo — typically in a
 synced drive — and its path differs between machines.  Set it once per machine:
 
     export PLEXUSFLOW_STAGE="/path/to/PlexusFlow21S"        # e.g. in ~/.zshrc
@@ -60,11 +60,12 @@ def load_graph(path=None):
     """Load the measured graph (networkx gpickle).  Graphs are pickled with numpy 1.x so that every environment can read
     them; numpy 2 reads them fine but warns about the old ``numpy.core`` module path — silenced here.  Release graphs
     keep their Q(t) traces in export/traces.npz; they are re-attached here (`attach_external_traces`)."""
-    import pickle, warnings
+    import warnings
+    from .compat import loads_graph
     p = Path(path) if path else _resolve("GRAPH")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        G = pickle.loads(p.read_bytes())
+        G = loads_graph(p.read_bytes())          # legacy key names → current (plexusflow.compat)
     return attach_external_traces(G, p)
 
 

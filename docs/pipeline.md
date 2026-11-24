@@ -75,7 +75,7 @@ and its tags).  Steps marked GUI are interactive; the rest are batch.
 | 7 | vectorise | `plexusflow vectorize STAGE` | `graph/graph.gpickle` |
 | 8 | edit graph (GUI) | `plexusflow edit STAGE` | `graph/graph.gpickle` |
 | 9 | condense | `plexusflow condense STAGE` | `graph/graph_vessels.gpickle` |
-| 10 | measure flow | `plexusflow analyze STAGE` (hours; `--tiles`, `--out` for a local copy) | `graph/graph_vessels_piv.gpickle`, `batch_kl_inputs/` |
+| 10 | measure flow | `plexusflow analyze STAGE` (hours; `--tiles`, `--out` for a local copy) | `graph/graph_vessels_piv.gpickle`, `batch_profile_inputs/` |
 | 11 | annotate (GUI) | `plexusflow workbench STAGE`: Edit tab → mark the dorsal-aorta anchors *source* and the vein anchors *sink*; View tab → region tools, *Tag class* → tag **open boundary** regions (beside the aortae) and **topology uncertain** regions (graph does not represent the vessels); Save | tags on `graph_vessels_piv.gpickle` |
 | 12 | stage settings | add `ac_ref_tile` (a clearly beating tile near the aortae) and, if needed, `ac_f0_band`, `ac_veins`, `ac_gauge_block`, `f0_min_hz`/`f0_max_hz`, `of_dt` to `plexusflow.yaml` | |
 | 13 | reconstruct | `bash scripts/run_stage.sh STAGE` (`--no-ac`) | `results/` |
@@ -93,8 +93,8 @@ flow and pulsatile field.  Region tags can be revised in the workbench at any ti
 STAGE`, `plexusflow carry-measurements STAGE` (copies measurements of unchanged vessels), `plexusflow analyze STAGE
 --skip-analyzed` (measures only edited or new vessels).
 
-**Changing the flux estimator's section rule.**  `python3 scripts/kl_reaggregate.py` re-estimates every recording from
-`batch_kl_inputs/` without re-running optical flow (backs up the graph first); then rerun step 13.
+**Changing the flux estimator's section rule.**  `python3 scripts/profile_reaggregate.py` re-estimates every recording from
+`batch_profile_inputs/` without re-running optical flow (backs up the graph first); then rerun step 13.
 
 **Reproducing the paper.**  `bash scripts/reproduce_paper.sh` runs step 13 for the 21S release plus the
 figure scripts (README).

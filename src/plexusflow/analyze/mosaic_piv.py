@@ -17,12 +17,14 @@ The coordinate transform lives in :mod:`plexusflow.analyze.geometry`
 and handles the full affine (including napari's rotation) plus
 downsample+bbox that separate the graph frame from tile pixels.
 
-All the OF-profile + harmonic-fit + Kloosterman code lives inside
+All the OF-profile + harmonic-fit + profile-fit code lives inside
 plexusflow itself (``plexusflow.analyze.{profile, centerline,
-kloosterman, harmonic}`` + ``plexusflow.io.tiff``).  No pertile
+profile_flux, harmonic}`` + ``plexusflow.io.tiff``).  No pertile
 dependency.
 """
 from __future__ import annotations
+from ..compat import loads_graph
+from ..compat import sidecar_inputs
 import warnings
 
 import pickle
@@ -68,7 +70,7 @@ FB_KWARGS = dict(
     # ridge_iterations=1 → the ridge tracker runs max(2,1+1)=2 passes, IDENTICAL
     # to the viewer's fresh-OF (which passes no ridge_iterations → compute default
     # 1).  This alignment is REQUIRED: the ridge tracker does not converge (more
-    # passes drift the CL back toward the graph CL and flip Kloosterman validity),
+    # passes drift the CL back toward the graph CL and flip profile-fit validity),
     # so batch=8/fresh=1 gave up to 150% Q differences.  refinement_mode and
     # ridge_ang_tol_deg are dead params (# noqa ARG001 in compute) — kept only for
     # signature compatibility; they have no effect.
@@ -179,7 +181,7 @@ def _profile_qc(bin_centers, profile_v, R_edt_mean_um, px_um, dt_s,
 # so callers pass one ``pt`` dict rather than re-importing everywhere.
 # ---------------------------------------------------------------------
 
-from .kloosterman import parabolicity
+from .profile_flux import parabolicity
 
 
 def _import_pertile():
@@ -398,11 +400,11 @@ def _smooth_path_inplace(pts, sigma=1.5):
 
 def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
                      f0, pt, ridge_mask=None, ridge_edt=None,
-                     keep_kl_inputs=False, of_overrides=None):
+                     keep_profile_inputs=False, of_overrides=None):
     """Run merged OF on one vessel in one tile.  Returns a clean
     measurement dict or None if the vessel isn't sufficiently in-FOV
-    or OF fails.  ``keep_kl_inputs`` attaches ``_kl_inputs`` (time-mean
-    flow field, refined CL, R_prior, ridge-mask ROI) so the Kloosterman
+    or OF fails.  ``keep_profile_inputs`` attaches ``_profile_inputs`` (time-mean
+    flow field, refined CL, R_prior, ridge-mask ROI) so the profile-fit
     step can be re-run offline with other settings (never stored in graphs)."""
     H, W = stack.shape[1], stack.shape[2]
     tc = graph_to_tile_batch(np.asarray(path_xy), geom, tile_id)
@@ -418,7 +420,7 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
     # off the junction node).  Replaces the EDT junction-bulge trim, which
     # over-trimmed short/junction-adjacent/boundary vessels to stubs and dropped
     # ~16% of them below the arc/aspect QC gates (tile-12 measurement).  The
-    # downstream Kloosterman shape / sign gates, per-slice R gates, neighbour rejection
+    # downstream profile-fit shape / sign gates, per-slice R gates, neighbour rejection
     # and curvature guard reject contaminated END SLICES without discarding the
     # whole vessel — so we keep coverage AND match fresh-OF exactly.  (compute
     # resamples internally too; the pre-smooth is dropped to mirror the viewer.)
@@ -486,33 +488,33 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
         Q_pois_free = float("nan")
     # Kloosterman/Poelma scalar Q — per-cross-section Poiseuille fits,
     # IQR-filtered, averaged.  Robust to branch/junction contamination.
-    Q_kl_raw = float(u.get("Q_kloosterman", np.nan))
-    Q_kl = Q_kl_raw * conv if np.isfinite(Q_kl_raw) else float("nan")
-    R_kl_um = float(u.get("R_kloosterman", np.nan)) * pt["PX_SIZE_UM"]
-    V_CL_kl = float(u.get("V_CL_kloosterman", np.nan)) * pt["PX_SIZE_UM"] / pt["FRAME_DT_S"]
-    Q_kl_valid_frac = float(u.get("Q_kloosterman_valid_frac", 0.0))
-    Q_kl_n_valid = int(u.get("Q_kloosterman_n_valid", 0))
+    Q_profile_raw = float(u.get("Q_profile", np.nan))
+    Q_profile = Q_profile_raw * conv if np.isfinite(Q_profile_raw) else float("nan")
+    R_profile_um = float(u.get("R_profile", np.nan)) * pt["PX_SIZE_UM"]
+    V_CL_profile = float(u.get("V_CL_profile", np.nan)) * pt["PX_SIZE_UM"] / pt["FRAME_DT_S"]
+    Q_profile_valid_frac = float(u.get("Q_profile_valid_frac", 0.0))
+    Q_profile_n_valid = int(u.get("Q_profile_n_valid", 0))
     Qt_ridge = np.asarray(u["Q_pois_t"]) * conv
     ridge_mean = float(np.nanmean(Qt_ridge))
-    # ONE flux estimator for mean and pulsatile flow (2026-11-17).  Q(t) is the Kloosterman fit of the time-mean field
+    # ONE flux estimator for mean and pulsatile flow (2026-11-17).  Q(t) is the profile fit of the time-mean field
     # applied to every frame with its geometry frozen (accepted sections, fit bins, R_s, offsets; only the centreline
-    # speed refitted — analyze.kloosterman.kloosterman_operator), in physical units, signed A→B.  Its arithmetic time mean
-    # is Q_kl exactly, so the mean flux and the flow direction are Q_kl's.  Replaces the rescaling of a second, pooled
-    # fixed-radius series by |Q_kl| / mean(series), which diverged where that mean ≈ 0 (saturated or stagnant vessels:
-    # 21S had a +19.4 nL/s artefact from a 0.06 nL/s vessel, and 7 % of directions disagreed with Kloosterman's).
-    # Kloosterman failed → no flux and no Q(t) (the recording was already unused for mean and pulsatile flow);
+    # speed refitted — analyze.profile_flux.profile_flux_operator), in physical units, signed A→B.  Its arithmetic time mean
+    # is Q_profile exactly, so the mean flux and the flow direction are Q_profile's.  Replaces the rescaling of a second, pooled
+    # fixed-radius series by |Q_profile| / mean(series), which diverged where that mean ≈ 0 (saturated or stagnant vessels:
+    # 21S had a +19.4 nL/s artefact from a 0.06 nL/s vessel, and 7 % of directions disagreed with the profile fit's).
+    # profile-fit failed → no flux and no Q(t) (the recording was already unused for mean and pulsatile flow);
     # the other scalar estimators are kept below for comparison only.
-    Q_kl_t = np.asarray(u.get("Q_kl_t", []), float)
-    best_key = "kl"
-    if np.isfinite(Q_kl) and Q_kl_t.size >= 32:
-        Qt = Q_kl_t * conv
+    Q_profile_t = np.asarray(u.get("Q_profile_t", []), float)
+    best_key = "profile"
+    if np.isfinite(Q_profile) and Q_profile_t.size >= 32:
+        Qt = Q_profile_t * conv
         hr = pt["fit_harmonics"](Qt, pt["FRAME_DT_S"], f0,
                                   K=pt["N_HARMONICS"], loss="huber",
                                   include_dc=True)
-        mean_Q = float(Q_kl)                            # = arithmetic mean of Qt (exact); hr["a0"] is the Fourier DC
+        mean_Q = float(Q_profile)                            # = arithmetic mean of Qt (exact); hr["a0"] is the Fourier DC
     else:
         Qt, hr, mean_Q, best_key = None, {}, float("nan"), "none"
-    # Physical direction: sign of the Kloosterman flux along the arc (A→B); arbitrary (A→B) without a flux
+    # Physical direction: sign of the profile-fit flux along the arc (A→B); arbitrary (A→B) without a flux
     if not np.isfinite(mean_Q) or mean_Q >= 0:
         flow_from, flow_to = A, B
     else:
@@ -557,16 +559,16 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
                       else float("nan")),
         "Q_pois_free": (float(abs(Q_pois_free)) if np.isfinite(Q_pois_free)
                          else float("nan")),
-        "Q_kl": (float(abs(Q_kl)) if np.isfinite(Q_kl) else float("nan")),
+        "Q_profile": (float(abs(Q_profile)) if np.isfinite(Q_profile) else float("nan")),
         # Alternative scale estimators, kept for estimator comparison
         # (scripts/fresh_tile_measurements.py): mask-R Poiseuille on the
         # segmentation CL, and the raw ridge-CL Poiseuille mean (signed A→B).
         "Q_pois_seg": (float(abs(Q_seg)) if np.isfinite(Q_seg) else float("nan")),
         "Q_ridge_mean": float(ridge_mean),
-        "R_kl_um": R_kl_um,
-        "V_CL_kl_ums": V_CL_kl,
-        "Q_kl_valid_frac": Q_kl_valid_frac,
-        "Q_kl_n_valid": Q_kl_n_valid,
+        "R_profile_um": R_profile_um,
+        "V_CL_profile_ums": V_CL_profile,
+        "Q_profile_valid_frac": Q_profile_valid_frac,
+        "Q_profile_n_valid": Q_profile_n_valid,
         "Q_t": (Qt.astype(np.float32) if Qt is not None else None),
         # Motion diagnostics (analyze.motion), independent of the flux fit: from the vessel-aligned pooled streamwise
         # velocity series v(t) (a fixed spatial average; stored float16 so a later f0 refit can recompute them).
@@ -582,23 +584,23 @@ def _analyze_vessel(A, B, path_xy, radius_graph, geom, tile_id, stack,
     }
     # Per-measurement quality record — enough to recompute the reliability
     # scale c (f, alignment, tile) after the batch without re-running OF.
-    _psq = np.asarray(u.get("Q_kloosterman_per_slice", []), float)
-    _psr = np.asarray(u.get("R_kloosterman_per_slice", []), float)
+    _psq = np.asarray(u.get("Q_profile_per_slice", []), float)
+    _psr = np.asarray(u.get("R_profile_per_slice", []), float)
     _fin = np.isfinite(_psq)
     out["quality"] = dict(
-        kl_ok=bool(np.isfinite(Q_kl)),
-        p=parabolicity(u.get("R2_kloosterman_per_slice", [])) if np.isfinite(Q_kl) else 0.0,
-        n_slices=int(_psq.size), n_kept=int(Q_kl_n_valid), f=float(Q_kl_valid_frac) if np.isfinite(Q_kl) else 0.0,
+        profile_ok=bool(np.isfinite(Q_profile)),
+        p=parabolicity(u.get("R2_profile_per_slice", [])) if np.isfinite(Q_profile) else 0.0,
+        n_slices=int(_psq.size), n_kept=int(Q_profile_n_valid), f=float(Q_profile_valid_frac) if np.isfinite(Q_profile) else 0.0,
         slice_cv=(float(np.nanstd(np.abs(_psq[_fin])) / max(np.nanmean(np.abs(_psq[_fin])), 1e-12))
                   if _fin.sum() >= 2 else float("nan")),
         R_ratio_med=(float(np.nanmedian(_psr[np.isfinite(_psr)]) / R_px) if np.isfinite(_psr).any() else float("nan")),
         **_flow_quality(u.get("vfield_mean"), u.get("cl_used"), float(u.get("R_used", R_px))))
-    if keep_kl_inputs:
+    if keep_profile_inputs:
         vf = np.asarray(u["vfield_mean"], np.float32)
         r0, c0 = u.get("roi_offset", (0, 0))
         rm = (np.asarray(ridge_mask[r0:r0 + vf.shape[0], c0:c0 + vf.shape[1]], bool)
               if ridge_mask is not None else None)
-        out["_kl_inputs"] = dict(vfield_mean=vf, cl_used=np.asarray(u["cl_used"], float),
+        out["_profile_inputs"] = dict(vfield_mean=vf, cl_used=np.asarray(u["cl_used"], float),
                                  R_prior_px=float(u.get("R_used", R_px)), roi_offset=(r0, c0),
                                  ridge_mask_roi=rm, conv=float(conv))
     return out
@@ -708,7 +710,7 @@ def _refit_tile_harm(G: nx.Graph, tile: int, f0_hz: float,
             a0, s0 = float(hr["a0"]), float(hr["sigma_a0"])
             resid = np.asarray(hr["resid"], float); resid = resid[np.isfinite(resid)]
             dc_db = float(20 * np.log10(abs(a0) / s0)) if s0 > 0 and a0 != 0 else float("nan")
-            # mean flux stays the arithmetic mean of Q(t) (= Q_kl, independent of f0); a0 is the Fourier DC at this f0
+            # mean flux stays the arithmetic mean of Q(t) (= Q_profile, independent of f0); a0 is the Fourier DC at this f0
             mq = float(np.nanmean(Qt))
             m["harm"] = dict(mean_Q=abs(mq), a0=abs(a0) * (1 if mq >= 0 else -1), f0_hz=float(f0_hz), harmonics=hr["harmonics"], fit_success=True,
                              sigma_DC=s0, sigma_resid=float(resid.std(ddof=2 * n_h + 1)) if resid.size > 2 * n_h + 1 else float("nan"),
@@ -720,10 +722,10 @@ def _refit_tile_harm(G: nx.Graph, tile: int, f0_hz: float,
 
 
 def _tile_beat_r2(G: nx.Graph, tile: int, f0: float, fs: float = 250.0, n_top: int = 20) -> float:
-    """Beat strength: median R² of a DC + H1 + H2 fit at f0 over the tile's n_top strongest Kloosterman-valid traces."""
+    """Beat strength: median R² of a DC + H1 + H2 fit at f0 over the tile's n_top strongest profile-valid traces."""
     from .harmonic import fit_harmonics
     ms = sorted([m for *_, d in G.edges(data=True) for m in (d.get("measurements_piv") or [])
-                 if m.get("tile_id") == tile and (m.get("quality") or {}).get("kl_ok") and m.get("Q_t") is not None],
+                 if m.get("tile_id") == tile and (m.get("quality") or {}).get("profile_ok") and m.get("Q_t") is not None],
                 key=lambda m: -abs((m.get("harm") or {}).get("mean_Q") or 0))[:n_top]
     r = []
     for m in ms:
@@ -788,7 +790,7 @@ def analyze_stage(cfg: StageConfig,
                     refit_f0: bool = False,
                     dry_run: bool = False,
                     verbose: bool = True,
-                    kl_sidecar_dir: Optional[Path] = None,
+                    profile_sidecar_dir: Optional[Path] = None,
                     out_path: Optional[Path] = None,
                     mask_path: Optional[Path] = None,
                     local: bool = False) -> Path:
@@ -837,7 +839,7 @@ def analyze_stage(cfg: StageConfig,
         load_path = src
     if verbose:
         print(f'loading {load_path.name}')
-    G = pickle.loads(load_path.read_bytes())
+    G = loads_graph(load_path.read_bytes())
     n_pre = sum(1 for _, _, d in G.edges(data=True)
                  if d.get("measurements_piv"))
     if verbose:
@@ -916,7 +918,7 @@ def analyze_stage(cfg: StageConfig,
         v = f0_by_tile.get(tid, f0_by_tile.get(str(tid)))
         if v is not None and np.isfinite(float(v)):
             return float(v)
-        if tid not in _f0_warned:                 # a wrong f0 silently corrupts every harmonic and Kloosterman fit of the tile
+        if tid not in _f0_warned:                 # a wrong f0 silently corrupts every harmonic and profile fit of the tile
             _f0_warned.add(tid)
             warnings.warn(f"tile {tid}: no heart rate in G.graph['tile_f0_piv']; using default_f0_hz={default_f0_hz} Hz. "
                           "Check this tile (e.g. 15-somite embryos beat at ~0.6-1.2 Hz).", RuntimeWarning, stacklevel=2)
@@ -1066,7 +1068,7 @@ def analyze_stage(cfg: StageConfig,
         # Workers get ONLY (A, B, oriented path, radius).  A closure that
         # references G (240 MB) or the edge dict (all stored measurements)
         # is re-serialised for every task: profiled 10× slower (2026-10-07).
-        _keep = kl_sidecar_dir is not None
+        _keep = profile_sidecar_dir is not None
         _jobs = [(A, B, _path_a_to_b(G, A, B, d["path"]), d.get("radius"))
                  for A, B, d in cand_edges]
 
@@ -1075,7 +1077,7 @@ def analyze_stage(cfg: StageConfig,
                 A, B, path_xy, radius,
                 geom, tid, stack, f0, pt,
                 ridge_mask=_rm, ridge_edt=_re,
-                keep_kl_inputs=_keep, of_overrides=_ov)
+                keep_profile_inputs=_keep, of_overrides=_ov)
 
         if Parallel is not None and n_workers > 1:
             results = Parallel(n_jobs=n_workers, backend="loky")(
@@ -1095,7 +1097,7 @@ def analyze_stage(cfg: StageConfig,
         for (A, B, d), m in zip(cand_edges, results):
             if m is None:
                 continue
-            ki = m.pop("_kl_inputs", None)
+            ki = m.pop("_profile_inputs", None)
             if ki is not None:
                 ki["vfield_mean"] = ki["vfield_mean"].astype(np.float16)
                 sidecar[(A, B)] = ki
@@ -1104,18 +1106,18 @@ def analyze_stage(cfg: StageConfig,
                                        if mm.get("tile_id") != tid]
             d["measurements_piv"].append(m)
             n_ves += 1
-        if kl_sidecar_dir is not None and sidecar and not dry_run:
+        if profile_sidecar_dir is not None and sidecar and not dry_run:
             import gzip
-            Path(kl_sidecar_dir).mkdir(parents=True, exist_ok=True)
-            sc_path = Path(kl_sidecar_dir) / f"tile_{tid}.pkl.gz"
+            Path(profile_sidecar_dir).mkdir(parents=True, exist_ok=True)
+            sc_path = Path(profile_sidecar_dir) / f"tile_{tid}.pkl.gz"
             if skip_analyzed and sc_path.exists():
                 # incremental run: keep the inputs of vessels measured earlier
                 # (only those still in the graph), add the new ones
                 with gzip.open(sc_path, "rb") as fh:
-                    old = pickle.load(fh).get("kl_inputs", {})
+                    old = sidecar_inputs(pickle.load(fh))
                 sidecar = {**{e: v for e, v in old.items() if G.has_edge(*e)}, **sidecar}
             with gzip.open(sc_path, "wb") as fh:
-                pickle.dump(dict(tile=tid, f0=f0, kl_inputs=sidecar), fh, protocol=4)
+                pickle.dump(dict(tile=tid, f0=f0, profile_inputs=sidecar), fh, protocol=4)
         total_measured += n_ves
 
         print(f'tile {tid}: {stack.shape[0]}f  f0={f0:.2f}  '

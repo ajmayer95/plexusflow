@@ -19,7 +19,7 @@ pip install -e ".[figures]"            # + [gui] for the napari viewer
 ```
 
 **Data are not in git.** A stage is a folder, e.g. `PlexusFlow21S_release_v3/`, shared separately by the authors (Zenodo on
-publication). Extract `*.core.tar.gz`, and optionally `*.extras.tar.gz` (tile videos for viewer playback, Kloosterman
+publication). Extract `*.core.tar.gz`, and optionally `*.extras.tar.gz` (tile videos for viewer playback, profile-fit
 sidecars), into the same folder. Then:
 
 ```bash
@@ -60,7 +60,7 @@ Edge orientation: every edge has a tail → head orientation and positive flux r
 
 ## Current method decisions (don't change without discussion)
 
-- **Flux per recording:** per-frame Kloosterman fit with geometry frozen from the time-mean fit. A failed Kloosterman fit means *unmeasured*; there is no fallback estimator.
+- **Flux per recording:** per-frame profile fit with geometry frozen from the time-mean fit. A failed profile fit means *unmeasured*; there is no fallback estimator.
 - **Fit per recording:** mean + 2 harmonics at the tile heart rate (`reconcile.dc.K_FIT = 2`).
 - **One uncertainty per recording:** σ² = s²/M from the residual of that fit; every weight is 1/σ² (mean flow, tile clocks, harmonic average). The reliability model c is not used.
 - **Mean flow:** 1/σ² average of the fitted means, projected onto junction conservation with total left = total right arterial inflow (`reconcile.dc.SYMMETRIC = True`).
@@ -83,7 +83,7 @@ Edge orientation: every edge has a tail → head orientation and positive flux r
 
 | path | contents |
 |---|---|
-| `src/plexusflow/analyze/` | optical flow, Kloosterman flux (`kloosterman.py`), Q(t) (`profile.py`, `mosaic_piv.py`), motion diagnostics |
+| `src/plexusflow/analyze/` | optical flow, profile-fit flux (`profile_flux.py`), Q(t) (`profile.py`, `mosaic_piv.py`), motion diagnostics |
 | `src/plexusflow/reconcile/` | measurement table and uncertainty model (`reliability.py`), reconstruction (`dc.py`, `network.py`), gains (`gain.py`), QC |
 | `src/plexusflow/ac/` | pulsatile field |
 | `src/plexusmech/` | RC model and distensibility fit |
