@@ -40,7 +40,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["napari[all] >= 0.5", "PyQt5"]
+gui = ["napari[all] >= 0.5"]                 # napari[all] brings the Qt binding it supports
 sam2 = ["torch", "torchvision"]
 ilastik = ["h5py"]
 # mask → graph vectorisation (plexusflow mve / vectorize)

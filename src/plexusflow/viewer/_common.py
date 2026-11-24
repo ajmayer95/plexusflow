@@ -68,7 +68,7 @@ from matplotlib import colors as mcolors
 # QStyle (parented so it stays alive) — surgical: only combos change style, the
 # rest of the app keeps the native macOS look.
 try:
-    from PyQt5.QtWidgets import QComboBox as _QCB, QStyleFactory as _QSF
+    from qtpy.QtWidgets import QComboBox as _QCB, QStyleFactory as _QSF
 
     if not getattr(_QCB, "_plexus_popup_patched", False):
         _orig_qcb_init = _QCB.__init__
