@@ -146,7 +146,8 @@ class VesselPanelMixin:
         ax.set_xlabel('cardiac cycles (common clock)', color='#dddddd', fontsize=8)
         _, (a_, b_) = self._vessel_flow(u, v)
         ax.set_ylabel('Q / Q̄' if rel else f'Q (nL/s), + = flow {a_}→{b_}', color='#dddddd', fontsize=8)
-        ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=8, frameon=False, labelcolor='#dddddd')
+        if ax.get_legend_handles_labels()[0]:
+            ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=8, frameon=False, labelcolor='#dddddd')
         self._vp_title.setText(f"Vessel ({u}, {v}) — flow {a_} → {b_}")
         self._vp_canvas.draw_idle()
 
