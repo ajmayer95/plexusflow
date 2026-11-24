@@ -176,11 +176,14 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         # statistically resolved cardiac harmonics).  Stored on the
         # in-memory graph only — never written back to the gpickle.
         # Cheap enough to do once at startup (~30 s for ~6k edges).
-        self._precompute_harmonic_classes()
-        # Precompute measured viscous dissipation per edge from PIV
-        # Q_t + geometry.  Stored as `_meas_dissipation` (W) on edge
-        # attrs, in-memory only.
-        self._precompute_measured_dissipation()
+        # The read-only viewer needs neither when the reconciliation is loaded: Measured comes from the combined
+        # pre-projection field, and harmonic class / dissipation are workbench-only properties.
+        if self.workbench or not getattr(self, '_pre_available', False):
+            self._precompute_harmonic_classes()
+            # Precompute measured viscous dissipation per edge from PIV
+            # Q_t + geometry.  Stored as `_meas_dissipation` (W) on edge
+            # attrs, in-memory only.
+            self._precompute_measured_dissipation()
         # ── Four-selector field model ──────────────────────────────
         # Source already added below as `self.current_source`.
         # Quantity: 'Q' or 'P'.  P only valid in Simulated source.
