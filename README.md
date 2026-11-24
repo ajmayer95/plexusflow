@@ -42,8 +42,13 @@ editors), `vectorize` ([net3](https://github.com/ajmayer95/net3), mask → graph
 
 ## Reproducing the paper
 
-1. Download and extract the data release (21-somite embryo) from Zenodo (link above). It contains the measured vessel
-   graph, the stitched mosaic and masks, per-tile projections and the inputs of every figure.
+1. Download the data release for the 21-somite embryo. Until the Zenodo record is published it is on this repository's
+   [Releases page](https://github.com/ajmayer95/plexusflow/releases) as **data-v4**, in two archives that unpack into
+   the same folder:
+   - `PlexusFlow21S_release_v4.core.tar.gz`: the measured vessel graph, results, mosaic, masks, per-tile projections and
+     the other figure inputs;
+   - `PlexusFlow21S_release_v4.extras.tar.gz`: one short video per tile, needed only for Figs 1 and 4 and for video
+     playback in the viewer.
 2. Point the code at it. There is no default location: every script stops with a clear message if
    `PLEXUSFLOW_STAGE` is unset.
 
