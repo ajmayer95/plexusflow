@@ -6,7 +6,8 @@ clock, + = the vessel's stored orientation:
   Measured     the combined measurement before the projection (1/σ² average of the recordings)
   Reconciled   the conservative field
   Model        the RC network at the current D
-Q (nL/s) or Q/Q̄ (each curve over its own mean).  Summary (read-only viewer): geometry, recordings, and for each source the
+Q (nL/s) or Q/Q̄ (each curve over its own mean).  'Raw recordings' instead shows each tile's frame-by-frame Q(t) for
+the vessel over the whole recording (its own clock, 250 fps) with its mean + two-harmonic fit.  Summary (read-only viewer): geometry, recordings, and for each source the
 mean flow (± uncertainty), pulsatility, relative pulsatile power and the H1 / H2 phase lag behind the vitelline veins.
 
 Mixin of plexusflow.viewer.app.ReadOnlyMosaicViewer.  Display only; nothing is written.
@@ -74,6 +75,16 @@ class VesselPanelMixin:
         row = QHBoxLayout()
         self._vp_abs = QRadioButton("Q (nL/s)"); self._vp_rel = QRadioButton("Q / Q̄"); self._vp_rel.setChecked(True)
         self._vp_recs = QCheckBox("Recordings"); self._vp_recs.setChecked(True)
+        from qtpy.QtWidgets import QButtonGroup
+        self._vp_cycles = QRadioButton("Cycles (common clock)"); self._vp_raw = QRadioButton("Raw recordings")
+        self._vp_cycles.setChecked(True)
+        self._vp_raw.setToolTip("Each tile's frame-by-frame flux Q(t) for this vessel over the whole recording (own clock, 250 fps),\n"
+                                "with its mean + two-harmonic fit at the tile's heart rate.")
+        g1 = QButtonGroup(w); g1.addButton(self._vp_cycles); g1.addButton(self._vp_raw)
+        g2 = QButtonGroup(w); g2.addButton(self._vp_abs); g2.addButton(self._vp_rel)
+        for x in (self._vp_cycles, self._vp_raw):
+            x.toggled.connect(lambda _c: self._vessel_plot_refresh()); row.addWidget(x)
+        row.addSpacing(16)
         for x in (self._vp_abs, self._vp_rel, self._vp_recs):
             x.toggled.connect(lambda _c: self._vessel_plot_refresh()); row.addWidget(x)
         self._vp_title = QLabel("Click a vessel"); row.addStretch(1); row.addWidget(self._vp_title)
@@ -98,6 +109,9 @@ class VesselPanelMixin:
             ax.text(0.5, 0.5, "Click a vessel", color='#dddddd', ha='center', va='center', transform=ax.transAxes)
             self._vp_canvas.draw_idle(); return
         u, v = sel; rel = self._vp_rel.isChecked(); c = np.linspace(0, 2, 400)
+        self._vp_recs.setEnabled(not self._vp_raw.isChecked())
+        if self._vp_raw.isChecked():
+            self._vessel_plot_raw(ax, u, v, rel); return
         norm = (lambda q0, q: q / q0 if q0 else q * np.nan) if rel else (lambda q0, q: q)
         if self._vp_recs.isChecked():
             recs = self._vessel_recordings(u, v)
@@ -116,6 +130,48 @@ class VesselPanelMixin:
         ax.set_ylabel('Q / Q̄' if rel else 'Q (nL/s), + = u→v', color='#dddddd', fontsize=8)
         ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=8, frameon=False, labelcolor='#dddddd')
         self._vp_title.setText(f"Vessel ({u}, {v})")
+        self._vp_canvas.draw_idle()
+
+    def _raw_traces(self, u, v):
+        """[(tile, f0, t (s), Q(t), fitted Q(t), Q̄)] — every recording with a profile fit, signed along the vessel's
+        reconciliation orientation (stored traces are signed along the graph edge)."""
+        from ..reconcile.harmonics import phasors
+        d = self.G.edges[u, v]; tf0 = self.G.graph.get('tile_f0_piv', {})
+        stored = (u, v) if (u, v) in self._edge_index_map() else (v, u)
+        disp = tuple(d.get('_rec_uv') or stored); sgn = 1.0 if disp == stored else -1.0
+        out = []
+        for m in d.get('measurements_piv') or []:
+            q = m.get('Q_t'); t_id = m.get('tile_id')
+            if q is None or not (m.get('quality') or {}).get('profile_ok') or t_id not in tf0:
+                continue
+            q = sgn * np.asarray(q, float); f0 = float(tf0[t_id]); t = np.arange(q.size) / 250.0
+            a0, H = phasors(q, f0)
+            fit = a0 + sum(np.real(h * np.exp(2j * np.pi * (k + 1) * f0 * t)) for k, h in enumerate(H))
+            out.append((int(t_id), f0, t, q, fit, float(a0)))
+        return sorted(out)
+
+    def _edge_index_map(self):
+        if getattr(self, '_eidx_cache', None) is None or len(self._eidx_cache) != len(self.edge_list):
+            self._eidx_cache = {e: i for i, e in enumerate(self.edge_list)}
+        return self._eidx_cache
+
+    def _vessel_plot_raw(self, ax, u, v, rel):
+        import matplotlib.pyplot as plt
+        traces = self._raw_traces(u, v)
+        if not traces:
+            ax.text(0.5, 0.5, "No recordings with a valid profile fit", color='#dddddd', ha='center', va='center',
+                    transform=ax.transAxes)
+        cmap = plt.get_cmap('tab10')
+        for i, (tile, f0, t, q, fit, a0) in enumerate(traces):
+            col = cmap(i % 10); sc = (1.0 / a0) if rel and a0 else 1.0
+            ax.plot(t, q * sc, color=col, lw=0.6, alpha=0.55)
+            ax.plot(t, fit * sc, color=col, lw=1.6, label=f"tile {tile} ({f0:.2f} Hz)")
+        ax.axhline(1.0 if rel else 0.0, color='#666666', lw=0.6)
+        ax.set_xlabel('time in each recording (s)', color='#dddddd', fontsize=8)
+        ax.set_ylabel('Q / Q̄' if rel else 'Q (nL/s), + = u→v', color='#dddddd', fontsize=8)
+        if traces:
+            ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=8, frameon=False, labelcolor='#dddddd')
+        self._vp_title.setText(f"Vessel ({u}, {v}) — {len(traces)} raw recording{'s' if len(traces) != 1 else ''}")
         self._vp_canvas.draw_idle()
 
     # ── summary table ────────────────────────────────────────────────
