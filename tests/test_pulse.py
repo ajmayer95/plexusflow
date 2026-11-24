@@ -66,3 +66,16 @@ def test_own_direction_makes_backward_recordings_harmless_for_the_clocks():
     assert err(own) < 2.0 and np.mean(np.abs(d) > 90) > 0.3                           # in the fixed orientation a third of the pairs are half a cycle off
     Po = flux_pairs(recs); do = np.degrees(np.angle(np.exp(1j * (Po["d"] - np.array([psi[a] - psi[b] for a, b in zip(Po["a"], Po["b"])])))))
     assert np.mean(np.abs(do) > 90) < 0.01
+
+
+def test_log_waveform_loss_recovers_distensibility(monkeypatch):
+    """the log-waveform loss is minimal at the D that generated the harmonics, and symmetric in the amplitude ratio"""
+    import plexusmech.ac.waveform as W
+    n = 40; rng = np.random.default_rng(0); el = np.ones(n, bool); base = {k: rng.uniform(0.1, 0.5, n) * np.exp(1j * rng.uniform(-3, 3, n)) for k in (1, 2)}
+    resp = lambda C, k, D, eta, gid, el_: (base[k] * np.exp(-1j * k * 1e3 * D) / (1 + 1e3 * D))[:, None]      # damping and delay grow with D
+    monkeypatch.setattr(W, "group_response", resp); monkeypatch.setattr(W, "groups", lambda C: None)
+    d_true = 4e-4; C = dict(elig=el, Qp=np.ones(n), Qs_dc=np.ones(n), H={k: resp(None, k, d_true, 0, None, el)[:, 0] for k in (1, 2)})
+    R = W.fit_log_waveform(C, d_grid=np.logspace(np.log10(2.5e-4), np.log10(8e-4), 21), tile=np.arange(n) % 5, n_boot=20)
+    assert abs(R["D_parabola"] / d_true - 1) < 0.03 and R["D_boot"][0] <= R["D_parabola"] <= R["D_boot"][2]
+    C2 = dict(C, H={k: 2 * v for k, v in C["H"].items()}); C3 = dict(C, H={k: v / 2 for k, v in C["H"].items()})
+    assert np.allclose(W.log_waveform_distance(C2, d_true), np.log(2) ** 2) and np.allclose(W.log_waveform_distance(C3, d_true), np.log(2) ** 2)

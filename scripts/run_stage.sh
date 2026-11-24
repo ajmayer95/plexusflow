@@ -29,7 +29,7 @@ run scripts/dc_reconcile.py                 # mean flow: 1/σ² average, conserv
 run scripts/dc_qc.py                        # review list: gross-error tests, loops, hotspots            → dc_qc.csv, dc_qc.json
 if [[ $AC == 1 ]]; then
   run scripts/pulse_field.py                # reconciled pulsatile field (plexusflow.ac.pulse)           → ac_field_v9.pkl
-  run scripts/mech/ac_estimate.py           # distensibility fit, forcing as measured                    → ac_estimate_v10.json
+  run scripts/mech/ac_estimate.py           # distensibility fit, forcing as measured                    → ac_estimate_v11.json
 fi
 echo
 echo "done. View:  plexusflow view \"$PLEXUSFLOW_STAGE\""

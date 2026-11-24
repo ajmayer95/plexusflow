@@ -18,7 +18,7 @@ Schema 2 (data-v2, 2026-10-15):
     fuse/organ_fusion_close.tif | organ_fusion.tif, stitch/positions.json
     results/{dc_reconciled_v2.pkl, ac_field_v2.pkl, reliability_model_v1.json, summary.json, *.csv}
 Schema 3 (2026-11-02): + figure inputs; results of the earlier method (ac_field_v7.pkl, ac_estimate_v8.json, validation JSONs).
-Schema 4 (2026-11-23, the paper): results/{dc_reconciled_v3.pkl, ac_field_v9.pkl, ac_estimate_v10.json, summary.json, *.csv}
+Schema 4 (2026-11-23, the paper): results/{dc_reconciled_v3.pkl, ac_field_v9.pkl, ac_estimate_v11.json, summary.json, *.csv}
     — mean flow with residual-variance weights and equal left/right inflow; tile clocks from vessels recorded in two tiles; reconciled pulsatile field; distensibility fit.
 """
 from __future__ import annotations
@@ -29,11 +29,11 @@ import pickle
 from functools import cached_property
 from pathlib import Path
 
-SCHEMA_VERSION = 4          # 4: paper results (dc v3, ac_field_v9, ac_estimate_v10); 3: earlier method (ac_field_v7, ac_estimate_v8); 2: data-v2
+SCHEMA_VERSION = 4          # 4: paper results (dc v3, ac_field_v9, ac_estimate_v11); 3: earlier method (ac_field_v7, ac_estimate_v8); 2: data-v2
 SUPPORTED_SCHEMAS = (2, 3, 4)
 _DC = {2: "dc_reconciled_v2.pkl", 3: "dc_reconciled_v2.pkl", 4: "dc_reconciled_v3.pkl"}
 _AC = {2: "ac_field_v2.pkl", 3: "ac_field_v7.pkl", 4: "ac_field_v9.pkl"}
-_FIT = {3: "ac_estimate_v8.json", 4: "ac_estimate_v10.json"}
+_FIT = {3: "ac_estimate_v8.json", 4: "ac_estimate_v11.json"}
 PHASE_SD_MAX_DEG = 30.0      # tile time gauge bootstrap SD above which phases are not compared across tiles
 
 
@@ -110,7 +110,7 @@ class Release:
 
     @cached_property
     def ac_fit(self) -> dict:
-        """The distensibility fit (schema ≥ 3; schema 4: results/ac_estimate_v10.json)."""
+        """The distensibility fit (schema ≥ 3; schema 4: results/ac_estimate_v11.json)."""
         if self.schema_version < 3:
             raise ReleaseError(f"{self.name}: schema {self.schema_version} releases have no distensibility fit")
         return json.loads(self._result(_FIT[self.schema_version]).read_text())

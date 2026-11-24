@@ -66,8 +66,8 @@ Edge orientation: every edge has a tail → head orientation and positive flux r
 - **Mean flow:** 1/σ² average of the fitted means, projected onto junction conservation with total left = total right arterial inflow (`reconcile.dc.SYMMETRIC = True`).
 - **Tile clocks:** `plexusflow.ac.pulse` (`flux_pairs` → `tile_clocks`): every graph vessel recorded in two tiles (network and open region), each flux recording in its own mean-flow direction, first harmonic; weighted circular least squares, solved jointly; tiles with clock SD > 30° are not synchronised. No aorta anchor, no sign correction, no raw-movie step.
 - **Pulsatile flow:** all of a vessel's recordings averaged with 1/σ² weights and rescaled by the reconciled mean over the combined measured mean; not reconstructed where that ratio is negative; vessels with recordings of both directions are flagged.
-- **Distensibility fit:** boundary forcing as measured, clocks fixed, no group corrections, one common variance per loss term (`scripts/mech/ac_estimate.py --method measured`).
-- **Result files:** `dc_reconciled_v3.pkl`, `ac_field_v9.pkl`, `ac_estimate_v10.json` (`ac_field_v8` / `ac_estimate_v9`: the earlier clocks, sensitivity). Earlier estimators stay selectable and write other names.
+- **Distensibility fit:** boundary forcing as measured, clocks fixed, no group corrections; loss = mean over fitted vessels and both harmonics of ln(amplitude ratio)² + (phase difference)², harmonics divided by their own mean flow, no weights and no fitted variances (`plexusmech.ac.waveform`, `scripts/mech/ac_estimate.py`). `--method measured` is the earlier three-term likelihood (writes `ac_estimate_v10.json`).
+- **Result files:** `dc_reconciled_v3.pkl`, `ac_field_v9.pkl`, `ac_estimate_v11.json` (`ac_field_v8` / `ac_estimate_v9`: the earlier clocks, sensitivity). Earlier estimators stay selectable and write other names.
 
 ## Conventions and pitfalls
 

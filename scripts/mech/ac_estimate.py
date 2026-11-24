@@ -1,6 +1,12 @@
-"""Wall distensibility D (η optional) from the pulsatile field: loss of plexusmech.ac.profile on a grid of D.
+"""Wall distensibility D from the pulsatile field: loss on a grid of D.
 
-METHOD (--method measured, the default): the reconciled field of scripts/pulse_field.py (ac_field_v9) on the mean
+METHOD (--method logwave, the default): the reconciled field of scripts/pulse_field.py (ac_field_v9) on the mean flow
+dc_reconciled_v3; boundary forcing taken from the field as measured (no group corrections fitted), tile clocks fixed.  Loss =
+mean over the fitted vessels and both harmonics of ln(amplitude ratio)² + (phase difference)², the harmonics of the field and of
+the RC network each divided by their own mean flow (plexusmech.ac.waveform): no weights, no fitted nuisance parameters.
+D̂ is also re-fitted on resampled tiles.  Writes results/ac_estimate_v11.json.
+
+--method measured (the loss before 2026-11-23; sensitivity): the reconciled field of scripts/pulse_field.py (ac_field_v9) on the mean
 flow dc_reconciled_v3; boundary forcing taken from the field as measured (no group corrections fitted), tile clocks fixed (no
 latent tile gauge); per-vessel variance = the variance of the averaged coefficient (fit residual) + one common variance fitted
 per loss term (H1 phase, H2 phase, H1 amplitude) — the reliability model is not used.  Writes results/ac_estimate_v10.json
@@ -45,19 +51,19 @@ def main():
     ap.add_argument("--gauge-passes", type=int, default=2)
     ap.add_argument("--n-jobs", type=int, default=8)
     ap.add_argument("--h1-only", action="store_true", help="sensitivity: leave the H2 phase term out of the likelihood (H1 phase + pulsatility only)")
-    ap.add_argument("--method", choices=("measured", "profiled"), default="measured",
+    ap.add_argument("--method", choices=("logwave", "measured", "profiled"), default="logwave",
                     help="measured (default): boundary forcing as measured, clocks fixed, common extra variance; profiled: the previous fit "
                          "(boundary group corrections and tile gauge re-fitted at each D, reliability-model variance)")
-    ap.add_argument("--out", default=None, help="results/<out>.json (default ac_estimate_v10; ac_estimate_v9 for --field ac_field_v8; ac_estimate_v8 with --method profiled)")
+    ap.add_argument("--out", default=None, help="results/<out>.json (default ac_estimate_v11; --method measured: ac_estimate_v10, ac_estimate_v9 for --field ac_field_v8; ac_estimate_v8 with --method profiled)")
     ap.add_argument("--field", default=None, help="results/<field>.pkl (default ac_field_v9 = scripts/pulse_field.py; ac_field_v8 = its --previous clocks; ac_field_v7 with --method profiled)")
     ap.add_argument("--dc", default=None, help="results/<dc>.pkl (default dc_reconciled_v3; dc_reconciled_v2 with --method profiled)")
     ap.add_argument("--gauge-block", default=None, help="tiles sharing one extra gauge offset with a flat prior, e.g. 15,18,19,20,29,30,31,32,33,34")
     ap.add_argument("--topo", default="flux", choices=("sealed", "flux", "supernode"),
                     help="pulsatile closure of topology-uncertain regions (plexusmech.ac.model.build_context); sensitivity, none primary")
     ap.add_argument("--supernode-scale", type=float, default=1.0, help="supernode compliance × this (region volume uncertain)")
-    a = ap.parse_args(); measured = a.method == "measured"
+    a = ap.parse_args(); logwave = a.method == "logwave"; measured = a.method in ("measured", "logwave")
     a.field = a.field or ("ac_field_v9" if measured else "ac_field_v7")
-    a.out = a.out or (("ac_estimate_v9" if a.field == "ac_field_v8" else "ac_estimate_v10") if measured else "ac_estimate_v8")
+    a.out = a.out or ("ac_estimate_v11" if logwave else ("ac_estimate_v9" if a.field == "ac_field_v8" else "ac_estimate_v10") if measured else "ac_estimate_v8")
     a.dc = a.dc or ("dc_reconciled_v3" if measured else "dc_reconciled_v2")
     from plexusflow.config import StageConfig
     _cfg = StageConfig.load(paths.STAGE)                     # per-stage defaults (plexusflow.yaml)
@@ -85,6 +91,14 @@ def main():
             C, info = vein_forcing(C0, A, mode=a.veins, gauge_rad=gauge_rad)
             log(f"  pass {p + 1}: {len(info['stubbed'])} of {len(dom['out'])} vein nodes have a stub;  shared waveform "
                 + ", ".join(f"H{k} {abs(info['mean'][k]):.3f}∠{np.degrees(np.angle(info['mean'][k])):+.0f}°" for k in (1, 2)))
+        if logwave:
+            from plexusmech.ac.waveform import fit_log_waveform
+            W = fit_log_waveform(C, d_grid=d_grid, tile=A["tile"])
+            R = dict(S=W["L"][None, :], D=W["D"], eta=0.0, nll=float(W["L"].min()), x=np.zeros(12), delta_deg={int(t): 0.0 for t in A["gauge_sd_deg"]},
+                     block_beta_deg=0.0, gauge_block=[])
+            log(f"  log-waveform loss on {W['n']} vessels: D {W['D_parabola']:.3e} /Pa (grid minimum {W['D']:.3e}); resampled tiles: "
+                f"median {W['D_boot'][1]:.3e}, 2.5–97.5 % {W['D_boot'][0]:.3e}–{W['D_boot'][2]:.3e}")
+            prof = W["L"] - W["L"].min(); break
         R = fit_profile(C, c, A, d_grid=d_grid, eta_grid=a.eta, weights=a.weights, gauge=not (a.no_gauge or measured), pin_veins=not a.fit_veins,
                         n_jobs=a.n_jobs, progress=lambda m: log("  " + m), x_fixed=np.zeros(12) if measured else None,
                         gauge_block=[int(t) for t in a.gauge_block.split(",")] if a.gauge_block else None, harmonics=(1,) if a.h1_only else (1, 2))
@@ -104,20 +118,22 @@ def main():
                topo=a.topo, supernode_scale=a.supernode_scale,
                method=a.method, field=a.field, dc=a.dc,
                forcing=(f"measured: boundary inflow × local measured waveform, no corrections; topology regions: {a.topo}; veins: {a.veins} (pinned); "
-                        f"clocks fixed; variance = averaged-coefficient variance + one common variance per term") if measured else
+                        f"clocks fixed; " + ("loss = mean squared log-waveform distance (H1 + H2, amplitude and phase), unweighted" if logwave else
+                                             "variance = averaged-coefficient variance + one common variance per term")) if measured else
                        f"carve: local ratio + L/R group corrections; topology regions: {a.topo}; veins: {a.veins}{' (fitted)' if a.fit_veins else ' (pinned)'}; "
                        f"weights {a.weights}; tile gauge {'latent' if not a.no_gauge else 'off'}",
                settings=vars(a), D_grid=d_grid.tolist(), eta_grid=list(a.eta), S=R["S"].tolist(),
                nodes=[int(dom["nodes"][b]) for b in bnd], f1=[[float(z.real), float(z.imag)] for z in f[1]],
                f2=[[float(z.real), float(z.imag)] for z in f[2]], x=[float(v) for v in R["x"]],
                gauge_correction_deg={str(t): v for t, v in R["delta_deg"].items()}, groups=group_table(C, R["x"]),
-               n_supported=int(sup.sum()), gauge_block=R["gauge_block"], block_beta_deg=R["block_beta_deg"])
+               n_supported=int(sup.sum()), gauge_block=R["gauge_block"], block_beta_deg=R["block_beta_deg"],
+               D_boot=W["D_boot"] if logwave else None, loss="log-waveform" if logwave else "likelihood")
     (paths.RESULTS / f"{a.out}.json").write_text(json.dumps(out, indent=1))
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(7, 4.5))
     for i, e in enumerate(a.eta):
         ax.plot(d_grid, R["S"][i] - np.nanmin(R["S"]), "o-", ms=3, label=f"η = {e:g}")
-    ax.set_xscale("log"); ax.set_yscale("symlog", linthresh=10); ax.set_xlabel("D (1/Pa)"); ax.set_ylabel("ΔNLL")
+    ax.set_xscale("log"); ax.set_yscale("symlog", linthresh=10); ax.set_xlabel("D (1/Pa)"); ax.set_ylabel("Δ loss" if logwave else "ΔNLL")
     ax.axvline(R["D"], color="k", lw=0.8); ax.legend(fontsize=8)
     ax.set_title(f"{paths.STAGE.name}: D = {out['D_parabola']:.2e} /Pa (veins {a.veins})", fontsize=10)
     o = paths.FIGURES / "ac" / f"{a.out}.png"; o.parent.mkdir(parents=True, exist_ok=True); fig.tight_layout(); fig.savefig(o, dpi=120)

@@ -6,6 +6,9 @@ implements it. Numbers are for the 21-somite embryo (21S).
 Input: the measured vessel graph. Every vessel carries one flux time series $Q^{\rm obs}_{e,\alpha}(t)$ per tile
 $\alpha$ that recorded it (250 frames/s; flux from parabolic velocity-profile fits, see [pipeline.md](pipeline.md)).
 Tiles are separate movies, taken one after another, so each has its own clock and its own heart rate $f_\alpha$.
+$f_\alpha$ is estimated once per tile from the stacked spectra of its strongest flux traces and then held fixed; the graph
+records where each tile's rate came from (`G.graph["tile_f0_status"]`; on 21S five tiles without a resolved beat keep a
+provisional rate).
 
 ## 1. Fit per recording
 
@@ -37,7 +40,7 @@ inflow 5.74 nL/s.
 
 `plexusflow.ac.pulse.build_pulse_field` · `scripts/pulse_field.py` → `results/ac_field_v9.pkl`
 
-1. **Tiles used.** Tiles whose heart rate is within 21 % of the reference tile's (21S: tile 21, 2.69 Hz; tiles 1–6 fall
+1. **Tiles used.** Tiles whose heart rate is within 21 % of the reference tile's (21S: tile 21, 2.71 Hz; tiles 1–6 fall
    outside).
 2. **Clock measurements.** Every vessel of the graph recorded in two tiles gives one measurement per tile pair, whether
    it belongs to the network or to the open region beside the aortae. Each recording is taken in its own mean-flow
@@ -67,9 +70,9 @@ inflow 5.74 nL/s.
 The field is a composite of recordings made at different times, not a simultaneous observation.
 
 21S: 8,357 clock measurements between retained tiles; 46 of 47 clocks synchronised (tile 53, at the lower rim, has a clock SD
-of 77° and is left out; the next largest is 15°).
-5,204 vessels reconstructed, 679 of them flagged as temporally inconsistent; 786 vessels are not reconstructed because their
-reconciled and measured means have opposite signs, and 35 because they have no usable mean.
+of 75° and is left out; the next largest is 14°).
+5,197 vessels reconstructed, 678 of them flagged as temporally inconsistent; 786 vessels are not reconstructed because their
+reconciled and measured means have opposite signs, and 42 because they have no usable mean.
 
 **Sensitivity to the averaging rule** (measured with an earlier, equivalent set of clocks). Averaging only the recordings
 whose mean flow has the reconciled direction (`pulse_field.py --agree`) changed $\hat D$ by 0.5 % and added about 200
@@ -88,7 +91,7 @@ raw movies), gave the same clocks as the ones in use to a median of 2° (90 % of
 
 ## 4. Distensibility
 
-`plexusmech.ac` · `scripts/mech/ac_estimate.py` → `results/ac_estimate_v10.json`
+`plexusmech.ac` · `scripts/mech/ac_estimate.py` → `results/ac_estimate_v11.json`
 
 The network is modelled as a distributed RC line per vessel (Poiseuille resistance, wall compliance set by one areal
 distensibility $D$).
@@ -96,14 +99,25 @@ distensibility $D$).
 - **Forcing, as measured, not fitted.** At each arterial node: the reconciled mean boundary flux times the
   flux-weighted mean waveform of reconstructed vessels within 4 junctions. At the two vein outlets: one shared
   measured waveform.
-- **Loss.** For each fitted vessel, the model is compared with the reconstructed field in three terms: first-harmonic
-  phase and second-harmonic phase (von Mises) and first-harmonic amplitude relative to the mean (Student-t, 4 degrees
-  of freedom, on $\log_{10}$). Per-vessel variance = variance of the averaged coefficient + one common variance fitted
-  per term.
-- **Estimate.** The loss is evaluated on 21 values of $D$ between 2.5 and 8 × 10⁻⁴ /Pa; $\hat D$ is the minimum of
-  a parabola through the lowest points.
+- **Loss.** For each fitted vessel $e$ and harmonic $n = 1, 2$, the reconstructed and simulated harmonics are divided by
+  their own mean flows, $h^{\mathrm{obs}}_{e,n} = \hat Q_{e,n}/\bar Q_e$ and
+  $h^{\mathrm{sim}}_{e,n}(D) = \hat Q^{\mathrm{sim}}_{e,n}(D)/\bar Q^{\mathrm{sim}}_e$, and compared through their complex
+  logarithms:
 
-21S: 4,961 vessels fitted; $\hat D$ = 4.0 × 10⁻⁴ /Pa (4.02; 4.28 with the earlier clocks).
+  $$L(D) = \frac{1}{N}\sum_e \sum_{n=1}^{2}\left[\left(\ln\frac{|h^{\mathrm{sim}}_{e,n}(D)|}{|h^{\mathrm{obs}}_{e,n}|}\right)^2
+  + \Delta\phi_{e,n}(D)^2\right],$$
+
+  with $\Delta\phi_{e,n}$ the phase difference in radians, wrapped to $(-\pi, \pi]$. There are no weights and no fitted
+  parameters other than $D$; a phase error of one radian counts as a factor $e$ in amplitude. (A plain complex
+  difference $|h^{\mathrm{sim}} - h^{\mathrm{obs}}|$ is not used: it is lowered by damping the model's pulsation and has
+  no minimum in $D$.)
+- **Estimate.** The loss is evaluated on 21 values of $D$ between 2.5 and 8 × 10⁻⁴ /Pa; $\hat D$ is the vertex of a
+  parabola in $\log_{10} D$ through the grid minimum and its two neighbours. Its spread is taken from re-fitting on
+  resampled tiles (whole tiles drawn with replacement), since vessels of a tile are not independent.
+
+21S: 4,948 vessels fitted; $\hat D$ = 3.7 × 10⁻⁴ /Pa (3.74; 2.5–97.5 % over resampled tiles 3.4–4.2). The components
+taken alone give 4.4 (first harmonic) and 3.5 (second harmonic); the three-term likelihood used before 2026-11-23
+(`--method measured`) gave 4.0 on the reconstruction of that date.
 
 ## Figures
 

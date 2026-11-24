@@ -6,7 +6,7 @@
   c  one cardiac cycle of three vessels, reconstructed vs RC network, each normalised by its own mean; the relative error of
      the modelled mean flux is written in each panel
 Inputs: results/dc_reconciled_v3.pkl (scripts/dc_reconcile.py), results/ac_field_v9.pkl (scripts/pulse_field.py) and
-results/ac_estimate_v10.json (scripts/mech/ac_estimate.py).  Phase lags: H_n in each vessel's own flow direction, relative to the
+results/ac_estimate_v11.json (scripts/mech/ac_estimate.py).  Phase lags: H_n in each vessel's own flow direction, relative to the
 vitelline-vein waveform.  The boundary-forcing panel of the earlier version is still built (for the node markers) but hidden.
 Writes figures/fig7/fig7.{png,pdf,tif}; nothing to any graph.
 """
@@ -58,7 +58,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--picks', default=PAPER_PICKS, help='three edges "u,v;u,v;…" for panel e (default: the paper\'s; "auto" = '
                     'good / typical / poor by harmonic-residual percentile 20/50/80 among well-measured vessels)')
-    ap.add_argument('--bc-json', default=None, help='distensibility fit (D, boundary forcing, loss over the D grid); default results/ac_estimate_v10.json')
+    ap.add_argument('--bc-json', default=None, help='distensibility fit (D, boundary forcing, loss over the D grid); default results/ac_estimate_v11.json')
     ap.add_argument('--field', default='ac_field_v9', help='results/<field>.pkl (scripts/pulse_field.py)')
     ap.add_argument('--abs-q', action='store_true', help='panel e in nL/s (each vessel in its own flow direction, own y axis) '
                     'instead of Q/Q̄; the model curve then also shows its mean-flow mismatch')
@@ -71,7 +71,7 @@ def main():
     D = pickle.loads((_paths.RESULTS / 'dc_reconciled_v3.pkl').read_bytes())
     A = pickle.loads((_paths.RESULTS / f'{args.field}.pkl').read_bytes())
     dom = carved_domain(G); assert dom['edges'] == D['edges'] == A['edges']
-    bc = Path(args.bc_json) if args.bc_json else _paths.RESULTS / 'ac_estimate_v10.json'
+    bc = Path(args.bc_json) if args.bc_json else _paths.RESULTS / 'ac_estimate_v11.json'
     J = json.loads(bc.read_text()) if bc.exists() else None
     if J is None:
         print(f'[fig7] {bc} not found: falling back to D = {D_MAIN:g}, no profile panel (run scripts/mech/ac_estimate.py)')

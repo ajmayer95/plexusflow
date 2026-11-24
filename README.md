@@ -63,7 +63,7 @@ editors), `vectorize` ([net3](https://github.com/ajmayer95/net3), mask → graph
 |---|---|---|
 | mean flow (conservation, equal left/right inflow) | `scripts/dc_reconcile.py` | `dc_reconciled_v3.pkl` |
 | tile clocks and pulsatile flow | `scripts/pulse_field.py` | `ac_field_v9.pkl` |
-| distensibility fit | `scripts/mech/ac_estimate.py` | `ac_estimate_v10.json` |
+| distensibility fit | `scripts/mech/ac_estimate.py` | `ac_estimate_v11.json` |
 | Figures 1–7 | `scripts/make_figure*.py` ([FIGURES.md](FIGURES.md)) | `$PLEXUSFLOW_FIGURES/figN/` |
 
 Script defaults are the settings used in the paper; the method is described in [docs/method.md](docs/method.md).

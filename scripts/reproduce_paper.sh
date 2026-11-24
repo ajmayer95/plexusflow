@@ -19,7 +19,7 @@ if [[ "${1:-}" != "--figures" ]]; then
   mkdir -p "${PLEXUSFLOW_RESULTS:-$PLEXUSFLOW_STAGE/results}"
   run scripts/dc_reconcile.py          # mean flow: 1/σ² average of the recordings, conservation, left = right inflow → dc_reconciled_v3.pkl
   run scripts/pulse_field.py           # tile clocks, averaged harmonics, rescaled to the reconciled mean             → ac_field_v9.pkl
-  run scripts/mech/ac_estimate.py      # distensibility of the RC network, boundary forcing as measured                → ac_estimate_v10.json
+  run scripts/mech/ac_estimate.py      # distensibility of the RC network, boundary forcing as measured                → ac_estimate_v11.json
 fi
 
 for f in 1 2 3 4 5 6 7; do             # make_figureN.py draws Fig N

@@ -23,7 +23,7 @@ import numpy as np
 import plexusflow.paths as paths
 from plexusflow.release import SCHEMA_VERSION
 
-RESULTS = ("dc_reconciled_v3.pkl", "ac_field_v9.pkl", "ac_estimate_v10.json")
+RESULTS = ("dc_reconciled_v3.pkl", "ac_field_v9.pkl", "ac_estimate_v11.json")
 RESULTS_OPTIONAL = ("reliability_model_v1.json", "dc_qc.json", "dc_qc.csv")
 # inputs of the paper figures (scripts/make_figure*.py), copied as-is from the stage (core tier)
 FIGURE_INPUTS = ("fuse/organ_fusion.tif", "fuse/maxmed.tif", "fuse/probs_logit.tif", "mask/mask.tif", "tiles/maxmed", "assets")
@@ -254,7 +254,7 @@ the analysis needs; **extras** adds the per-tile realtime videos (viewer playbac
 |---|---|---|
 | `graph/` | core | `graph_vessels_piv.gpickle` (networkx; includes the viewer's derived per-edge harmonic cache; Q(t) traces are re-attached from `export/traces.npz` on load) and `export/` — the same graph as CSV + npz, plus per-tile heart rates (see `export/SCHEMA.md`) |
 | `fuse/`, `stitch/` | core | organ mosaic and tile placement |
-| `results/` | core | reconciled mean flow `dc_reconciled_v3`, reconciled pulsatile field `ac_field_v9`, distensibility fit `ac_estimate_v10`; CSV exports and `summary.json` |
+| `results/` | core | reconciled mean flow `dc_reconciled_v3`, reconciled pulsatile field `ac_field_v9`, distensibility fit `ac_estimate_v11`; CSV exports and `summary.json` |
 | `fuse/`, `mask/`, `tiles/maxmed/`, `assets/` | core | mosaic projections, segmentation probability and mask, per-tile projections, figure drawings |
 | `acquisition_times.json`, `tile_video_shapes.json`, `raw_subset/` | core | recording times and frame sizes of every tile (from the raw recordings) and the representative raw frame of tile 36 (Fig 3) |
 | `videos_realtime/` | extras | every tile's realtime video as used by the figures and the viewer |
