@@ -1,9 +1,10 @@
-"""'Model' data source: the distributed RC network of Fig 7 at a user-chosen wall distensibility D.
+"""'Model' data source: the distributed RC network of Fig 7 at a user-chosen wall distensibility D (flow and pressure).
 
 The model is driven exactly as in scripts/make_figure7.py: mean flow = the passive network flow with the reconciliation's
 boundary fluxes (dc_reconciled_v3 `Qs`); harmonics 1–2 from plexusmech.ac.model.solve with the boundary forcing stored by
 the distensibility fit (results/ac_estimate_v10.json: reconciled boundary flux × measured waveform, veins sharing one
-waveform).  Only D changes.  Results live in memory as `_h_*_mod` edge attributes and are never written.
+waveform).  Only D changes.  Pressure (Quantity P): vessel mean = mean of its end nodes, drop = tail − head, in Pa; the mean
+pressure is gauged to 0 at a vein node.  Results live in memory as `_h_*_mod` edge attributes and are never written.
 
 Mixin of plexusflow.viewer.app.ReadOnlyMosaicViewer; needs `plexusmech` and the reconciliation results.
 """
@@ -53,8 +54,12 @@ class ModelMixin:
         self._model_eta = float(J.get('eta', 0.0))
         self._model_D_fit = float(J.get('D_parabola', J['D']))
         self._model_D = None
+        from plexusmech.ac.model import dc_node_pressure
+        P0 = dc_node_pressure(C, D['fb']); t, h = C['tail'], C['head']
         for i, (u, v) in enumerate(self._model_edges):
-            self.G.edges[u, v]['_h_amp_DC_mod'] = float(C['Qs_dc'][i])
+            d = self.G.edges[u, v]
+            d['_h_amp_DC_mod'] = float(C['Qs_dc'][i])
+            d['_h_p_DC_mod'] = float(0.5 * (P0[t[i]] + P0[h[i]])); d['_h_dp_DC_mod'] = float(P0[t[i]] - P0[h[i]])
         print(f"  model: RC network on {len(self._model_edges)} carved edges, forcing from {self._model_fit_path().name} "
               f"(fitted D̂ = {self._model_D_fit:.2e} /Pa, η = {self._model_eta:g})")
         return True
@@ -63,13 +68,16 @@ class ModelMixin:
         """Harmonics 1–2 at distensibility D → `_h_amp_H{k}_mod`, `_h_phase_H{k}_mod` (in memory)."""
         if not self._model_setup():
             return
-        from plexusmech.ac.model import solve
-        C = self._model_ctx
+        from plexusmech.ac.model import node_pressure, NL
+        C = self._model_ctx; t, h = C['tail'], C['head']
         for k in (1, 2):
-            H = solve(C, k, float(D), self._model_eta, 'flux')
+            P, Ys, Yt = node_pressure(C, k, float(D), self._model_eta, 'flux')
+            H = 0.5 * (Ys + Yt) * (P[t] - P[h]) / NL          # vessel-mean flux, as plexusmech.ac.model.solve
+            Pe, dP = 0.5 * (P[t] + P[h]), P[t] - P[h]
             for i, (u, v) in enumerate(self._model_edges):
                 d = self.G.edges[u, v]
                 d[f'_h_amp_H{k}_mod'] = float(abs(H[i])); d[f'_h_phase_H{k}_mod'] = float(np.angle(H[i]))
+                d[f'_h_p_H{k}_mod'] = complex(Pe[i]); d[f'_h_dp_H{k}_mod'] = complex(dP[i])
         self._model_D = float(D)
 
     # ── controls (View tab) ──────────────────────────────────────────

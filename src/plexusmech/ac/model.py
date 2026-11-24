@@ -113,17 +113,36 @@ def _admittances(C, k, D, eta):
     return Ys, Yt, Y
 
 
-def solve(C, k, D, eta, vmode="flux"):
-    """Vessel-mean harmonic k (nL/s) for the context's forcing.  vmode 'flux': all boundary nodes driven;
-    'P=0': veins held at zero pressure."""
-    Ys, Yt, Y = _admittances(C, k, D, eta); t, h, nN = C["tail"], C["head"], C["nN"]
+def node_pressure(C, k, D, eta, vmode="flux"):
+    """Complex nodal pressure (Pa) of harmonic k for the context's forcing, and the vessel admittances (Ys, Yt).
+    vmode 'flux': all boundary nodes driven; 'P=0': veins held at zero pressure."""
+    Ys, Yt, Y = _admittances(C, k, D, eta); nN = C["nN"]
     f = C["F"][(k, vmode)] * NL
     if vmode == "P=0":
         free = np.setdiff1d(np.arange(nN), C["dom"]["out"])
         P = np.zeros(nN, complex); P[free] = spla.spsolve(Y[free][:, free], f[free])
     else:
         P = spla.spsolve(Y, f)
+    return P, Ys, Yt
+
+
+def solve(C, k, D, eta, vmode="flux"):
+    """Vessel-mean harmonic k (nL/s) for the context's forcing (see node_pressure for vmode)."""
+    P, Ys, Yt = node_pressure(C, k, D, eta, vmode); t, h = C["tail"], C["head"]
     return 0.5 * (Ys + Yt) * (P[t] - P[h]) / NL
+
+
+def dc_node_pressure(C, fb):
+    """Nodal mean pressure (Pa) of the passive network carrying the context's mean flow (C['Qs_dc']): Poiseuille
+    conductances, net inflow fb (nL/s) at every node, one pressure per connected piece pinned to 0 (a vein node where
+    available) — the same gauge as plexusflow.reconcile.network.passive."""
+    from plexusflow.reconcile.network import _gauge_nodes
+    dom = C["dom"]; nr = dom.get("n_real", dom["B"].shape[0]); B = dom["B"][:nr]
+    Gc = np.pi * C["r_m"] ** 4 / (8 * MU * C["l_m"])
+    L = (B @ sp.diags(Gc) @ B.T).tocsc(); f = np.asarray(fb, float)[:nr] * NL
+    free = np.setdiff1d(np.arange(nr), _gauge_nodes(dom))
+    P = np.zeros(nr); P[free] = spla.spsolve(L[free][:, free], f[free])
+    return P
 
 
 def response(C, k, D, eta, bnd):

@@ -154,16 +154,16 @@ PROPERTY_DEFS = [
     # (key,           display label,          is_harmonic_keyed, valid_in)
     ('magnitude',     'Magnitude |·|',        True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
     # Signed value (real part, NO |·|) — sim only.  The point is DC pressure,
     # where the gauge can dip below 0; |·| would hide the sign.  Rendered on a
     # diverging colormap centred at 0.  (At AC harmonics this is the in-phase
     # component, whose sign depends on the solver phase reference.)
     ('signed',        'Signed (no |·|)',      True,
-        {('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q'), ('model', 'Q')}),
+        {('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
     ('phase',         'Phase ∠·',             True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
     # (Resolution Z = amp/SE removed — same ranking as SNR (dB) for
     # fixed-N, so redundant from the user's perspective.  Z is still
     # computed internally by _harmonic_fit_full and used by the
@@ -218,13 +218,13 @@ PROPERTY_DEFS = [
     ('pulse_frac',     '% pulsatile (AC / total energy)', False,
         {('measured', 'Q'), ('sim', 'Q')}),
     ('drop',          'Pressure drop',        False,
-        {('sim', 'P')}),
+        {('sim', 'P'), ('model', 'P')}),
     ('radius',        'Radius (px)',          False,
         {('measured', 'Q'), ('measured', 'P'),
-         ('sim', 'Q'), ('sim', 'P')}),
+         ('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
     ('length',        'Length (px)',          False,
         {('measured', 'Q'), ('measured', 'P'),
-         ('sim', 'Q'), ('sim', 'P')}),
+         ('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
     ('harmonic_class','Resolved-harmonic class', False,
         {('measured', 'Q')}),
     # Fraction of AC power in the selected harmonic:
@@ -356,6 +356,12 @@ def _osi_from_harmonics(dc, amps_phi, n_samples: int = 200):
     if mean_abs_Q < 1e-30 or not np.isfinite(mean_abs_Q):
         return None
     return 0.5 * (1.0 - abs(mean_Q) / mean_abs_Q)
+
+
+# Properties shown only in the workbench (legacy physics fields and measurement diagnostics superseded by the current
+# method); the read-only viewer lists the rest, and only those valid for the current source / quantity.
+WORKBENCH_ONLY_PROPERTIES = {'OSI', 'snr_ac', 'snr_total', 'dissipation', 'dissipation_ac', 'pulse_frac',
+                             'harmonic_class', 'harmonic_fraction', 'waveform_av'}
 
 
 def _combo_valid(source: str, quantity: str, prop_key: str,

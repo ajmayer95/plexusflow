@@ -23,7 +23,7 @@ Or from Python:
 """
 from __future__ import annotations
 
-from ._common import (  # noqa: F401 - re-exported: app.py was the single viewer module
+from ._common import (WORKBENCH_ONLY_PROPERTIES,   # noqa: F401 - re-exported: app.py was the single viewer module
     _note_suppressed,
     CATEGORICAL_FIELDS,
     DEFAULT_FIELDS,
@@ -607,9 +607,27 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
 
         # ── Model source: Fig 7 RC network at the slider's D (`_h_*_mod`, viewer/model.py); defined on every carved edge.
         if src == 'model':
+            k_idx = HARMONIC_KEYS.index(self.current_harmonic)
+            if k_idx > 2:
+                return None
+            if prop in ('radius', 'length'):
+                return _safe_float(d.get(prop))
+            if qty == 'P':                       # vessel-mean pressure (mean of its end nodes) and drop, Pa
+                tag = 'DC' if k_idx == 0 else f'H{k_idx}'
+                p, dp = d.get(f'_h_p_{tag}_mod'), d.get(f'_h_dp_{tag}_mod')
+                if p is None:
+                    return None
+                if prop == 'magnitude':
+                    return abs(p)
+                if prop == 'signed':
+                    return float(np.real(p))
+                if prop == 'phase':
+                    return float(np.angle(p)) if k_idx else None
+                if prop == 'drop':
+                    return abs(dp) if dp is not None else None
+                return None
             if qty != 'Q':
                 return None
-            k_idx = HARMONIC_KEYS.index(self.current_harmonic)
             dc = _safe_float(d.get('_h_amp_DC_mod'))
             if k_idx == 0:
                 if dc is None:
@@ -633,6 +651,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         if src == 'reconciled':
             if qty != 'Q':
                 return None
+            if prop in ('radius', 'length'):
+                return _safe_float(d.get(prop))
             k_idx = HARMONIC_KEYS.index(self.current_harmonic)
             if prop == 'rec_dc_sd':
                 sd, dc = _safe_float(d.get('_rec_Qp_sd')), _safe_float(d.get('_h_amp_DC_rec'))
@@ -2122,6 +2142,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._tag_class = TOPOLOGY
         _cls_lay.addWidget(self._tag_class_combo)
         _ru_lay.addWidget(_cls_row)
+        self._tag_class_row = _cls_row
 
         # Click-to-tag mode: while ON, every click on a vessel toggles
         # its tag instead of showing info.  Much faster for bulk tagging.
@@ -2250,6 +2271,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             "color: #aaaaaa; font-size: 11px;")
         _fm_lay.addWidget(self._flow_mismatch_status_lbl)
         fld_lay.addWidget(_fm_row)
+        self._flow_mismatch_row = _fm_row
         self._compute_flow_mismatch_edges()   # initial status + cache
 
         # Colour-bound controls — two modes selectable by the combo:
@@ -2459,6 +2481,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         # Tooltip shows the actual distribution so the user knows what
         # cut they're applying in absolute terms.  0 = no filtering.
         diss_row = QWidget()
+        self._dissipation_row = diss_row
         diss_lay = QHBoxLayout(diss_row)
         diss_lay.setContentsMargins(0, 0, 0, 0)
         diss_lay.addWidget(QLabel('Hide bottom % by dissipation Φ:'))
@@ -4072,7 +4095,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         q_p_item = qmodel.item(1)  # 'P' entry
         if q_p_item is not None:
             flags = q_p_item.flags()
-            if sim_active and self.current_source == 'sim':
+            if (sim_active and self.current_source == 'sim') or self.current_source == 'model':
                 q_p_item.setFlags(flags | Qt.ItemIsEnabled
                                     | Qt.ItemIsSelectable)
             else:
@@ -4094,6 +4117,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 continue
             ok = _combo_valid(self.current_source, self.current_quantity,
                                key, self.current_harmonic)
+            listed = (_combo_valid(self.current_source, self.current_quantity, key, 'H1')
+                      or _combo_valid(self.current_source, self.current_quantity, key, 'DC'))
+            self._property_combo.view().setRowHidden(
+                i, not listed or (not self.workbench and key in WORKBENCH_ONLY_PROPERTIES))
+            ok = ok and (self.workbench or key not in WORKBENCH_ONLY_PROPERTIES)
             flags = item.flags()
             if ok:
                 item.setFlags(flags | Qt.ItemIsEnabled
@@ -4111,6 +4139,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 self._property_combo.blockSignals(True)
                 self._property_combo.setCurrentIndex(first_valid_idx)
                 self._property_combo.blockSignals(False)
+        # The Model has H1 and H2 only.
+        self._harmonic_combo.view().setRowHidden(3, self.current_source == 'model')
+        if self.current_source == 'model' and self.current_harmonic == 'H3':
+            self.current_harmonic = 'H2'
+            self._harmonic_combo.blockSignals(True); self._harmonic_combo.setCurrentIndex(2); self._harmonic_combo.blockSignals(False)
         # Harmonic combo: enabled only for harmonic-keyed properties.
         pdef = next((p for p in PROPERTY_DEFS
                       if p[0] == self.current_property), None)
@@ -4336,10 +4369,15 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         if self.workbench:
             return
         for name in ('_click_to_tag_chk', '_radial_btn_row', '_region_row',
-                     '_run_of_btn', '_of_merge_chk', '_of_refine_chk', '_clear_of_region_btn'):
+                     '_run_of_btn', '_of_merge_chk', '_of_refine_chk', '_clear_of_region_btn',
+                     '_tag_class_row', '_flow_mismatch_row', '_dissipation_row', '_edge_labels_all_chk'):
             w = getattr(self, name, None)
             if w is not None:
                 w.setVisible(False)
+        if getattr(self, '_edge_labels_chk', None) is not None:
+            self._edge_labels_chk.setText("Show edge value labels")
+            self._edge_labels_chk.setToolTip("Show the current value at each edge's midpoint (every edge that has one).\n"
+                                             "Text is a fixed screen size: zoom in to read it.")
 
 
     def _reconciliation_available(self) -> bool:
@@ -4458,6 +4496,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
 
     def _on_edge_labels_toggle(self, checked: bool):
         self.show_edge_labels = bool(checked)
+        if not self.workbench:                  # read-only viewer: one checkbox labels every edge with a value
+            self.edge_labels_all_tiles = bool(checked)
         self._refresh_edge_labels()
 
 
