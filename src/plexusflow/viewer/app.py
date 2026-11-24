@@ -743,6 +743,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 and self.current_tile_filter is not None):
             return self._resolve_tile_filtered_value(u, v, d, prop)
 
+        # Read-only viewer: Measured = the combined measurement before the projection (`_attach_pre_projection`).
+        if (src == 'measured' and qty == 'Q' and self._pre_active()
+                and prop in ('magnitude', 'signed', 'phase', 'PI', 'pulse_power')):
+            return self._pre_value(d, prop)
+
         # BC-anchor phase override: for edges incident to a boundary
         # anchor node, use the tile-14-only measurement (raw φ +
         # tile-14 gauge) rather than the multi-tile average.  The BC
@@ -4184,8 +4189,9 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 self._property_combo.setCurrentIndex(first_valid_idx)
                 self._property_combo.blockSignals(False)
         # The Model has H1 and H2 only.
-        self._harmonic_combo.view().setRowHidden(3, self.current_source == 'model')
-        if self.current_source == 'model' and self.current_harmonic == 'H3':
+        _two = self.current_source == 'model' or (self.current_source == 'measured' and self._pre_active())
+        self._harmonic_combo.view().setRowHidden(3, _two)
+        if _two and self.current_harmonic == 'H3':
             self.current_harmonic = 'H2'
             self._harmonic_combo.blockSignals(True); self._harmonic_combo.setCurrentIndex(2); self._harmonic_combo.blockSignals(False)
         # Harmonic combo: enabled only for harmonic-keyed properties.
@@ -4425,6 +4431,70 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                                              "Text is a fixed screen size: zoom in to read it.")
 
 
+    def _attach_pre_projection(self, D, A, edges):
+        """Measured, before the projection (docs/method.md steps 2.1 and 3.4), on the carved network, in memory:
+        `_h_amp_DC_pre` = Q̄ (1/σ²-weighted mean of every recording's fitted mean), `_h_{amp,phase}_H{k}_pre` = the
+        1/σ²-weighted average of the recordings of synchronised tiles on the common clock (harmonic n rotated by
+        e^{-inψ_tile}), before rescaling to the reconciled mean.  Reconciled = (Q′/Q̄) × this on reconstructed vessels."""
+        self._pre_available = False
+        meas, psi = A.get('_meas'), A.get('psi')
+        if not meas or not psi:
+            return
+        eix = {e: i for i, e in enumerate(edges)}; N = np.arange(1, 3)
+        Qm = np.asarray(D.get('Qm', np.full(len(edges), np.nan)), float); imd = np.asarray(D.get('imaged', np.isfinite(Qm)), bool)
+        for i, (u, v) in enumerate(edges):
+            if imd[i] and np.isfinite(Qm[i]):
+                self.G.edges[u, v]['_h_amp_DC_pre'] = float(Qm[i])
+        n = 0
+        for e, recs in meas.items():
+            i = eix.get(tuple(e))
+            rs = [(t, r) for t, r in recs.items() if t in psi] if i is not None else []
+            if not rs:
+                continue
+            w = np.array([1.0 / r['sigma2'] for _, r in rs])
+            Hb = sum(wi * np.asarray(r['H'])[:2] * np.exp(-1j * N * psi[t]) for wi, (t, r) in zip(w, rs)) / w.sum()
+            d = self.G.edges[edges[i]]
+            for k in (1, 2):
+                d[f'_h_amp_H{k}_pre'] = float(abs(Hb[k - 1])); d[f'_h_phase_H{k}_pre'] = float(np.angle(Hb[k - 1]))
+            n += 1
+        self._pre_available = True
+        print(f"  measured before projection: mean flow on {int(imd.sum())} vessels, pulse on {n} (synchronised tiles)")
+
+    def _pre_value(self, d, prop):
+        """Measured (pre-projection) value of `prop` for the current harmonic; None where not measured."""
+        k_idx = HARMONIC_KEYS.index(self.current_harmonic)
+        dc = _safe_float(d.get('_h_amp_DC_pre'))
+        if prop == 'pulse_power':
+            a1, a2 = _safe_float(d.get('_h_amp_H1_pre')), _safe_float(d.get('_h_amp_H2_pre'))
+            return (a1 ** 2 + a2 ** 2) / dc ** 2 if None not in (a1, a2, dc) and dc else None
+        if k_idx == 0:
+            if dc is None:
+                return None
+            return dc if prop == 'signed' else (abs(dc) if prop == 'magnitude' else None)
+        if k_idx > 2:
+            return None
+        amp, ph = _safe_float(d.get(f'_h_amp_H{k_idx}_pre')), _safe_float(d.get(f'_h_phase_H{k_idx}_pre'))
+        if amp is None:
+            return None
+        if prop == 'magnitude':
+            return amp
+        if prop == 'signed':
+            return amp * np.cos(ph)
+        if prop == 'PI':
+            return 2.0 * amp / abs(dc) if dc else None
+        if prop == 'phase':
+            ref = self._fig7_phref()
+            if ref is None:
+                return ph
+            from ..ac.display import phase_lag_deg
+            return float(phase_lag_deg(np.exp(1j * ph), dc if dc else 1.0, k_idx, ref))
+        return None
+
+    def _pre_active(self) -> bool:
+        """Measured shows the pre-projection field: read-only viewer, all tiles (a tile filter shows that tile's recording)."""
+        return (not self.workbench and self.current_source == 'measured' and getattr(self, '_pre_available', False)
+                and self.current_tile_filter is None)
+
     def _fig7_phref(self):
         """Fig 7's phase reference (vitelline-vein stubs of tile 14, in the field's clock); None if unavailable.  Cached."""
         if getattr(self, '_phref_cache', 'unset') != 'unset':
@@ -4448,7 +4518,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
     def _fig7_style(self):
         """Colormap / norm / ticks of Fig 7 for the current selection (Reconciled or Model phase lag and relative pulsatile
         power), else None (the viewer's general colouring applies)."""
-        if self.current_source not in ('reconciled', 'model'):
+        if self.current_source not in ('reconciled', 'model') and not (self.current_source == 'measured' and self._pre_active()):
             return None
         import matplotlib.colors as mcolors
         from ..ac import display as dsp
@@ -4552,6 +4622,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                     d[f'_h_amp_H{k + 1}_rec'] = abs(h); d[f'_h_phase_H{k + 1}_rec'] = float(np.angle(h))
                 d['_rec_tile'] = t; d['_rec_gauge_sd'] = float(gsd.get(t, np.nan)); d['_rec_phase_ok'] = bool(ph_ok[i])
                 n_ac += 1; n_ph += int(ph_ok[i])
+            self._attach_pre_projection(D, A, edges)
         try:
             nds = D['nodes']
             self.G.graph['_rec_boundary'] = {nds[i] for i in np.r_[np.asarray(D['inj'], int), np.asarray(D['out'], int)]}

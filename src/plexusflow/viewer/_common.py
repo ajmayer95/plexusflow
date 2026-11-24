@@ -160,7 +160,7 @@ PROPERTY_DEFS = [
     # diverging colormap centred at 0.  (At AC harmonics this is the in-phase
     # component, whose sign depends on the solver phase reference.)
     ('signed',        'Signed (no |·|)',      True,
-        {('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
+        {('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P'), ('measured', 'Q')}),
     ('phase',         'Phase ∠·',             True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
          ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q'), ('model', 'P')}),
@@ -197,7 +197,7 @@ PROPERTY_DEFS = [
     # fit locked onto an aliased peak or a slightly different rate.
     # Relative pulsatile power (|H1|² + |H2|²) / Q̄² — Fig 7's second column, same scale.
     ('pulse_power',   'Relative pulsatile power (|H₁|²+|H₂|²)/Q̄²', False,
-        {('reconciled', 'Q'), ('model', 'Q')}),
+        {('measured', 'Q'), ('reconciled', 'Q'), ('model', 'Q')}),
     ('frequency',     'Fundamental f₀ (Hz)',  False,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P')}),
     # Aggregate canonical SNRs (in dB).  These match the fit_harmonics
