@@ -20,6 +20,7 @@ Schema 2 (data-v2, 2026-10-15):
 Schema 3 (2026-11-02): + figure inputs; results of the earlier method (ac_field_v7.pkl, ac_estimate_v8.json, validation JSONs).
 Schema 4 (2026-11-23, the paper): results/{dc_reconciled_v3.pkl, ac_field_v9.pkl, ac_estimate_v11.json, summary.json, *.csv}
     — mean flow with residual-variance weights and equal left/right inflow; tile clocks from vessels recorded in two tiles; reconciled pulsatile field; distensibility fit.
+    The graph holds only RELEASE_FIELDS (`to_release_schema`), in the current field names.
 """
 from __future__ import annotations
 import csv
@@ -28,6 +29,46 @@ import json
 import pickle
 from functools import cached_property
 from pathlib import Path
+
+# Graph fields kept in a release: what the analysis scripts (dc_reconcile, pulse_field, mech/ac_estimate), the paper figures and
+# the read-only viewer read.  Established by recording every field lookup while running all of them (2026-11-24); a release
+# graph reduced to these fields reproduces results/ and the figures exactly.
+RELEASE_FIELDS = {
+    "graph": {"tile_f0_piv", "tile_f0_status", "tile_f0_update", "external_traces"},
+    "node": {"x", "y", "boundary_type"},
+    "edge": {"path", "radius", "length", "open_region", "radial_uncertain", "measurements_piv"},
+    "measurement": {"tile_id", "flow_from", "flow_to", "Q_t", "Q_profile", "R_profile_um", "schema_version", "meas_id",
+                    "harm", "quality", "snr", "motion"},
+    "measurement.harm": {"f0_hz", "mean_Q", "harmonics"},
+    "measurement.quality": {"profile_ok", "f", "align", "p"},
+    "measurement.snr": {"dc_db", "h1_db"},
+    "measurement.motion": {"z_dc", "p_ac"},
+}
+
+
+def to_release_schema(G):
+    """Drop every graph field not in RELEASE_FIELDS (in place) and return G.  Expects current field names
+    (load through plexusflow.compat)."""
+    keep = RELEASE_FIELDS
+    for k in [k for k in G.graph if k not in keep["graph"]]:
+        del G.graph[k]
+    for _, d in G.nodes(data=True):
+        for k in [k for k in d if k not in keep["node"]]:
+            del d[k]
+    for *_, d in G.edges(data=True):
+        for k in [k for k in d if k not in keep["edge"]]:
+            del d[k]
+        ms = []
+        for m in d.get("measurements_piv") or []:
+            m = {k: v for k, v in m.items() if k in keep["measurement"]}
+            for sub in ("harm", "quality", "snr", "motion"):
+                if isinstance(m.get(sub), dict):
+                    m[sub] = {k: v for k, v in m[sub].items() if k in keep[f"measurement.{sub}"]}
+            ms.append(m)
+        if "measurements_piv" in d:
+            d["measurements_piv"] = ms
+    return G
+
 
 SCHEMA_VERSION = 4          # 4: paper results (dc v3, ac_field_v9, ac_estimate_v11); 3: earlier method (ac_field_v7, ac_estimate_v8); 2: data-v2
 SUPPORTED_SCHEMAS = (2, 3, 4)

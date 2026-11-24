@@ -1,28 +1,30 @@
-"""Build a frozen, self-contained data release of a stage (graph, viewer inputs, final results).
+"""Build a self-contained data release of a stage (graph, viewer inputs, final results, figure inputs).
 
-Writes <out>/ (default: <stage>_release_v2 next to the stage folder), in two tiers:
+Writes <out>/ (default: <stage>_release_<version> next to the stage folder), in two tiers:
   core
-    plexusflow.yaml            stage config without raw-video dependence (viewer runs read-only)
-    graph/graph_vessels_piv.gpickle   the frozen measured graph; Q(t) traces are NOT inside it (stored once, in
-                               export/traces.npz, and re-attached by plexusflow.paths.load_graph / the viewer)
-    graph/export/              portable copy: nodes.csv, edges.csv, measurements.csv, tiles.csv, paths.npz, traces.npz, SCHEMA.md
-    fuse/organ_fusion_close.tif (or organ_fusion.tif), stitch/positions.json (+ provenance)   mosaic + tile placement
-    results/                   final DC / AC / reliability outputs (+ CSV exports)
-    README.md, MANIFEST.json   contents, sha256 checksums and tier per file, code commit, measurement-batch provenance
-  extras (optional)
-    videos_realtime/           every tile downsampled SPATIAL× in space, ~N_FRAMES frames (viewer playback only)
-    batch_profile_inputs/           profile-fit sidecars (re-run the profile-fit step / refit the reliability model)
+    plexusflow.yaml            stage config without the raw-video paths (the viewer runs read-only)
+    graph/graph_vessels_piv.gpickle   the measured graph, reduced to plexusflow.release.RELEASE_FIELDS, current field
+                               names; Q(t) traces are stored once, in export/traces.npz, and re-attached on load
+    graph/export/              the same graph as CSV + npz (nodes, edges, measurements, tiles, paths, traces, SCHEMA.md)
+    graph/provenance.json      how the recordings were measured
+    fuse/, stitch/, mask/, tiles/maxmed/, assets/   mosaic, tile placement and the other figure inputs
+    batch_profile_inputs/tile_<FIG3_TILE>.pkl.gz   the profile-fit inputs Fig 3 uses
+    results/                   final results (+ CSV exports)
+    README.md, MANIFEST.json   contents, sha256 checksums and tier per file, code commit and environment
+  extras
+    videos_realtime/           per-tile videos: a prepared folder (--videos) or a downsample of the stage's (--preview-videos)
+    batch_profile_inputs/      all profile-fit sidecars (unless --no-sidecars)
 With --pack, also writes <out>.core.tar.gz and <out>.extras.tar.gz (same root folder; extract both to merge).
-Usage: python scripts/make_release.py [--out PATH] [--version v2] [--spatial 4] [--frames 90] [--no-sidecars] [--pack]
+Usage: python scripts/make_release.py [--out PATH] [--version v4] [--videos DIR | --preview-videos] [--no-sidecars] [--pack]
 Run with numpy < 2 (system python3) so every environment can read the gpickle.
 """
 import sys, json, csv, shutil, hashlib, pickle, subprocess, datetime, argparse
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import numpy as np
-from plexusflow.compat import sidecar_dir
+from plexusflow.compat import sidecar_dir, loads_graph
 import plexusflow.paths as paths
-from plexusflow.release import SCHEMA_VERSION
+from plexusflow.release import SCHEMA_VERSION, to_release_schema
 
 RESULTS = ("dc_reconciled_v3.pkl", "ac_field_v9.pkl", "ac_estimate_v11.json")
 RESULTS_OPTIONAL = ("reliability_model_v1.json", "dc_qc.json", "dc_qc.csv")
@@ -30,11 +32,10 @@ RESULTS_OPTIONAL = ("reliability_model_v1.json", "dc_qc.json", "dc_qc.csv")
 FIGURE_INPUTS = ("fuse/organ_fusion.tif", "fuse/maxmed.tif", "fuse/probs_logit.tif", "mask/mask.tif", "tiles/maxmed", "assets")
 FIG3_TILE = 36                # its representative raw frame is stored (raw recordings are not released)
 EXTRAS = ("videos_realtime", "batch_profile_inputs")
-NODE_KEYS = ("x", "y", "boundary_type", "side")
+NODE_KEYS = ("x", "y", "boundary_type")
 EDGE_KEYS = ("radius", "length", "radial_uncertain", "in_carved_network")
-MEAS_SCALARS = ("tile_id", "flow_from", "flow_to", "Q_profile", "Q_profile_valid_frac", "Q_profile_n_valid", "R_profile_um", "V_CL_profile_ums",
-                "Q_pois_seg", "Q_ridge_mean", "Q_direct", "Q_pois_free")
-QUALITY_KEYS = ("profile_ok", "f", "n_slices", "n_kept", "slice_cv", "R_ratio_med", "align", "consist", "centre")
+MEAS_SCALARS = ("tile_id", "flow_from", "flow_to", "Q_profile", "R_profile_um")
+QUALITY_KEYS = ("profile_ok", "f", "align", "p")
 
 
 def sha256(p, chunk=1 << 22):
@@ -55,6 +56,8 @@ def scalar(v):
 
 def export_graph(G, out):
     out.mkdir(parents=True, exist_ok=True)
+    from plexusflow.reconcile import carved_domain
+    carved = {frozenset(e) for e in carved_domain(G)["edges"]}
     with open(out / "nodes.csv", "w", newline="") as f:
         w = csv.writer(f); w.writerow(("node",) + NODE_KEYS)
         for n, d in G.nodes(data=True):
@@ -63,7 +66,8 @@ def export_graph(G, out):
     with open(out / "edges.csv", "w", newline="") as f:
         w = csv.writer(f); w.writerow(("edge_id", "u", "v") + EDGE_KEYS + ("n_measurements",))
         for i, (u, v, d) in enumerate(G.edges(data=True)):
-            w.writerow((i, u, v) + tuple(scalar(d.get(k)) for k in EDGE_KEYS) + (len(d.get("measurements_piv") or []),))
+            vals = {**d, "in_carved_network": frozenset((u, v)) in carved}
+            w.writerow((i, u, v) + tuple(scalar(vals.get(k)) for k in EDGE_KEYS) + (len(d.get("measurements_piv") or []),))
             if d.get("path") is not None:
                 paths_npz[f"e{i}"] = np.asarray(d["path"], np.float32)
     np.savez_compressed(out / "paths.npz", **paths_npz)
@@ -100,40 +104,24 @@ def export_graph(G, out):
         for t in sorted(set(tf) | set(ts)):
             s_ = ts.get(t) or {}
             w.writerow((t, scalar(tf.get(t)), s_.get("status", ""), scalar(s_.get("beats")), scalar(s_.get("beat_r2")), s_.get("user_note", "")))
-    (out / "SCHEMA.md").write_text(f"""# Graph export schema
+    (out / "SCHEMA.md").write_text(f"""# Graph export
 
-Portable copy of `graph_vessels_piv.gpickle` ({G.number_of_nodes()} nodes, {G.number_of_edges()} edges, {mid} measurements).
-Coordinates are in the fused-mosaic graph frame (pixels; ~1.7 µm/px at 10×).
+CSV and npz copy of `graph_vessels_piv.gpickle`: {G.number_of_nodes()} nodes, {G.number_of_edges()} vessels,
+{mid} recordings.  Coordinates are in the mosaic frame, in pixels (about 1.7 µm per pixel).
 
-- **nodes.csv** — `node` id, `x`, `y`, `boundary_type` (source / sink / empty), `side`.
-- **edges.csv** — `edge_id` (row order of the gpickle), `u`, `v` (positive flux = u→v), `radius` (segmented, px), `length` (px),
-  `radial_uncertain` (porous zone, excluded from the carved network), `in_carved_network`, `n_measurements`.
-  Centreline polylines: `paths.npz`, key `e<edge_id>`, (N, 2) [x, y].
-- **measurements.csv** — one row per (edge, tile) optical-flow measurement. `flow_from`/`flow_to` give the direction of the
-  positive mean flow; `mean_Q` (nL/s) is the DC of the harmonic fit (magnitude; sign from flow_from/flow_to); `H*_amp`/`H*_phase`
-  the harmonic fit at the tile heart rate `f0_hz`; `Q_profile` profile-fit flux (nL/s), `R_profile_um` its fitted radius, `V_CL_profile_ums`
-  centreline speed; `q_*` the per-measurement quality record (`q_profile_ok`, kept-slice fraction `q_f`, `q_align` flow/centreline
-  alignment …) from which the reliability scale c is computed (results/reliability_model_v1.json).
-  Flux time series Q(t) (250 Hz, nL/s): `traces.npz`, key `m<meas_id>` (the only copy; the gpickle refers to it).
-- **tiles.csv** — per-tile heart rate `f0_hz` used for the harmonic fits, and where reviewed, its status
-  (resolved / corrected / user_confirmed / user_estimate / user_uncertain / no_signal / excluded), beats per recording,
-  beat strength (median R² of a DC+H1+H2 fit over the tile's strongest vessels) and the reviewer's note.
+- **nodes.csv**: `node`, `x`, `y`, `boundary_type` (`source` = dorsal-aorta inflow, `sink` = vitelline-vein outflow, empty otherwise).
+- **edges.csv**: `edge_id` (row order of the gpickle), `u`, `v`, `radius` (px), `length` (px), `radial_uncertain`
+  (region left out of the reconstructed network), `in_carved_network`, `n_measurements`.  Centrelines are in `paths.npz`,
+  key `e<edge_id>`, an (N, 2) array of [x, y].
+- **measurements.csv**: one row per recording (vessel and tile).  `flow_from` / `flow_to` give the direction of positive
+  mean flow; `mean_Q` (nL/s) is the recording's mean flux and `H1_*`, `H2_*` its first two harmonics at the tile's heart
+  rate `f0_hz`; `Q_profile` is the profile-fit flux and `R_profile_um` its radius; `q_*` is the quality record
+  (`q_profile_ok`, `q_f`, `q_align`, `q_p`).  The flux time series Q(t) (250 frames/s, nL/s) are in `traces.npz`, key
+  `m<meas_id>`.
+- **tiles.csv**: heart rate `f0_hz` of each tile, with its status and any note from review.
 """)
+
     return mid
-
-
-def prime_viewer_cache(graph_path):
-    """Run the viewer's per-edge harmonic_class precompute headlessly and save it into the release graph, so opening the
-    release never has to compute (≈3 min) or write it (the viewer does not write into folders with a MANIFEST.json)."""
-    if int(np.__version__.split(".")[0]) >= 2:
-        sys.exit("make_release must run under numpy < 2: a gpickle written by numpy 2 cannot be read by numpy 1.x "
-                 "(the viewer's Python). Use the system python3.")
-    from plexusflow.viewer.app import ReadOnlyMosaicViewer
-    v = object.__new__(ReadOnlyMosaicViewer)
-    v.G = pickle.loads(Path(graph_path).read_bytes()); v.graph_path = Path(graph_path)
-    v.cache_harmonic_class = True; v.force_recompute_harmonic_class = False
-    v.workbench = True                      # write the cache into this release copy of the graph (its only writer)
-    v._precompute_harmonic_classes()
 
 
 def downsample_videos(src_dir, dst_dir, spatial, n_frames):
@@ -181,8 +169,10 @@ def export_results(res_dir, out):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--out"); ap.add_argument("--spatial", type=int, default=4)
     ap.add_argument("--frames", type=int, default=90); ap.add_argument("--no-sidecars", action="store_true")
-    ap.add_argument("--version", default="v3"); ap.add_argument("--pack", action="store_true")
+    ap.add_argument("--version", default="v4"); ap.add_argument("--pack", action="store_true")
     ap.add_argument("--preview-videos", action="store_true", help="downsample videos (--spatial/--frames) instead of copying them as used by the figures")
+    ap.add_argument("--videos", default=None, help="copy this prepared video folder (e.g. from a raw-video downsample) as videos_realtime/; "
+                                                    "a videos_realtime.json next to it (factors, frame timing) is copied too")
     a = ap.parse_args()
     st = paths.STAGE; out = Path(a.out) if a.out else st.parent / f"{st.name}_release_{a.version}"
     if out.exists() and any(out.iterdir()):
@@ -191,9 +181,11 @@ def main():
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).parent, capture_output=True, text=True).stdout.strip()
     dirty = bool(subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=Path(__file__).parent, capture_output=True, text=True).stdout.strip())
     print(f"release → {out}  (code {commit[:10]}{' + uncommitted changes' if dirty else ''})", flush=True)
-    (out / "graph").mkdir(); gdst = out / "graph" / paths.GRAPH.name; shutil.copy2(paths.GRAPH, gdst)
-    prime_viewer_cache(gdst)
-    G = pickle.loads(gdst.read_bytes()); n_meas = export_graph(G, out / "graph" / "export"); print(f"  graph + export: {n_meas} measurements", flush=True)
+    (out / "graph").mkdir(); gdst = out / "graph" / paths.GRAPH.name
+    G = to_release_schema(loads_graph(paths.GRAPH.read_bytes()))      # current field names, release fields only
+    if (paths.GRAPH.parent / "provenance.json").exists():              # how the measurements were made
+        shutil.copy2(paths.GRAPH.parent / "provenance.json", out / "graph" / "provenance.json")
+    n_meas = export_graph(G, out / "graph" / "export"); print(f"  graph + export: {n_meas} measurements", flush=True)
     mid = 0                                   # Q(t) stored once: in export/traces.npz, keyed by the export's meas_id
     for *_, d in G.edges(data=True):
         for m in d.get("measurements_piv") or []:
@@ -211,7 +203,15 @@ def main():
     (out / "stitch").mkdir()
     for f in ("positions.json", "provenance.json"):
         shutil.copy2(st / "stitch" / f, out / "stitch" / f)
-    if a.preview_videos:                                           # small viewer-only copy (data-v2 behaviour)
+    vids_ds = None
+    if a.videos:                                                   # prepared bundle
+        shutil.copytree(a.videos, out / "videos_realtime")
+        vj = Path(a.videos).parent / "videos_realtime.json"
+        if vj.exists():
+            shutil.copy2(vj, out / "videos_realtime" / "videos_realtime.json")
+            vids_ds = json.loads(vj.read_text()).get("spatial_downsample")
+        print(f"  videos: {len(list((out / 'videos_realtime').glob('*.tif')))} tiles from {a.videos}", flush=True)
+    elif a.preview_videos:                                         # small viewer-only copy (data-v2 behaviour)
         nv = downsample_videos(st / "videos_realtime", out / "videos_realtime", a.spatial, a.frames); print(f"  videos (preview): {nv} tiles", flush=True)
     else:                                                          # as used by the figures (Figs 1, 4)
         shutil.copytree(st / "videos_realtime", out / "videos_realtime"); print("  videos: copied as-is", flush=True)
@@ -237,31 +237,47 @@ def main():
     export_results(paths.RESULTS, out / "results")
     if not a.no_sidecars:
         shutil.copytree(sidecar_dir(st), out / "batch_profile_inputs")
+    else:                                                          # Fig 3 needs only its tile's sidecar
+        (out / "batch_profile_inputs").mkdir()
+        shutil.copy2(sidecar_dir(st) / f"tile_{FIG3_TILE}.pkl.gz", out / "batch_profile_inputs" / f"tile_{FIG3_TILE}.pkl.gz")
     cfg = (st / "plexusflow.yaml").read_text().splitlines()
     cfg = [("# " + l if l.startswith("external_") else l) for l in cfg]
     (out / "plexusflow.yaml").write_text("# Frozen release: raw videos are not included (viewer is read-only; fresh optical flow disabled).\n"
-                                         + "\n".join(cfg) + (f"\nvideos_realtime_spatial_ds: {a.spatial}\n" if a.preview_videos else "\n"))   # copied videos keep the stage value
+                                         + "\n".join(cfg) + (f"\nvideos_realtime_spatial_ds: {vids_ds or a.spatial}\n" if (a.preview_videos or vids_ds) else "\n"))
     batch = G.graph.get("measurement_batch")
-    (out / "README.md").write_text(f"""# {st.name} — frozen release {a.version} ({datetime.date.today()})
+    (out / "README.md").write_text(f"""# {st.name} — data release {a.version} ({datetime.date.today()})
 
-Self-contained snapshot of the {st.name.replace("PlexusFlow", "")} yolk-sac vessel-flow analysis: the measured vessel graph,
-everything the read-only viewer needs, the final DC / AC results and the inputs of every paper figure.  No raw videos — the graph is frozen.
+Data for the {st.name.replace("PlexusFlow", "").replace("S", "-somite")} yolk-sac analysis: the measured vessel graph, the
+reconstructed flows, and the inputs needed to redraw the figures and to open the viewer.  The raw microscope recordings are
+not included.
 
-Two downloads, same root folder (extract both to merge): **core** (graph, exports, mosaic, results, figure inputs) is all
-the analysis needs; **extras** adds the per-tile realtime videos (viewer playback, Figs 1 and 4) and the profile-fit inputs
-(Figs 3 and 6, refitting the reliability model).  All ten paper figures need both.
+## Downloads
 
-| folder | tier | contents |
-|---|---|---|
-| `graph/` | core | `graph_vessels_piv.gpickle` (networkx; includes the viewer's derived per-edge harmonic cache; Q(t) traces are re-attached from `export/traces.npz` on load) and `export/` — the same graph as CSV + npz, plus per-tile heart rates (see `export/SCHEMA.md`) |
-| `fuse/`, `stitch/` | core | organ mosaic and tile placement |
-| `results/` | core | reconciled mean flow `dc_reconciled_v3`, reconciled pulsatile field `ac_field_v9`, distensibility fit `ac_estimate_v11`; CSV exports and `summary.json` |
-| `fuse/`, `mask/`, `tiles/maxmed/`, `assets/` | core | mosaic projections, segmentation probability and mask, per-tile projections, figure drawings |
-| `acquisition_times.json`, `tile_video_shapes.json`, `raw_subset/` | core | recording times and frame sizes of every tile (from the raw recordings) and the representative raw frame of tile 36 (Fig 3) |
-| `videos_realtime/` | extras | every tile's realtime video as used by the figures and the viewer |
-| `batch_profile_inputs/` | extras | profile-fit sidecars (time-mean flow per vessel) — refit the reliability model without videos |
+The release comes as two archives that unpack into the same folder (`{out.name}/`):
 
-**Use** (code: https://github.com/ajmayer95/plexusflow, commit `{commit}`; Python ≥ 3.10).  Paste-safe commands:
+- **core**: graph, results, mosaic, masks and the other figure inputs.  Enough to rerun the analysis, draw Figs 2, 3, 5,
+  6 and 7, and use the viewer without video.
+- **extras**: one short video per tile for playback in the viewer and for Figs 1 and 4
+  (see `videos_realtime/videos_realtime.json` for the downsampling and frame timing).
+
+## Contents
+
+| Path | What it is |
+|---|---|
+| `graph/graph_vessels_piv.gpickle` | Vessel graph (networkx): centrelines, radii, region tags, and every flow recording per vessel and tile. Q(t) traces are stored once, in `graph/export/traces.npz`, and re-attached when the graph is loaded with plexusflow. |
+| `graph/export/` | The same graph as CSV and npz, readable without Python (`SCHEMA.md` lists the columns). |
+| `graph/provenance.json` | How the recordings were measured. |
+| `results/` | Reconciled mean flow (`dc_reconciled_v3.pkl`), pulsatile field (`ac_field_v9.pkl`), distensibility fit (`ac_estimate_v11.json`), with CSV copies and `summary.json`. |
+| `fuse/`, `stitch/`, `mask/`, `tiles/maxmed/`, `assets/` | Organ mosaic, tile positions, segmentation, per-tile projections and figure drawings. |
+| `acquisition_times.json`, `tile_video_shapes.json`, `raw_subset/`, `batch_profile_inputs/` | Recording times and frame sizes of every tile, and the inputs Fig 3 needs from the raw data. |
+| `videos_realtime/` (extras) | Per-tile videos. |
+| `MANIFEST.json` | Checksum and size of every file, and the code version and environment used to build the release. |
+
+## Running the code
+
+The code is at https://github.com/ajmayer95/plexusflow; this release was built from commit `{commit[:10]}`.
+It needs Python 3.10 or newer.
+
 ```bash
 git clone https://github.com/ajmayer95/plexusflow.git
 cd plexusflow
@@ -274,16 +290,15 @@ export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results
 export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
 bash scripts/reproduce_paper.sh
 ```
-`reproduce_paper.sh` re-derives `results/` and draws Figs 1–9 into `$PLEXUSFLOW_FIGURES` (about 4 minutes; `--figures` to skip
-the analysis); `python examples/quickstart.py` is a one-minute tour of the DC reconciliation.  For the read-only viewer,
-`pip install -e ".[gui]"` and `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"`.  This folder is never written to:
-outputs go to PLEXUSFLOW_RESULTS / PLEXUSFLOW_FIGURES.
-No Python?  `graph/export/` (CSV + npz, see `SCHEMA.md`) and the CSVs in `results/` contain everything.
-Reproducibility: re-running the scripts reproduces `results/` across Python / numpy / scipy versions up to solver tolerance
-(the DC reconciliation converges to a stationary point of an explicit objective); the build environment is in `MANIFEST.json`.
-`unstable` in `dc_reconciled_edges.csv` marks vessels whose reconciled flow depends on the solver start (direction, or > 10 %).
-Methods: `docs/method.md`, `docs/synthetic_validation.md` in the code repository.  Checksums: `MANIFEST.json`.
+
+`reproduce_paper.sh` recomputes `results/` from the graph and draws Figs 1–7 into `$PLEXUSFLOW_FIGURES` (a few minutes on
+a laptop; `--figures` skips the analysis).  Nothing is written into this folder.  For the viewer, `pip install -e ".[gui]"`
+and `python -m plexusflow.cli view "$PLEXUSFLOW_STAGE"`.
+
+Recomputed results match the files in `results/` up to small numerical differences between library versions.  The method
+is described in `docs/method.md` in the code repository.
 """)
+
     files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != "MANIFEST.json")
     import platform, scipy, networkx
     env = dict(python=platform.python_version(), numpy=np.__version__, scipy=scipy.__version__, networkx=networkx.__version__)
@@ -305,7 +320,10 @@ Methods: `docs/method.md`, `docs/synthetic_validation.md` in the code repository
 
 
 def tier(rel):
-    return "extras" if Path(rel).parts[0] in EXTRAS else "core"
+    rel = Path(rel)
+    if rel == Path("batch_profile_inputs") / f"tile_{FIG3_TILE}.pkl.gz":    # Fig 3's sidecar ships with the core
+        return "core"
+    return "extras" if rel.parts[0] in EXTRAS else "core"
 
 
 if __name__ == "__main__":

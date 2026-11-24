@@ -26,11 +26,17 @@ def apply():
         "font.family": "Arial", "font.size": LABEL, "axes.titlesize": LABEL, "axes.labelsize": LABEL,
         "xtick.labelsize": TICK, "ytick.labelsize": TICK, "legend.fontsize": TICK,
         "mathtext.fontset": "cm",                    # all mathematics in LaTeX Computer Modern (Alex, 2026-11-19); text stays Arial
-        "mathtext.default": "normal",                # LaTeX behaviour: italic letters, upright digits
         "axes.linewidth": LW, "xtick.major.width": LW, "ytick.major.width": LW, "xtick.minor.width": 0.6, "ytick.minor.width": 0.6,
         "xtick.major.size": 3.0, "ytick.major.size": 3.0, "xtick.direction": "out", "ytick.direction": "out",
         "lines.linewidth": 1.2, "figure.facecolor": "white", "axes.facecolor": "white", "savefig.facecolor": "white",
         "savefig.transparent": False, "pdf.fonttype": 42, "ps.fonttype": 42})
+    try:
+        plt.rcParams["mathtext.default"] = "normal"      # LaTeX behaviour: italic letters, upright digits (matplotlib ≥ 3.10)
+    except ValueError:                                   # older matplotlib: italic throughout; the pinned version renders as published
+        import warnings
+        warnings.warn(f"matplotlib {matplotlib.__version__} has no mathtext.default 'normal'; using 'it'. "
+                      "Install from requirements-lock.txt to match the published figures.", stacklevel=2)
+        plt.rcParams["mathtext.default"] = "it"
 
 
 def _is_letter(t):
