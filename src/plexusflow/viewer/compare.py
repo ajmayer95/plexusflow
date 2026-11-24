@@ -128,7 +128,58 @@ class CompareMixin:
         return list(self._compare_cols[panels[0]])
 
     # ── layers ───────────────────────────────────────────────────────
+    # ── panel titles: fixed-size labels pinned to the top of the canvas, centred over their panel ──
+    def _compare_titles(self, items):
+        """items: [(text, world column of the panel centre)].  Plain Qt labels over the canvas: the font size does not
+        change with zoom; they stay at the top of the view and follow their panel sideways (hidden when it is off-screen)."""
+        from qtpy.QtWidgets import QLabel
+        from qtpy.QtCore import Qt
+        self._compare_titles_clear()
+        canvas = self.viewer.window._qt_viewer.canvas.native
+        self._title_labels = []
+        for text, xw in items:
+            lb = QLabel(text, canvas)
+            lb.setStyleSheet("color: white; background: rgba(0, 0, 0, 140); padding: 2px 8px; "
+                             "border-radius: 4px; font-size: 13px; font-weight: 600;")
+            lb.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            lb.adjustSize(); lb.show(); lb.raise_()
+            self._title_labels.append((lb, float(xw)))
+        if not getattr(self, '_title_events_connected', False):
+            self.viewer.camera.events.center.connect(self._compare_place_titles)
+            self.viewer.camera.events.zoom.connect(self._compare_place_titles)
+            from qtpy.QtCore import QObject, QEvent
+
+            class _OnResize(QObject):                     # keep titles placed when the canvas is resized
+                def __init__(self, cb):
+                    super().__init__(); self._cb = cb
+
+                def eventFilter(self, obj, ev):
+                    if ev.type() == QEvent.Resize:
+                        self._cb()
+                    return False
+            self._title_resize_filter = _OnResize(self._compare_place_titles)
+            canvas.installEventFilter(self._title_resize_filter)
+            self._title_events_connected = True
+        self._compare_place_titles()
+
+    def _compare_place_titles(self, _event=None):
+        labels = getattr(self, '_title_labels', [])
+        if not labels:
+            return
+        canvas = self.viewer.window._qt_viewer.canvas.native
+        cw = canvas.width(); cx = float(self.viewer.camera.center[-1]); z = float(self.viewer.camera.zoom)
+        for lb, xw in labels:
+            x = (xw - cx) * z + cw / 2.0                      # world column → canvas pixel
+            lb.setVisible(-lb.width() < x < cw + lb.width())
+            lb.move(int(round(x - lb.width() / 2.0)), 10)
+
+    def _compare_titles_clear(self):
+        for lb, _ in getattr(self, '_title_labels', []):
+            lb.setParent(None); lb.deleteLater()
+        self._title_labels = []
+
     def _compare_clear(self):
+        self._compare_titles_clear()
         for lay in getattr(self, '_compare_layers', []):
             try:
                 self.viewer.layers.remove(lay)
@@ -152,13 +203,9 @@ class CompareMixin:
             self._compare_layers.append(self.viewer.add_shapes(
                 lines, shape_type='line', edge_color=self._compare_cols[src], edge_width=widths,
                 name=f'Edges [{src}]', opacity=0.7, translate=off))
-        ys = [p[0] for ln in lines for p in ln]; xs = [p[1] for ln in lines for p in ln]
-        top, xc = float(min(ys)) - 0.03 * (max(ys) - min(ys)), 0.5 * (min(xs) + max(xs))
-        pts = np.array([[top, xc + k * pitch] for k in range(len(panels))])
-        txt = self.viewer.add_points(pts, size=0, name='Panel titles',
-                                     text=dict(string=[self._source_label(s) for s in panels], size=16, color='white',
-                                               anchor='center'))
-        self._compare_layers.append(txt)
+        xs = [p[1] for ln in lines for p in ln]
+        xc = 0.5 * (min(xs) + max(xs))
+        self._compare_titles([(self._source_label(s), xc + k * pitch) for k, s in enumerate(panels)])
         self._compare_mark_selection()
         if self._edges_layer is not None:                  # keep the original's layers on top for picking / highlights
             self.viewer.layers.selection.active = self._edges_layer

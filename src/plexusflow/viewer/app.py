@@ -3696,6 +3696,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             fig.subplots_adjust(left=0.05, right=0.35, top=0.97, bottom=0.03)
         fig.canvas.draw()
         buf = np.asarray(fig.canvas.buffer_rgba()).copy()
+        _nz = np.argwhere(buf[..., 3] > 0)                 # trim the transparent margin so the bar sits at the edge
+        if _nz.size:
+            (r0, c0), (r1, c1) = _nz.min(0), _nz.max(0)
+            buf = np.ascontiguousarray(buf[max(r0 - 2, 0):r1 + 3, max(c0 - 2, 0):c1 + 3])
         plt.close(fig)
         h, w, _ = buf.shape
         qimg = QImage(buf.data, w, h, 4 * w, QImage.Format_RGBA8888)
@@ -3710,11 +3714,12 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         overlay.setStyleSheet("background: transparent;")
         overlay.raise_()
         # Position: right edge, vertically centred.
+        _horizontal = _sty is not None
         def _reposition():
             pw = canvas_widget.width()
             ph = canvas_widget.height()
-            x = max(0, pw - w - 20)
-            y = max(0, (ph - h) // 2)
+            x = max(0, pw - w - 8)                        # flush right
+            y = max(0, ph - h - 12) if _horizontal else max(0, (ph - h) // 2)   # horizontal bar: bottom right
             overlay.move(x, y)
         _reposition()
         overlay.show()
