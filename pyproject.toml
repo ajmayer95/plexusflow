@@ -43,10 +43,10 @@ dependencies = [
 gui = ["napari[all] >= 0.5", "PyQt5"]
 sam2 = ["torch", "torchvision"]
 ilastik = ["h5py"]
-# mask → graph vectorisation (plexusflow mve / vectorize) and Fig 1 tile positions
+# mask → graph vectorisation (plexusflow mve / vectorize)
 vectorize = ["net3 @ git+https://github.com/ajmayer95/net3.git"]
 # everything the paper figure scripts need (scripts/make_figure*.py; see FIGURES.md)
-figures = ["shapely >= 2.0", "net3 @ git+https://github.com/ajmayer95/net3.git"]
+figures = ["shapely >= 2.0"]
 # known-truth benchmark (scripts/benchmark/): scikit-fem + numba to run; gmsh + meshio only to rebuild geometry
 bench = ["scikit-fem >= 10", "numba >= 0.58", "meshio >= 5", "gmsh >= 4.11", "pykitPIV"]
 dev = [

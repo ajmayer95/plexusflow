@@ -18,13 +18,10 @@ librt==0.16.0
 markdown-it-py==4.2.0
 matplotlib==3.11.2
 mdurl==0.1.2
-meshpy==2026.1.1
 mypy==2.4.1
 mypy_extensions==1.1.0
-net3 @ git+https://github.com/ajmayer95/net3.git@2e761de97447395e5ccc4c835a87ebc227ef61f2
 networkx==3.6.1
 numpy==2.4.6
-opencv-python==5.0.0.93
 opencv-python-headless==5.0.0.93
 packaging==26.3
 pathspec==1.1.1
