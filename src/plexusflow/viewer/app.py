@@ -2324,6 +2324,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._bounds_mode_combo.currentIndexChanged.connect(
             self._on_bounds_mode_change)
         b_lay.addWidget(self._bounds_mode_combo)
+        b_lay.addStretch(1)
+        fld_lay.addWidget(bounds_row)
+        bounds_row = QWidget()                      # second line: the numbers (percentiles or manual limits)
+        b_lay = QHBoxLayout(bounds_row); b_lay.setContentsMargins(16, 0, 0, 0)
         # Percentile spinboxes (visible when mode == 'Percentile')
         self._pct_lo_lbl = QLabel(' lo pct:')
         b_lay.addWidget(self._pct_lo_lbl)
@@ -2485,6 +2489,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         tspct_lay.addWidget(self._tspct_filter_spin)
         tspct_lay.addStretch(1)
         fld_lay.addWidget(tspct_row)
+        self._snr_h1_row = tspct_row
 
         # H2 fundamental SNR percentile filter — same shape as H1 above.
         tspct_h2_row = QWidget()
@@ -2506,6 +2511,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         tspct_h2_lay.addWidget(self._tspct_h2_filter_spin)
         tspct_h2_lay.addStretch(1)
         fld_lay.addWidget(tspct_h2_row)
+        self._snr_h2_row = tspct_h2_row
 
         # Percentile filter on viscous dissipation Φ — gates measured-Q
         # fields by network-wide percentile of `_meas_dissipation` (W).
@@ -2720,7 +2726,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         inspect_lay.addWidget(self._aligned_norm_chk)
         # ── Overlay: compare current source with a second source ────────
         _cmp_row = QHBoxLayout()
-        _cmp_row.addWidget(QLabel("Compare current source with:"))
+        self._overlay_label = QLabel("Compare current source with:")
+        _cmp_row.addWidget(self._overlay_label)
         from qtpy.QtWidgets import QComboBox
         self._overlay_source_combo = QComboBox()
         self._overlay_source_combo.addItem("(none)", None)
@@ -2983,6 +2990,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 print(f"  (Refine tab unavailable: {_e})")
         self._edit_mode = None
         self._apply_capabilities()
+        self._compact_panel(tabs)
         self.viewer.window.add_dock_widget(tabs, name="Controls", area='right')
         self._selected_edge: Optional[Tuple[int, int]] = None
         # Radial-uncertainty tagging: viewer-editable per-edge flag
@@ -4418,6 +4426,54 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 d.update(kv)
 
 
+    # Shorter labels for the side panel (full wording moves to the tooltip).
+    _SHORT_LABELS = {
+        "Highlight tagged regions (orange = open, cyan = topology)": "Highlight tagged regions",
+        "Boundary node fluxes (tiles | input | Q′ | 50 %)": "Boundary node fluxes",
+        "Show colour bar (overlaid on canvas)": "Show colour bar",
+        "Show Kirchhoff residuals (tile mode)": "Kirchhoff residuals (tile)",
+        "Aligned-waveform window: shape only, (Q − Q̄)/|H1|, instead of Q/Q̄": "Aligned window: shape only",
+        "Plot KCL sum at boundary (selected edge's boundary node)": "Plot boundary KCL sum",
+        "Edge flux card (recordings → input → Q′)": "Edge flux card",
+        "Compare side by side (one colour scale)": "Compare side by side",
+        "Highlight flow-direction mismatches (magenta)": "Flow-direction mismatches",
+        "bounds:": "Range", " lo pct:": "lo %", " hi pct:": "hi %", " vmin:": "min", " vmax:": "max",
+    }
+
+    def _compact_panel(self, tabs):
+        """Keep the side panel narrow: drop-downs no wider than ~14 characters (their lists still show full names),
+        long labels wrapped or shortened (full text in the tooltip)."""
+        from qtpy.QtWidgets import QComboBox, QLabel, QCheckBox, QPushButton, QGroupBox
+        for cb in tabs.findChildren(QComboBox):
+            longest = max((len(cb.itemText(i)) for i in range(cb.count())), default=4)
+            cb.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            cb.setMinimumContentsLength(min(14, max(3, longest)))
+            cb.view().setMinimumWidth(cb.view().sizeHintForColumn(0) + 24)
+        for w in tabs.findChildren((QCheckBox, QPushButton)):
+            full = w.text()
+            if full in self._SHORT_LABELS:
+                w.setText(self._SHORT_LABELS[full])
+                w.setToolTip(full + ("\n\n" + w.toolTip() if w.toolTip() else ""))
+        for g in tabs.findChildren(QGroupBox):
+            if g.title() in self._SHORT_LABELS:
+                g.setToolTip(g.title()); g.setTitle(self._SHORT_LABELS[g.title()])
+        from qtpy.QtWidgets import QAbstractSpinBox
+        for sb in tabs.findChildren(QAbstractSpinBox):
+            sb.setFixedWidth(64)
+        for cb in tabs.findChildren(QComboBox):
+            cb.setMaximumWidth(110 if cb is getattr(self, '_bounds_mode_combo', None) else 170)
+        for lb in tabs.findChildren(QLabel):
+            t = lb.text()
+            if t in self._SHORT_LABELS:
+                lb.setText(self._SHORT_LABELS[t])
+            elif len(t) > 40:
+                lb.setWordWrap(True)
+        from qtpy.QtWidgets import QLayout, QWidget
+        for lay in tabs.findChildren(QLayout):           # sizes changed after layout: recompute before docking
+            lay.invalidate()
+        for w in tabs.findChildren(QWidget):
+            w.updateGeometry()
+
     def _require_workbench(self, what: str) -> bool:
         """Guard for anything that writes or recomputes; the read-only viewer refuses."""
         if self.workbench:
@@ -4433,7 +4489,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         for name in ('_click_to_tag_chk', '_radial_btn_row', '_region_row',
                      '_run_of_btn', '_of_merge_chk', '_of_refine_chk', '_clear_of_region_btn',
                      '_tag_class_row', '_flow_mismatch_row', '_dissipation_row', '_edge_labels_all_chk',
-                     '_phase_offset_row'):
+                     '_phase_offset_row', '_snr_h1_row', '_snr_h2_row',
+                     '_overlay_label', '_overlay_source_combo', '_plot_overlay_btn'):
             w = getattr(self, name, None)
             if w is not None:
                 w.setVisible(False)
