@@ -83,7 +83,7 @@ plexusflow condense    STAGE        # one edge per vessel
 plexusflow analyze     STAGE        # optical flow → Q(t) → harmonics per vessel and tile
 plexusflow workbench   STAGE        # mark aorta/vein anchors and tag open / topology-uncertain regions
 bash scripts/run_stage.sh STAGE     # mean flow, pulsatile field, distensibility fit
-plexusflow view        STAGE        # read-only viewer (measured and reconciled flow, video overlay)
+plexusflow view        STAGE        # read-only viewer: measured / reconciled flow, RC-network model with a distensibility slider, time series
 plexusflow info        STAGE        # which artefacts exist
 ```
 

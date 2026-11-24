@@ -80,14 +80,17 @@ from .edit import EditMixin
 from .refine import RefineMixin
 from .optical_flow import OpticalFlowMixin
 from .timeseries import TimeseriesMixin
+from .model import ModelMixin
 
 
-class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMixin, TimeseriesMixin):
+class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMixin, TimeseriesMixin, ModelMixin):
     """napari-based mosaic viewer with field colouring + edge inspection.
 
     Two capability levels (``mode``):
       'view'      — purely for viewing: never writes any file, no fresh optical flow, no tagging or boundary
-                    editing, no simulations.  The default, and the only mode allowed on a frozen release.
+                    editing.  Sources: Measured, Reconciled and Model (the Fig 7 RC network at an adjustable
+                    distensibility, driven by the reconciled boundary fluxes; in memory only).  The default, and the
+                    only mode allowed on a frozen release.
       'workbench' — adds fresh OF on a selected vessel, radial-uncertainty tagging, boundary marking (Edit tab)
                     and saving those to the stage graph; the Simulate tab appears only if `plexusmech` is installed.
     """
@@ -150,6 +153,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self.G = self._load_graph()
         # Reconciliation outputs (DC Q', AC field) from the stage/release results folder; the
         # 'Reconciled' data source reads them.  In-memory only (`_h_*_rec` edge attrs).
+        self._rec_D = self._rec_A = None      # set by _load_reconciliation
         self._rec = self._load_reconciliation()
         self.mosaic = self._load_tiff() if self.tiff_path else None
         self.tiles = self._load_tile_positions() if self.tile_positions_path else {}
@@ -203,7 +207,6 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._kcl_layer = None
         self.show_bnd_levels = False
         self._bnd_levels_layer = None
-        self._rec_D = None
         self._rec_sym_fb = None        # node → net inflow under the 50 %-left fit (cached)
         self._edges_layer = None
         self._nodes_layer = None
@@ -600,6 +603,29 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 val = 2.0 * abs(amp) / abs(dc)
                 return val if np.isfinite(val) else None
             # Fallthrough: unsupported prop for sim_carved → None
+            return None
+
+        # ── Model source: Fig 7 RC network at the slider's D (`_h_*_mod`, viewer/model.py); defined on every carved edge.
+        if src == 'model':
+            if qty != 'Q':
+                return None
+            k_idx = HARMONIC_KEYS.index(self.current_harmonic)
+            dc = _safe_float(d.get('_h_amp_DC_mod'))
+            if k_idx == 0:
+                if dc is None:
+                    return None
+                return dc if prop == 'signed' else (abs(dc) if prop == 'magnitude' else None)
+            if k_idx > 2:
+                return None
+            amp, ph = _safe_float(d.get(f'_h_amp_H{k_idx}_mod')), _safe_float(d.get(f'_h_phase_H{k_idx}_mod'))
+            if prop == 'magnitude':
+                return amp
+            if prop == 'signed':
+                return amp * np.cos(ph) if amp is not None and ph is not None else None
+            if prop == 'phase':
+                return ph
+            if prop == 'PI':
+                return 2.0 * abs(amp) / abs(dc) if amp is not None and dc else None
             return None
 
         # ── Reconciled source: DC Q' + tile-aligned AC field (`_h_*_rec`, see _load_reconciliation).
@@ -1967,21 +1993,34 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         if not self._src_radio_sim_carved.isEnabled():
             self._src_radio_sim_carved.setToolTip(
                 "Run the porous-carved sim in the Carved Sim tab to enable.")
+        self._src_radio_model = QRadioButton("Model")
+        self._src_radio_model.setChecked(self.current_source == 'model')
+        self._src_radio_model.setEnabled(self._model_available())
+        self._src_radio_model.setToolTip(
+            "Fig 7 RC network at an adjustable wall distensibility, driven by the reconciled boundary fluxes."
+            if self._model_available() else
+            "Needs plexusmech and results/dc_reconciled_v3.pkl, ac_field_v9.pkl, ac_estimate_v10.json.")
         self._src_button_group = QButtonGroup(src_group)
         self._src_button_group.addButton(self._src_radio_measured)
         self._src_button_group.addButton(self._src_radio_rec)
+        self._src_button_group.addButton(self._src_radio_model)
         self._src_button_group.addButton(self._src_radio_sim)
         self._src_button_group.addButton(self._src_radio_sim_carved)
         self._src_radio_measured.toggled.connect(self._on_source_change)
         self._src_radio_rec.toggled.connect(self._on_source_change)
+        self._src_radio_model.toggled.connect(self._on_source_change)
         self._src_radio_sim.toggled.connect(self._on_source_change)
         self._src_radio_sim_carved.toggled.connect(self._on_source_change)
         src_lay.addWidget(self._src_radio_measured)
         src_lay.addWidget(self._src_radio_rec)
+        src_lay.addWidget(self._src_radio_model)
         src_lay.addWidget(self._src_radio_sim)
         src_lay.addWidget(self._src_radio_sim_carved)
+        for _r in (self._src_radio_sim, self._src_radio_sim_carved):     # simulations: workbench only
+            _r.setVisible(self.workbench)
         src_lay.addStretch(1)
         layout.addWidget(src_group)
+        layout.addWidget(self._build_model_controls())
 
         # Field selector — four small combos compose the colormap.
         fld_group = QGroupBox("Color edges by")
@@ -2851,7 +2890,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         # Info label (View tab footer)
         _mode_txt = ("<b>Workbench</b> — fresh OF, tagging and boundary edits; saves go to the stage graph."
                      if self.workbench else
-                     "<b>Viewer</b> — read-only: nothing is written, no OF re-runs."
+                     "<b>Viewer</b> — read-only: nothing is written, no OF re-runs; the Model source is recomputed in memory."
                      + (" (frozen release)" if self.is_release else ""))
         info = QLabel(
             f"<small>{self.G.number_of_edges()} edges, "
@@ -4215,7 +4254,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         radios = [self._src_radio_measured,
                   getattr(self, '_src_radio_rec', None),
                   self._src_radio_sim,
-                  getattr(self, '_src_radio_sim_carved', None)]
+                  getattr(self, '_src_radio_sim_carved', None),
+                  getattr(self, '_src_radio_model', None)]
         checked = [r for r in radios if r is not None and r.isChecked()]
         if len(checked) != 1:
             return  # transient state during exclusive-group switch
@@ -4227,11 +4267,18 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         elif (getattr(self, '_src_radio_rec', None) is not None
               and self._src_radio_rec.isChecked()):
             new_src = 'reconciled'
+        elif (getattr(self, '_src_radio_model', None) is not None
+              and self._src_radio_model.isChecked()):
+            new_src = 'model'
         else:
             new_src = 'measured'
         if new_src == self.current_source:
             return
         self.current_source = new_src
+        if getattr(self, '_model_box', None) is not None:
+            self._model_box.setVisible(new_src == 'model')
+        if new_src == 'model':
+            self._enter_model_source()
         # Re-sync enablement; the selection may need to fall back.
         self._sync_field_combos()
         # Refresh carve boundary markers if they're on (colours follow
@@ -4339,6 +4386,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         sd = np.asarray(D.get('Qp_sd', np.full(len(edges), np.nan)), float)
         uns = np.asarray(D.get('unstable', np.zeros(len(edges), bool)), bool)
         self._rec_D = D
+        self._rec_A = A
         Qm = np.asarray(D.get('Qm', np.full(len(edges), np.nan)), float)
         cc = np.asarray(D.get('c', np.full(len(edges), np.nan)), float)
         imd = np.asarray(D.get('imaged', np.isfinite(Qm)), bool)

@@ -571,10 +571,11 @@ def view(stage_root: Path = typer.Argument(...),
          field: str = typer.Option("mean_Q",
              help='Field to colour edges by on startup')
          ) -> None:
-    """Open the read-only mosaic viewer (measured, reconciled, video overlay).
+    """Open the read-only mosaic viewer: Measured, Reconciled and Model sources, time series, video overlay.
 
-    Never writes anything and runs no optical flow — safe on frozen releases.
-    For tagging, boundary edits and fresh OF use `plexusflow workbench`.
+    Model = the Fig 7 RC network driven by the reconciled boundary fluxes, at a distensibility set with a slider
+    (recomputed in memory).  Never writes anything and runs no optical flow — safe on frozen releases.
+    For tagging, boundary edits, refinement, fresh OF and simulations use `plexusflow workbench`.
     """
     _launch_viewer(stage_root, field, 'view')
 

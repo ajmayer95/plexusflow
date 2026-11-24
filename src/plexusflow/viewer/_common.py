@@ -154,16 +154,16 @@ PROPERTY_DEFS = [
     # (key,           display label,          is_harmonic_keyed, valid_in)
     ('magnitude',     'Magnitude |·|',        True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q'), ('reconciled', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q')}),
     # Signed value (real part, NO |·|) — sim only.  The point is DC pressure,
     # where the gauge can dip below 0; |·| would hide the sign.  Rendered on a
     # diverging colormap centred at 0.  (At AC harmonics this is the in-phase
     # component, whose sign depends on the solver phase reference.)
     ('signed',        'Signed (no |·|)',      True,
-        {('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q')}),
+        {('sim', 'Q'), ('sim', 'P'), ('reconciled', 'Q'), ('model', 'Q')}),
     ('phase',         'Phase ∠·',             True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q'), ('reconciled', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q')}),
     # (Resolution Z = amp/SE removed — same ranking as SNR (dB) for
     # fixed-N, so redundant from the user's perspective.  Z is still
     # computed internally by _harmonic_fit_full and used by the
@@ -185,7 +185,7 @@ PROPERTY_DEFS = [
     # PI@H2 / PI@H3 measure higher-harmonic content as a fraction of mean.
     ('PI',            'Pulsatility index',    True,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P'),
-         ('sim_carved', 'Q'), ('reconciled', 'Q')}),
+         ('sim_carved', 'Q'), ('reconciled', 'Q'), ('model', 'Q')}),
     # OSI (oscillation index, Q-form).  OSI_Q = ½·(1 − |∫Q|/∫|Q|) over
     # one period — aggregate (NOT harmonic-keyed).  0 = unidirectional;
     # ½ = perfectly bidirectional.  Reconstructed from DC + H1..H3.
