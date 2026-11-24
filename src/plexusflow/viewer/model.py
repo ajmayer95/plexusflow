@@ -123,7 +123,7 @@ class ModelMixin:
         fit = getattr(self, '_model_D_fit', None)
         tag = "  (fitted)" if fit is not None and abs(np.log10(D / fit)) < 0.5 * np.log10(D_RANGE[1] / D_RANGE[0]) / N_STEPS else ""
         self._model_label.setText(f"D = {D * 1e4:.2f}×10⁻⁴ /Pa{tag}")
-        if getattr(self, 'current_source', None) != 'model':
+        if getattr(self, 'current_source', None) != 'model' and 'model' not in self._compare_panels():
             return
         self._model_solve(D)
         self._refresh_edges(); self._refresh_nodes(); self._refresh_cbar()
@@ -132,7 +132,7 @@ class ModelMixin:
         """Called when the Model source is selected: build once, solve at the current (initially fitted) D."""
         if not self._model_setup():
             return
-        if self._model_D is None:
+        if self._model_D is None or not self._model_label.text():
             self._model_slider.blockSignals(True)
             self._model_slider.setValue(self._D_to_slider(self._model_D_fit))
             self._model_slider.blockSignals(False)

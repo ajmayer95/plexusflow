@@ -81,9 +81,10 @@ from .refine import RefineMixin
 from .optical_flow import OpticalFlowMixin
 from .timeseries import TimeseriesMixin
 from .model import ModelMixin
+from .compare import CompareMixin
 
 
-class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMixin, TimeseriesMixin, ModelMixin):
+class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMixin, TimeseriesMixin, ModelMixin, CompareMixin):
     """napari-based mosaic viewer with field colouring + edge inspection.
 
     Two capability levels (``mode``):
@@ -1942,6 +1943,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             if _ml is not None and self.viewer.layers.selection.active is _ml and str(_ml.mode) in ('paint', 'erase', 'fill'):
                 return
             row, col = self._world_to_mosaic_data(event.position)
+            col = self._compare_unshift(col)              # a click in a comparison panel → the same vessel
             # Edit-tab boundary marking takes priority — when a mode is
             # active, every click is a node-tag action.
             if getattr(self, '_edit_mode', None):
@@ -2069,6 +2071,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         src_lay.addStretch(1)
         layout.addWidget(src_group)
         layout.addWidget(self._build_model_controls())
+        layout.addWidget(self._build_compare_controls())
 
         # Field selector — four small combos compose the colormap.
         fld_group = QGroupBox("Color edges by")
@@ -3314,6 +3317,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                             v_use = v_
                         colors.append(mcolors.to_hex(cmap(norm(v_use))))
 
+        # Compare side by side: every panel (this one included) on one colour scale (viewer/compare.py).
+        if self._compare_active() and not is_categorical:
+            colors = self._compare_recolour(colors)
+
         # Radial-uncertainty highlight override.  Runs LAST so it wins
         # over the field-driven colormap.  Only applies when the user
         # has the highlight toggle on.
@@ -3363,6 +3370,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 edge_width=widths,
                 name='Edges', opacity=0.7,
             )
+        if self._compare_active() and not is_categorical:
+            self._compare_draw(lines, widths)
+        else:
+            self._compare_clear(); self._compare_mark_selection()
         n_usable = sum(1 for v in vals if v is not None)
         print(f"  Drew {len(lines)} edges  "
               f"({n_usable} coloured by {field}, "
@@ -3910,6 +3921,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             return
         u, v = self.edge_list[i]
         self._selected_edge = (u, v)
+        self._compare_mark_selection()
         self._plot_qt_btn.setEnabled(True)
         if hasattr(self, '_plot_overlay_btn'):
             self._plot_overlay_btn.setEnabled(True)
@@ -4360,7 +4372,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             return
         self.current_source = new_src
         if getattr(self, '_model_box', None) is not None:
-            self._model_box.setVisible(new_src == 'model')
+            self._model_box.setVisible(new_src == 'model' or 'model' in self._compare_panels())
         if new_src == 'model':
             self._enter_model_source()
         # Re-sync enablement; the selection may need to fall back.

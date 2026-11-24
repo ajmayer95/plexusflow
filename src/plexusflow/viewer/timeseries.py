@@ -832,8 +832,8 @@ class TimeseriesMixin:
         Convention matches compare_waveforms.py: Q(t) = Re(Z0) + Σ Re(Zk·e^{iωkt})."""
         d = self.G.edges[u, v]
         Z = [None, None, None, None]
-        if source in ('reconciled', 'model'):
-            sfx = '_rec' if source == 'reconciled' else '_mod'
+        if source in ('reconciled', 'model') or (source == 'measured' and self._pre_active()):
+            sfx = {'reconciled': '_rec', 'model': '_mod', 'measured': '_pre'}[source]
             a0 = d.get(f'_h_amp_DC{sfx}')
             if a0 is not None and np.isfinite(a0):
                 Z[0] = complex(float(a0), 0.0)
@@ -972,6 +972,9 @@ class TimeseriesMixin:
         #   'reconciled' → reconciled waveform (Q\u2032 + aligned harmonics) with the per-tile raw traces
         #   'measured'   → the standard 3-row Q(t) + harmonic decomp + FFT
         src = getattr(self, 'current_source', 'measured')
+        if self._compare_active():
+            self._plot_selected_compare_qt()
+            return
         if src == 'sim':
             self._plot_selected_sim_qt()
             return
