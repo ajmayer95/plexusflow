@@ -622,13 +622,22 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 if prop == 'signed':
                     return float(np.real(p))
                 if prop == 'phase':
-                    return float(np.angle(p)) if k_idx else None
+                    if not k_idx:
+                        return None
+                    ref = self._fig7_phref()
+                    if ref is None:
+                        return float(np.angle(p))
+                    from ..ac.display import phase_lag_deg
+                    return float(phase_lag_deg(p, 1.0, k_idx, ref))
                 if prop == 'drop':
                     return abs(dp) if dp is not None else None
                 return None
             if qty != 'Q':
                 return None
             dc = _safe_float(d.get('_h_amp_DC_mod'))
+            if prop == 'pulse_power':
+                a1, a2 = _safe_float(d.get('_h_amp_H1_mod')), _safe_float(d.get('_h_amp_H2_mod'))
+                return (a1 ** 2 + a2 ** 2) / dc ** 2 if None not in (a1, a2, dc) and dc else None
             if k_idx == 0:
                 if dc is None:
                     return None
@@ -641,7 +650,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             if prop == 'signed':
                 return amp * np.cos(ph) if amp is not None and ph is not None else None
             if prop == 'phase':
-                return ph
+                ref = self._fig7_phref()
+                if ph is None or ref is None:
+                    return ph
+                from ..ac.display import phase_lag_deg
+                return float(phase_lag_deg(np.exp(1j * ph), dc if dc else 1.0, k_idx, ref))
             if prop == 'PI':
                 return 2.0 * abs(amp) / abs(dc) if amp is not None and dc else None
             return None
@@ -659,6 +672,9 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 return sd / abs(dc) if sd is not None and dc else None
             if prop == 'rec_gauge_sd':
                 return _safe_float(d.get('_rec_gauge_sd'))
+            if prop == 'pulse_power':
+                a1, a2, dc = (_safe_float(d.get(k_)) for k_ in ('_h_amp_H1_rec', '_h_amp_H2_rec', '_h_amp_DC_rec'))
+                return (a1 ** 2 + a2 ** 2) / dc ** 2 if None not in (a1, a2, dc) and dc else None
             tf = self.current_tile_filter
             tin = None
             if tf is not None:                                    # Tile filter: only this tile's recordings
@@ -705,7 +721,13 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 ph = _safe_float(d.get(f'_h_phase_H{k_idx}_rec'))
                 return amp * np.cos(ph) if amp is not None and ph is not None else None
             if prop == 'phase':
-                return _safe_float(d.get(f'_h_phase_H{k_idx}_rec')) if d.get('_rec_phase_ok') else None
+                if not d.get('_rec_phase_ok'):
+                    return None
+                ph, dc, ref = _safe_float(d.get(f'_h_phase_H{k_idx}_rec')), _safe_float(d.get('_h_amp_DC_rec')), self._fig7_phref()
+                if ph is None or ref is None or k_idx > 2:
+                    return ph
+                from ..ac.display import phase_lag_deg
+                return float(phase_lag_deg(np.exp(1j * ph), dc if dc else 1.0, k_idx, ref))
             if prop == 'PI':
                 dc = _safe_float(d.get('_h_amp_DC_rec'))
                 if amp is None or not dc:
@@ -2389,6 +2411,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         pr_lay.addWidget(self._phase_zero_boundary_chk)
         pr_lay.addStretch(1)
         fld_lay.addWidget(phase_row)
+        self._phase_offset_row = phase_row
 
         # Colour bar toggle — overlays a floating colorbar on top of the
         # napari canvas (right side, vertically centred).  No embedded
@@ -3155,7 +3178,12 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         else:
             finite_arr = np.array(
                 [v for v in vals if v is not None], dtype=float)
-            if len(finite_arr) == 0:
+            _sty = self._fig7_style()
+            if _sty is not None:                      # Fig 7 scale: fixed norm and colormap, values already final
+                cmap, norm = _sty['cmap'], _sty['norm']
+                self._last_vmin, self._last_vmax = float(norm.vmin), float(norm.vmax)
+                colors = [NO_DATA_COLOR if v_ is None else mcolors.to_hex(cmap(norm(v_))) for v_ in vals]
+            elif len(finite_arr) == 0:
                 colors = [NO_DATA_COLOR] * len(lines)
             else:
                 # Signed / cyclic fields render on a fixed linear scale —
@@ -3408,7 +3436,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 vhi = vlo + 1e-9
             cmap = (plt.get_cmap('hsv') if 'phase' in field
                     else plt.get_cmap('viridis'))
-            if 'phase' in field:
+            _sty = self._fig7_style()
+            if _sty is not None:
+                cmap, norm = _sty['cmap'], _sty['norm']
+                face = [NO_DATA_COLOR if not np.isfinite(v_) else mcolors.to_hex(cmap(norm(v_))) for v_ in arr]
+            elif 'phase' in field:
                 # π-unified: fold onto [0, π] (see edge phase pipeline)
                 norm = mcolors.Normalize(vmin=0.0, vmax=float(np.pi))
                 _ph_offset_node = float(np.radians(
@@ -3431,9 +3463,10 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 norm = mcolors.Normalize(vmin=float(vlo), vmax=float(vhi))
                 _ph_offset_node = 0.0
                 _ph_bnd_offset_node = 0.0
-            face = []
+            if _sty is None:
+                face = []
             _is_phase = 'phase' in field
-            for v_ in arr:
+            for v_ in (arr if _sty is None else []):
                 if not np.isfinite(v_):
                     face.append(NO_DATA_COLOR)
                 else:
@@ -3580,12 +3613,23 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             return  # nothing meaningful to draw
         is_phase = (self.current_property == 'phase')
         use_log = bool(self.log_scale) and not is_phase
+        _sty = self._fig7_style()
         # Compose colorbar label from the selectors so it always reads
         # cleanly: "Magnitude |·|  (Q, H₁)", "Pulsatility index  (P)", …
         label = self._current_field_label()
         # Build the matplotlib figure (Agg, transparent bg, white text).
         dpi = 100
-        if is_phase:
+        if _sty is not None:                          # Fig 7 scale: horizontal bar with the paper's ticks
+            fig, ax = plt.subplots(figsize=(3.6, 0.95), dpi=dpi)
+            sm = plt.cm.ScalarMappable(cmap=_sty['cmap'], norm=_sty['norm']); sm.set_array([])
+            cbar = fig.colorbar(sm, cax=ax, orientation='horizontal')
+            cbar.set_ticks(list(_sty['ticks'])); cbar.ax.minorticks_off()
+            cbar.set_ticklabels([f"{t:g}" for t in _sty['ticks']])
+            cbar.set_label(_sty['label'], color='white', fontsize=11, labelpad=4)
+            cbar.ax.xaxis.set_tick_params(color='white', labelcolor='white', labelsize=10, width=1.5, length=4)
+            fig.patch.set_facecolor((0, 0, 0, 0)); ax.patch.set_alpha(0)
+            fig.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.55)
+        elif is_phase:
             # Half-circle color wheel for π-unified phase (matches
             # the [0, π] fold applied in the display pipeline).
             fig_sz = 2.8
@@ -4370,7 +4414,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             return
         for name in ('_click_to_tag_chk', '_radial_btn_row', '_region_row',
                      '_run_of_btn', '_of_merge_chk', '_of_refine_chk', '_clear_of_region_btn',
-                     '_tag_class_row', '_flow_mismatch_row', '_dissipation_row', '_edge_labels_all_chk'):
+                     '_tag_class_row', '_flow_mismatch_row', '_dissipation_row', '_edge_labels_all_chk',
+                     '_phase_offset_row'):
             w = getattr(self, name, None)
             if w is not None:
                 w.setVisible(False)
@@ -4379,6 +4424,45 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             self._edge_labels_chk.setToolTip("Show the current value at each edge's midpoint (every edge that has one).\n"
                                              "Text is a fixed screen size: zoom in to read it.")
 
+
+    def _fig7_phref(self):
+        """Fig 7's phase reference (vitelline-vein stubs of tile 14, in the field's clock); None if unavailable.  Cached."""
+        if getattr(self, '_phref_cache', 'unset') != 'unset':
+            return self._phref_cache
+        self._phref_cache = None
+        A = getattr(self, '_rec_A', None)
+        if A is not None:
+            try:
+                import json
+                from ..reconcile import carved_domain
+                from ..ac.display import vein_phase_reference
+                fit = self._model_fit_path()
+                gcorr = json.loads(fit.read_text()).get('gauge_correction_deg') if fit is not None else None
+                self._phref_cache = vein_phase_reference(self.G, A, carved_domain(self.G), gauge_correction_deg=gcorr)
+                print(f"  phase reference (vitelline-vein stubs, tile 14): H1 {np.degrees(self._phref_cache[1]):.0f}°, "
+                      f"H2 {np.degrees(self._phref_cache[2]):.0f}°")
+            except Exception as exc:
+                print(f"  phase reference unavailable ({exc!r}); phases shown raw")
+        return self._phref_cache
+
+    def _fig7_style(self):
+        """Colormap / norm / ticks of Fig 7 for the current selection (Reconciled or Model phase lag and relative pulsatile
+        power), else None (the viewer's general colouring applies)."""
+        if self.current_source not in ('reconciled', 'model'):
+            return None
+        import matplotlib.colors as mcolors
+        from ..ac import display as dsp
+        prop = self.current_property
+        if prop == 'phase' and self.current_harmonic in ('H1', 'H2') and self._fig7_phref() is not None:
+            k = 1 if self.current_harmonic == 'H1' else 2; spec = dsp.PHASE_LAG[k]
+            what = 'pressure' if self.current_quantity == 'P' else 'flow'
+            return dict(cmap=dsp.cmap(spec['cmap']), norm=mcolors.Normalize(spec['vmin'], spec['vmax'], clip=True),
+                        ticks=spec['ticks'], label=f"H{k} {what} phase lag (deg) behind the vitelline veins")
+        if prop == 'pulse_power' and self.current_quantity == 'Q':
+            spec = dsp.PULSE_POWER
+            return dict(cmap=dsp.cmap(spec['cmap']), norm=mcolors.LogNorm(spec['vmin'], spec['vmax'], clip=True),
+                        ticks=spec['ticks'], label="Pulsatile / mean power")
+        return None
 
     def _reconciliation_available(self) -> bool:
         """True if reconciliation outputs were found and attached to the graph."""

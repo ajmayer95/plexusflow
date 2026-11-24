@@ -195,6 +195,9 @@ PROPERTY_DEFS = [
     # attr set during analysis (== best measurement's f0); sim reads
     # the solver f0 it ran with.  Useful for spotting tiles where the
     # fit locked onto an aliased peak or a slightly different rate.
+    # Relative pulsatile power (|H1|² + |H2|²) / Q̄² — Fig 7's second column, same scale.
+    ('pulse_power',   'Relative pulsatile power (|H₁|²+|H₂|²)/Q̄²', False,
+        {('reconciled', 'Q'), ('model', 'Q')}),
     ('frequency',     'Fundamental f₀ (Hz)',  False,
         {('measured', 'Q'), ('sim', 'Q'), ('sim', 'P')}),
     # Aggregate canonical SNRs (in dB).  These match the fit_harmonics
