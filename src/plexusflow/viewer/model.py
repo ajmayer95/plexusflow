@@ -51,7 +51,6 @@ class ModelMixin:
             C['F'][(k, 'flux')] = F
         self._model_ctx = C
         self._model_edges = [tuple(e) for e in dom['edges']]
-        self._model_eta = float(J.get('eta', 0.0))
         self._model_D_fit = float(J.get('D_parabola', J['D']))
         self._model_D = None
         from plexusmech.ac.model import dc_node_pressure
@@ -61,7 +60,7 @@ class ModelMixin:
             d['_h_amp_DC_mod'] = float(C['Qs_dc'][i])
             d['_h_p_DC_mod'] = float(0.5 * (P0[t[i]] + P0[h[i]])); d['_h_dp_DC_mod'] = float(P0[t[i]] - P0[h[i]])
         print(f"  model: RC network on {len(self._model_edges)} carved edges, forcing from {self._model_fit_path().name} "
-              f"(fitted D̂ = {self._model_D_fit:.2e} /Pa, η = {self._model_eta:g})")
+              f"(fitted D̂ = {self._model_D_fit:.2e} /Pa)")
         return True
 
     def _model_solve(self, D: float) -> None:
@@ -71,7 +70,7 @@ class ModelMixin:
         from plexusmech.ac.model import node_pressure, NL
         C = self._model_ctx; t, h = C['tail'], C['head']
         for k in (1, 2):
-            P, Ys, Yt = node_pressure(C, k, float(D), self._model_eta, 'flux')
+            P, Ys, Yt = node_pressure(C, k, float(D), 0.0, 'flux')     # purely elastic wall, as the fit
             H = 0.5 * (Ys + Yt) * (P[t] - P[h]) / NL          # vessel-mean flux, as plexusmech.ac.model.solve
             Pe, dP = 0.5 * (P[t] + P[h]), P[t] - P[h]
             for i, (u, v) in enumerate(self._model_edges):
