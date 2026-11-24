@@ -1,7 +1,7 @@
 """Selected-vessel views: a live waveform plot docked under the canvas and a compact summary table.
 
 Plot (redrawn on every vessel selection and whenever the Model's distensibility changes), two cardiac cycles on the common
-clock, + = the vessel's stored orientation:
+clock, shown along the vessel's flow (mean positive; a recording read the other way stays below zero):
   recordings   each tile's two-harmonic fit (synchronised tiles, rotated onto the common clock), thin grey
   Measured     the combined measurement before the projection (1/σ² average of the recordings)
   Reconciled   the conservative field
@@ -25,8 +25,25 @@ SUFFIX = {'measured': '_pre', 'reconciled': '_rec', 'model': '_mod'}
 class VesselPanelMixin:
 
     # ── data ─────────────────────────────────────────────────────────
+    def _vessel_flow(self, u, v):
+        """(s, a, b): the vessel is shown along its flow, a → b, and s (±1) multiplies values stored along the
+        reconciliation's orientation (or the graph edge's, outside the network).  Direction from the reconciled mean flow,
+        else the measured average, else the summed means of the recordings."""
+        d = self.G.edges[u, v]
+        stored = (u, v) if (u, v) in self._edge_index_map() else (v, u)
+        base = tuple(d.get('_rec_uv') or stored)
+        ref = next((x for x in (d.get('_h_amp_DC_rec'), d.get('_h_amp_DC_pre')) if x is not None and np.isfinite(x) and x != 0), None)
+        if ref is None:
+            sgn = 1.0 if base == stored else -1.0
+            means = [np.nanmean(np.asarray(m['Q_t'], float)) for m in d.get('measurements_piv') or []
+                     if m.get('Q_t') is not None and (m.get('quality') or {}).get('profile_ok')]
+            ref = sgn * float(np.nansum(means)) if means else 1.0
+        s = 1.0 if ref >= 0 else -1.0
+        return s, (base if s > 0 else base[::-1])
+
     def _vessel_harmonics(self, u, v, src):
-        """(Q̄, [H1, H2]) of a source for the vessel, in the reconciliation's orientation; None if absent."""
+        """(Q̄, [H1, H2]) of a source for the vessel, along its flow (`_vessel_flow`); None if absent."""
+        s, _ = self._vessel_flow(u, v)
         d = self.G.edges[u, v]; sfx = SUFFIX[src]
         if src == 'model' and self._model_available() and getattr(self, '_model_D', None) is None and self._model_setup():
             self._model_solve(self._model_D_fit)
@@ -36,8 +53,8 @@ class VesselPanelMixin:
         H = []
         for k in (1, 2):
             a, p = d.get(f'_h_amp_H{k}{sfx}'), d.get(f'_h_phase_H{k}{sfx}')
-            H.append(complex(a * np.exp(1j * p)) if a is not None and p is not None and np.isfinite(a) else None)
-        return float(q0), H
+            H.append(s * complex(a * np.exp(1j * p)) if a is not None and p is not None and np.isfinite(a) else None)
+        return s * float(q0), H
 
     def _vessel_recordings(self, u, v):
         """[(tile, Q̄_t, [H1, H2] on the common clock)] for every recording in a synchronised tile, same orientation."""
@@ -50,7 +67,7 @@ class VesselPanelMixin:
             recs, sgn = A['_meas'].get((e[1], e[0])), -1.0
         if not recs:
             return []
-        psi = A['psi']; out = []
+        psi = A['psi']; out = []; sgn *= self._vessel_flow(u, v)[0]
         for t, r in sorted(recs.items()):
             if t in psi:
                 H = np.asarray(r['H'])[:2] * np.exp(-1j * np.arange(1, 3) * psi[t]) * sgn
@@ -127,9 +144,10 @@ class VesselPanelMixin:
                     label=LABELS[src] + (f" (D = {self._model_D * 1e4:.2f}×10⁻⁴)" if src == 'model' and getattr(self, '_model_D', None) else ""))
         ax.axhline(1.0 if rel else 0.0, color='#666666', lw=0.6)
         ax.set_xlabel('cardiac cycles (common clock)', color='#dddddd', fontsize=8)
-        ax.set_ylabel('Q / Q̄' if rel else 'Q (nL/s), + = u→v', color='#dddddd', fontsize=8)
+        _, (a_, b_) = self._vessel_flow(u, v)
+        ax.set_ylabel('Q / Q̄' if rel else f'Q (nL/s), + = flow {a_}→{b_}', color='#dddddd', fontsize=8)
         ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=8, frameon=False, labelcolor='#dddddd')
-        self._vp_title.setText(f"Vessel ({u}, {v})")
+        self._vp_title.setText(f"Vessel ({u}, {v}) — flow {a_} → {b_}")
         self._vp_canvas.draw_idle()
 
     def _raw_traces(self, u, v):
@@ -138,7 +156,7 @@ class VesselPanelMixin:
         from ..reconcile.harmonics import phasors
         d = self.G.edges[u, v]; tf0 = self.G.graph.get('tile_f0_piv', {})
         stored = (u, v) if (u, v) in self._edge_index_map() else (v, u)
-        disp = tuple(d.get('_rec_uv') or stored); sgn = 1.0 if disp == stored else -1.0
+        disp = tuple(d.get('_rec_uv') or stored); sgn = (1.0 if disp == stored else -1.0) * self._vessel_flow(u, v)[0]
         out = []
         for m in d.get('measurements_piv') or []:
             q = m.get('Q_t'); t_id = m.get('tile_id')
@@ -168,10 +186,11 @@ class VesselPanelMixin:
             ax.plot(t, fit * sc, color=col, lw=1.6, label=f"tile {tile} ({f0:.2f} Hz)")
         ax.axhline(1.0 if rel else 0.0, color='#666666', lw=0.6)
         ax.set_xlabel('time in each recording (s)', color='#dddddd', fontsize=8)
-        ax.set_ylabel('Q / Q̄' if rel else 'Q (nL/s), + = u→v', color='#dddddd', fontsize=8)
+        _, (a_, b_) = self._vessel_flow(u, v)
+        ax.set_ylabel('Q / Q̄' if rel else f'Q (nL/s), + = flow {a_}→{b_}', color='#dddddd', fontsize=8)
         if traces:
             ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=8, frameon=False, labelcolor='#dddddd')
-        self._vp_title.setText(f"Vessel ({u}, {v}) — {len(traces)} raw recording{'s' if len(traces) != 1 else ''}")
+        self._vp_title.setText(f"Vessel ({u}, {v}) — flow {a_} → {b_} — {len(traces)} raw recording{'s' if len(traces) != 1 else ''}")
         self._vp_canvas.draw_idle()
 
     # ── summary table ────────────────────────────────────────────────
@@ -187,7 +206,7 @@ class VesselPanelMixin:
         L, R = d.get('length'), d.get('radius')
         recs = self._vessel_recordings(u, v); n_all = len(d.get('measurements_piv') or [])
         qp = d.get('_h_amp_DC_rec')
-        agree = sum(1 for _, q0, _ in recs if qp is not None and np.sign(q0) == np.sign(qp))
+        agree = sum(1 for _, q0, _ in recs if q0 > 0)          # shown along the reconciled flow: positive = agrees
         head = (f"<b>Vessel ({u}, {v})</b> — {region}<br>"
                 f"length {L * UM_PER_PX:.0f} µm · radius {R * UM_PER_PX:.1f} µm<br>" if L is not None and R is not None else
                 f"<b>Vessel ({u}, {v})</b> — {region}<br>")
@@ -206,7 +225,7 @@ class VesselPanelMixin:
         for s in cols:
             q0, H = self._vessel_harmonics(u, v, s)
             a = [abs(h) if h is not None else None for h in H]
-            rows["Mean flow Q̄ (nL/s)"].append(fmt(q0, "{:+.3g}"))
+            rows["Mean flow Q̄ (nL/s)"].append(fmt(q0, "{:.3g}"))
             rows["± uncertainty"].append(fmt(unc[s]()))
             rows["Pulsatility 2|H₁|/Q̄"].append(fmt(2 * a[0] / abs(q0) if a[0] is not None and q0 else None, "{:.2f}"))
             rows["Pulsatile / mean power"].append(fmt((a[0] ** 2 + a[1] ** 2) / q0 ** 2 if None not in a and q0 else None, "{:.2f}"))
