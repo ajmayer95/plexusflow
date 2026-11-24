@@ -31,38 +31,75 @@ Python ≥ 3.10.
 ```bash
 git clone https://github.com/ajmayer95/plexusflow.git
 cd plexusflow
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[figures]"                 # library + everything the figure scripts need
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[gui,figures]"
 ```
 
-The exact environment in which the tests and all figures were verified is pinned in `requirements-lock.txt`
-(`pip install -r requirements-lock.txt && pip install -e . --no-deps`). Optional extras: `gui` (napari viewer and
-editors), `vectorize` ([net3](https://github.com/ajmayer95/net3), mask → graph), `bench` (Stokes benchmark), `dev`
-(pytest, ruff).
+`gui` installs the viewer (napari, Qt) and `figures` what the figure scripts need; leave out either if you do not need
+it. Other extras: `vectorize` ([net3](https://github.com/ajmayer95/net3), mask → graph), `bench` (Stokes benchmark),
+`dev` (pytest, ruff). The exact environment in which the tests and figures were checked is pinned in
+`requirements-lock.txt` (`pip install -r requirements-lock.txt && pip install -e . --no-deps`).
+
+In a new terminal, activate the environment again with `source .venv/bin/activate` from the `plexusflow` folder.
+
+## Getting the data
+
+The data for the 21-somite embryo will be archived on Zenodo. Until then it is on this repository's
+[Releases page](https://github.com/ajmayer95/plexusflow/releases) as **data-v4**, in two archives that unpack into
+the same folder:
+
+- `PlexusFlow21S_release_v4.core.tar.gz`: the measured vessel graph, results, mosaic, masks, per-tile projections and
+  the other figure inputs;
+- `PlexusFlow21S_release_v4.extras.tar.gz`: one short, downsampled video per tile, used for video playback in the
+  viewer and for Figs 1 and 4.
+
+Download both from the Releases page, or with the [GitHub CLI](https://cli.github.com):
+
+```bash
+mkdir -p $HOME/plexusflow_data
+gh release download data-v4 -R ajmayer95/plexusflow -D $HOME/plexusflow_data
+tar -xzf $HOME/plexusflow_data/PlexusFlow21S_release_v4.core.tar.gz -C $HOME/plexusflow_data
+tar -xzf $HOME/plexusflow_data/PlexusFlow21S_release_v4.extras.tar.gz -C $HOME/plexusflow_data
+export PLEXUSFLOW_STAGE=$HOME/plexusflow_data/PlexusFlow21S_release_v4
+```
+
+There is no default data location: every command stops with a clear message if `PLEXUSFLOW_STAGE` is unset. The
+folder can be read-only.
+
+## Exploring the data in the viewer
+
+```bash
+plexusflow view $PLEXUSFLOW_STAGE
+```
+
+This opens the mosaic with every vessel coloured by a chosen quantity: mean flow, pulsatile amplitude, phase lag
+behind the vitelline veins, or relative pulsatile power. Three sources can be shown, alone or side by side on a common
+colour scale:
+
+- **Measured**: the per-vessel optical-flow measurements before reconciliation;
+- **Reconciled**: the mass-conserving mean flow and the synchronised pulsatile field;
+- **Model**: the RC network driven by the reconciled boundary flows, with a slider for the wall distensibility
+  (starting at the fitted value).
+
+Clicking a vessel shows its waveform over one cardiac cycle and the raw recordings from each tile it appears in. The
+release already contains all results, so the viewer needs nothing else to be run first, and it never changes the
+data.
 
 ## Reproducing the paper
 
-1. Download the data release for the 21-somite embryo. Until the Zenodo record is published it is on this repository's
-   [Releases page](https://github.com/ajmayer95/plexusflow/releases) as **data-v4**, in two archives that unpack into
-   the same folder:
-   - `PlexusFlow21S_release_v4.core.tar.gz`: the measured vessel graph, results, mosaic, masks, per-tile projections and
-     the other figure inputs;
-   - `PlexusFlow21S_release_v4.extras.tar.gz`: one short video per tile, needed only for Figs 1 and 4 and for video
-     playback in the viewer.
-2. Point the code at it. There is no default location: every script stops with a clear message if
-   `PLEXUSFLOW_STAGE` is unset.
+With the data downloaded and `PLEXUSFLOW_STAGE` set as above, choose where derived results and figures go, then run
+everything (about 4 minutes on a laptop):
 
-   ```bash
-   export PLEXUSFLOW_STAGE=/path/to/PlexusFlow21S_release       # read-only is fine
-   export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results       # derived results (default <stage>/results)
-   export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures       # figures (default <stage>/figures)
-   ```
-3. Run everything (about 4 minutes on a laptop):
+```bash
+export PLEXUSFLOW_RESULTS=$HOME/plexusflow_out/results
+export PLEXUSFLOW_FIGURES=$HOME/plexusflow_out/figures
+bash scripts/reproduce_paper.sh
+```
 
-   ```bash
-   bash scripts/reproduce_paper.sh             # results, then Figs 1–7 → $PLEXUSFLOW_FIGURES/latest/
-   bash scripts/reproduce_paper.sh --figures   # figures only, from existing results
-   ```
+Figures 1–7 end up in `$PLEXUSFLOW_FIGURES/latest/`. `bash scripts/reproduce_paper.sh --figures` redraws the figures
+from existing results. If the two variables are unset, results and figures are written inside the data folder, which then has to be
+writable.
 
 | Step | Script | Output (in `$PLEXUSFLOW_RESULTS`) |
 |---|---|---|
