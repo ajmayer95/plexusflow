@@ -127,6 +127,11 @@ class ModelMixin:
             return
         self._model_solve(D)
         self._refresh_edges(); self._refresh_nodes(); self._refresh_cbar()
+        if hasattr(self, '_vessel_plot_refresh'):
+            self._vessel_plot_refresh()
+            sel = getattr(self, '_selected_edge', None)
+            if sel is not None and not self.workbench and self.G.has_edge(*sel):
+                self._info_box.setHtml(self._vessel_summary_html(*sel))
 
     def _enter_model_source(self) -> None:
         """Called when the Model source is selected: build once, solve at the current (initially fitted) D."""

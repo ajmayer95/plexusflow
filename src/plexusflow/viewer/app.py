@@ -82,9 +82,10 @@ from .optical_flow import OpticalFlowMixin
 from .timeseries import TimeseriesMixin
 from .model import ModelMixin
 from .compare import CompareMixin
+from .vessel_panel import VesselPanelMixin
 
 
-class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMixin, TimeseriesMixin, ModelMixin, CompareMixin):
+class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMixin, TimeseriesMixin, ModelMixin, CompareMixin, VesselPanelMixin):
     """napari-based mosaic viewer with field colouring + edge inspection.
 
     Two capability levels (``mode``):
@@ -2726,7 +2727,6 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             "Only with Tile filter = All tiles and no video: the extra window that puts every recording\n"
             "on a common cardiac phase.  Off (default): Q/Q̄ (pulsatility visible).  On: (Q − Q̄)/|H1| (shape only).")
         self._aligned_norm_chk.toggled.connect(lambda c: setattr(self, '_aligned_norm_mean', not c))
-        inspect_lay.addWidget(self._aligned_norm_chk)
         # ── Overlay: compare current source with a second source ────────
         _cmp_row = QHBoxLayout()
         self._overlay_label = QLabel("Compare current source with:")
@@ -2852,6 +2852,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._clear_comp_btn.setEnabled(False)
         self._clear_comp_btn.clicked.connect(self._clear_comparison)
         inspect_lay.addWidget(self._clear_comp_btn)
+        inspect_lay.addWidget(self._aligned_norm_chk)
         self._edge_card_btn = QPushButton("Edge flux card (recordings \u2192 input \u2192 Q\u2032)")
         self._edge_card_btn.setToolTip(
             "For the selected edge: every tile recording, the single averaged input Q\u0304 the\n"
@@ -2965,7 +2966,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
 
         # Assemble the tabbed panel
         from qtpy.QtCore import Qt as _Qt
-        for _panel, _name in ((view_panel, "View"), (ts_panel, "Time series")):   # scroll when the window is short
+        for _panel, _name in ((view_panel, "View"), (ts_panel, "Vessel")):   # scroll when the window is short
             _sa = QScrollArea(); _sa.setWidgetResizable(True); _sa.setWidget(_panel)
             _sa.setHorizontalScrollBarPolicy(_Qt.ScrollBarAlwaysOff); _sa.setFrameShape(QScrollArea.NoFrame)
             tabs.addTab(_sa, _name)
@@ -2998,6 +2999,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         self._apply_capabilities()
         self._compact_panel(tabs)
         self.viewer.window.add_dock_widget(tabs, name="Controls", area='right')
+        self._build_vessel_dock()
         self._selected_edge: Optional[Tuple[int, int]] = None
         # Radial-uncertainty tagging: viewer-editable per-edge flag
         # (``radial_uncertain=True``) that overrides the edge colour with
@@ -4087,6 +4089,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 info.append(f"  Resolved: {_harmonic_class_label(klass)} "
                             f"(threshold Z > {HARMONIC_SNR_THRESHOLD:.0f})")
         self._info_box.setPlainText("\n".join(info))
+        self._on_vessel_selected()
 
 
     def _show_edge_card(self):
@@ -4505,7 +4508,8 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                      '_run_of_btn', '_of_merge_chk', '_of_refine_chk', '_clear_of_region_btn',
                      '_tag_class_row', '_flow_mismatch_row', '_dissipation_row', '_edge_labels_all_chk',
                      '_phase_offset_row', '_snr_h1_row', '_snr_h2_row',
-                     '_overlay_label', '_overlay_source_combo', '_plot_overlay_btn'):
+                     '_overlay_label', '_overlay_source_combo', '_plot_overlay_btn',
+                     '_of_pipeline_btn', '_plot_bnd_kcl_btn'):
             w = getattr(self, name, None)
             if w is not None:
                 w.setVisible(False)
