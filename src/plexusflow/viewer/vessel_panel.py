@@ -56,6 +56,15 @@ class VesselPanelMixin:
             H.append(s * complex(a * np.exp(1j * p)) if a is not None and p is not None and np.isfinite(a) else None)
         return s * float(q0), H
 
+    def _vessel_qbar(self, u, v):
+        """One mean flow for the whole vessel (reconciled, else measured), used to scale every curve in Q / Q̄ mode so
+        that a recording whose own mean is near zero is not blown up.  None if the vessel has no usable mean."""
+        for src in ('reconciled', 'measured'):
+            got = self._vessel_harmonics(u, v, src)
+            if got is not None and np.isfinite(got[0]) and got[0] > 0:
+                return got[0]
+        return None
+
     def _vessel_recordings(self, u, v):
         """[(tile, Q̄_t, [H1, H2] on the common clock)] for every recording in a synchronised tile, same orientation."""
         A = getattr(self, '_rec_A', None)
@@ -129,7 +138,10 @@ class VesselPanelMixin:
         self._vp_recs.setEnabled(not self._vp_raw.isChecked())
         if self._vp_raw.isChecked():
             self._vessel_plot_raw(ax, u, v, rel); return
-        norm = (lambda q0, q: q / q0 if q0 else q * np.nan) if rel else (lambda q0, q: q)
+        qbar = self._vessel_qbar(u, v) if rel else None
+        if rel and qbar is None:
+            rel = False                                   # no usable vessel mean: fall back to nL/s
+        norm = (lambda q0, q: q / qbar) if rel else (lambda q0, q: q)
         if self._vp_recs.isChecked():
             recs = self._vessel_recordings(u, v)
             for i, (t, q0, H) in enumerate(recs):
@@ -177,12 +189,15 @@ class VesselPanelMixin:
     def _vessel_plot_raw(self, ax, u, v, rel):
         import matplotlib.pyplot as plt
         traces = self._raw_traces(u, v)
+        qbar = self._vessel_qbar(u, v) if rel else None
+        if rel and qbar is None:
+            rel = False
         if not traces:
             ax.text(0.5, 0.5, "No recordings with a valid profile fit", color='#dddddd', ha='center', va='center',
                     transform=ax.transAxes)
         cmap = plt.get_cmap('tab10')
         for i, (tile, f0, t, q, fit, a0) in enumerate(traces):
-            col = cmap(i % 10); sc = (1.0 / a0) if rel and a0 else 1.0
+            col = cmap(i % 10); sc = (1.0 / qbar) if rel else 1.0
             ax.plot(t, q * sc, color=col, lw=0.6, alpha=0.55)
             ax.plot(t, fit * sc, color=col, lw=1.6, label=f"tile {tile} ({f0:.2f} Hz)")
         ax.axhline(1.0 if rel else 0.0, color='#666666', lw=0.6)
