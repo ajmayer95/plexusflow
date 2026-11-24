@@ -1118,6 +1118,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         print(f"Loading graph: {self.graph_path}")
         with open(self.graph_path, 'rb') as f:
             G = pickle.load(f)
+            from ..compat import upgrade_graph; upgrade_graph(G)   # legacy key names → current
         from ..paths import attach_external_traces      # release graphs keep Q(t) in export/traces.npz
         G = attach_external_traces(G, self.graph_path)
         print(f"  {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
@@ -2752,7 +2753,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
         # Comprehensive stage-by-stage OF pipeline walkthrough for the last
         # fresh OF run.  ('Compute fresh PIV/OF' already pops it automatically;
         # this button re-opens it.)  Folds in what used to be three separate
-        # popups — the 4-panel diagnostic, the Kloosterman per-slice figure,
+        # popups — the 4-panel diagnostic, the profile-fit per-slice figure,
         # and the vessel-quality verdict — into one single figure driven by
         # one data path.
         self._of_pipeline_btn = QPushButton("Show OF pipeline walkthrough")
@@ -2762,7 +2763,7 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
             "fresh OF run: ROI selection, background subtraction, mean flow "
             "field, centerline refinement (coarse shift → per-slice snap → "
             "offset smoothing), vessel mask + tangent, radial-profile binning, "
-            "the three radii + how each is chosen, the Kloosterman per-slice "
+            "the three radii + how each is chosen, the profile-fit per-slice "
             "gate with reject reasons, Q-estimator comparison, and Q(t) — plus "
             "an overall PASS / CROP / RAILING verdict.")
         self._of_pipeline_btn.clicked.connect(self._show_of_pipeline_figures)
@@ -3923,11 +3924,11 @@ class ReadOnlyMosaicViewer(SimulateMixin, EditMixin, RefineMixin, OpticalFlowMix
                 f0_ = MeasurementView(mm).harm.f0_hz
                 mv_ = MeasurementView(mm); ff_, ft_ = mv_.flow_from, mv_.flow_to
                 dir_ = f", flow {ff_}\u2192{ft_}" if ff_ is not None and ft_ is not None else ""
-                if q_.get('kl_ok'):
-                    info.append(f"    Kloosterman |Q|: {abs(float(mm.get('Q_kl', float('nan')))):.4g} nL/s{dir_}"
+                if q_.get('profile_ok'):
+                    info.append(f"    profile-fit |Q|: {abs(float(mm.get('Q_profile', float('nan')))):.4g} nL/s{dir_}"
                                 f"   (alignment {float(q_.get('align', float('nan'))):.2f}, parabolicity {float(q_.get('p', float('nan'))):.2f})")
                 else:
-                    info.append("    Kloosterman: no flux (fit failed)")
+                    info.append("    profile-fit: no flux (fit failed)")
                 if mo_:
                     info.append(f"    motion: z_DC {float(mo_.get('z_dc', float('nan'))):.1f}, cardiac p {float(mo_.get('p_ac', float('nan'))):.1e}"
                                 + (f", f0 {float(f0_):.2f} Hz" if f0_ else ""))

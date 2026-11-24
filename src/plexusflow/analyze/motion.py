@@ -3,7 +3,7 @@
 Three questions are kept apart:
   1. is blood motion detectable?            — no velocity-profile assumption
   2. what is its temporal character?        — no flux needed
-  3. can it be converted to volumetric flux? — Kloosterman profile fit (analyze.kloosterman), a separate question
+  3. can it be converted to volumetric flux? — profile-fit profile fit (analyze.profile_flux), a separate question
 
 Signal: the vessel-aligned velocity series v(t) — a fixed spatial average of the streamwise optical flow over the vessel
 pixels (profile.py's pooled fixed-radius series, in any units).  Every quantity below is invariant to a multiplicative

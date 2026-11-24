@@ -13,7 +13,7 @@ a common reference heart rate:
 
     y_ref = y · (f_ref / f_t)^β,      log|y_kt| = α_k + β log(f_t / f_ref) + ε    (α_k one per vessel)
 
-β is fitted by robust (Huber-IRLS) least squares on all Kloosterman-valid recordings of vessels recorded in ≥ 2 tiles; f_ref
+β is fitted by robust (Huber-IRLS) least squares on all profile-valid recordings of vessels recorded in ≥ 2 tiles; f_ref
 = median tile heart rate.  β is an EMPIRICAL scaling, not a physiological law.  Relative errors c are scale-free, and the
 absolute terms of the reconstruction (σ0, between-recording spread) are computed from the corrected fluxes, so the
 uncertainties transform with the data.  Pulsatile analysis is unaffected: it uses each recording's waveform relative to its own

@@ -1,4 +1,4 @@
-"""Fresh optical flow on a vessel, Kloosterman slices, PIV comparison and OF diagnostics.
+"""Fresh optical flow on a vessel, profile-fit slices, PIV comparison and OF diagnostics.
 
 Mixin of plexusflow.viewer.app.ReadOnlyMosaicViewer (methods moved verbatim from app.py)."""
 from __future__ import annotations
@@ -45,10 +45,10 @@ class OpticalFlowMixin:
         return tiles, affine_sx, affine_sy
 
 
-    def _show_kloosterman_slices(self):
-        """Per-slice Kloosterman diagnostic — R, V_CL, Q along the vessel
+    def _show_profile_slices(self):
+        """Per-slice profile-fit diagnostic — R, V_CL, Q along the vessel
         arc, with median lines and comparison to Q_direct / Q_pois_free.
-        Shows how the median-of-slices Q_kl is derived and which slices
+        Shows how the median-of-slices Q_profile is derived and which slices
         got gated out (R constraint / low-signal)."""
         import matplotlib.pyplot as plt
         from .mosaic import show_figure
@@ -67,17 +67,17 @@ class OpticalFlowMixin:
             _px_um = float(PX_SIZE_UM)
         except Exception:
             _px_um = 1.7
-        Q_slice_px = np.asarray(res.get('Q_kloosterman_per_slice', []),
+        Q_slice_px = np.asarray(res.get('Q_profile_per_slice', []),
                                  dtype=float)
-        R_slice_px = np.asarray(res.get('R_kloosterman_per_slice', []),
+        R_slice_px = np.asarray(res.get('R_profile_per_slice', []),
                                  dtype=float)
         if len(Q_slice_px) == 0:
             self._info_box.setPlainText(
-                "No Kloosterman per-slice data in the OF result.\n"
+                "No profile-fit per-slice data in the OF result.\n"
                 "(Batch stores medians; re-run 'Compute fresh PIV/OF' "
                 "which populates the per-slice arrays.)")
             return
-        # Physical units.  Our stored `Q_kloosterman_per_slice` uses
+        # Physical units.  Our stored `Q_profile_per_slice` uses
         # `use_r_prior_area=True` — Q_slice = ½·V_CL·π·R_prior² — i.e.
         # V_CL from the Poiseuille fit but AREA fixed to the mask radius.
         # The Kloosterman 2014 paper convention uses the *fitted* R_slice
@@ -117,7 +117,7 @@ class OpticalFlowMixin:
         fig = plt.figure(figsize=(15, 11), dpi=110)
         gs = GridSpec(2, 3, figure=fig, hspace=0.35, wspace=0.28,
                        height_ratios=[1.0, 0.85])
-        fig.suptitle(f"Kloosterman per-slice — {data.get('title','')}",
+        fig.suptitle(f"profile-fit per-slice — {data.get('title','')}",
                       fontsize=11)
 
         ax = fig.add_subplot(gs[0, :])
@@ -231,7 +231,7 @@ class OpticalFlowMixin:
                 ax.set_ylim(_yt.max() + _pad, _yt.min() - _pad)
                 ax.set_aspect('equal')
             except Exception as _e:
-                print(f"  (KL panel orient skipped: {_e})")
+                print(f"  (profile panel orient skipped: {_e})")
             ax.set_xlabel('col (ROI px)'); ax.set_ylabel('row (ROI px)')
         else:
             ax.text(0.5, 0.5,
@@ -315,7 +315,7 @@ class OpticalFlowMixin:
                  perpendicular velocity-arrow fan at several cross-sections
                  (arrow length = the fitted Poiseuille profile).  Plus the
                  radial profile with all three fits.
-          Fig 4  Kloosterman deep-dive  — per-slice R / V_CL / Q, the
+          Fig 4  profile-fit deep-dive  — per-slice R / V_CL / Q, the
                  section gates, the reject-reason breakdown, the vessel
                  with per-slice half-widths, and how (Q_char, V_CL_char,
                  R_char) are derived.
@@ -342,7 +342,7 @@ class OpticalFlowMixin:
         r_tile = float(data.get('r_tile', np.nan))            # R_prior (px)
         frame_dt_s = float(data.get('frame_dt_s', 1.0 / 250))
         f0_hz = float(data.get('f0_hz') or 2.5)
-        best_key = data.get('best_key', 'kl')
+        best_key = data.get('best_key', 'profile')
         u, v = data.get('edge', (0, 0))
         tile_id = data.get('tile_id')
         px_um = v_conv * frame_dt_s                            # effective µm/px
@@ -368,7 +368,7 @@ class OpticalFlowMixin:
 
         # radii (px) + fit velocities (px/frame)
         R_free_px = float(res.get('R_fit_free', np.nan))
-        R_kl_px = float(res.get('R_kloosterman', np.nan))
+        R_profile_px = float(res.get('R_profile', np.nan))
         v0_fix = float(res.get('v0_fixed', np.nan))
         v0_free = float(res.get('v0_free', np.nan))
         R_free_ratio = (R_free_px / r_tile
@@ -405,20 +405,20 @@ class OpticalFlowMixin:
         # kept as an informational descriptor only — no BLUNT flag: it false-failed
         # under-segmented but otherwise clean vessels.)
         railing = np.isfinite(R_free_ratio) and R_free_ratio >= 1.95
-        n_valid_kl = int(res.get('Q_kloosterman_n_valid', 0) or 0)
+        n_valid_profile = int(res.get('Q_profile_n_valid', 0) or 0)
         # Split the verdict by WHAT each flag invalidates.  CROP starves every
         # estimator of data → always a hard failure.  RAILING describes the R-FIT
         # geometry: it invalidates Q only when the canonical estimator IS an R-fit
-        # (Pois free-/mask-R).  When the reported Q is Kloosterman — per-slice,
+        # (Pois free-/mask-R).  When the reported Q is profile-fit — per-slice,
         # independent of the free-R blow-up — with enough valid slices, RAILING is
         # an advisory NOTE, not a failure.  (E.g. a clean central peak with low
         # side-shoulders that don't trip neighbour rejection but still drag free-R
-        # to >2×: the Kloosterman Q is fine.)
+        # to >2×: the profile-fit Q is fine.)
         hard, soft = [], []
         if cropped:
             hard.append('CROP')
         _geom = ['RAILING'] if railing else []
-        if best_key == 'kl' and n_valid_kl >= 3:
+        if best_key == 'profile' and n_valid_profile >= 3:
             soft += _geom
         else:
             hard += _geom
@@ -433,16 +433,16 @@ class OpticalFlowMixin:
         vcol = '#2ca02c' if not hard else '#d62728'
 
         # ── Q estimators (nL/s) ─────────────────────────────────────────
-        Q_kl = float(res.get('Q_kloosterman', np.nan)) * q_conv
+        Q_profile = float(res.get('Q_profile', np.nan)) * q_conv
         Q_plug = float(res.get('Q_plug_mean', np.nan)) * q_conv
         Q_pois_mask = float(res.get('Q_pois_mean', np.nan)) * q_conv
         Q_pois_free = ((abs(v0_free) * np.pi * R_free_px ** 2 / 2.0) * q_conv
                        if (np.isfinite(v0_free) and np.isfinite(R_free_px) and R_free_px > 0)
                        else np.nan)
-        Q_canon = {'kl': Q_kl, 'pois_free': Q_pois_free,
-                   'pois_seg': Q_pois_mask}.get(best_key, Q_kl)
-        canon_name = {'kl': 'Kloosterman', 'pois_free': 'Pois free-R',
-                      'pois_seg': 'Pois mask-R'}.get(best_key, 'Kloosterman')
+        Q_canon = {'profile': Q_profile, 'pois_free': Q_pois_free,
+                   'pois_seg': Q_pois_mask}.get(best_key, Q_profile)
+        canon_name = {'profile': 'profile-fit', 'pois_free': 'Pois free-R',
+                      'pois_seg': 'Pois mask-R'}.get(best_key, 'profile-fit')
 
         fig = plt.figure(figsize=(15, 19), dpi=100)
         fig.suptitle(
@@ -591,7 +591,7 @@ class OpticalFlowMixin:
             rr2 = np.linspace(-R_free_um, R_free_um, 100)
             ax.plot(rr2, np.clip(abs(v0_free) * v_conv * (1 - (rr2 / R_free_um) ** 2), 0, None),
                     '--', color='#d62728', lw=1.8, label=f'free-R fit ({R_free_um:.0f} µm)')
-        lo = float(diag.get('kl_r_slice_lo', 0.5)); hi = float(diag.get('kl_r_slice_hi', 2.0))
+        lo = float(diag.get('profile_r_slice_lo', 0.5)); hi = float(diag.get('profile_r_slice_hi', 2.0))
         ax.axvspan(lo * R_prior_um, hi * R_prior_um, color='orange', alpha=0.06)
         ax.axvspan(-hi * R_prior_um, -lo * R_prior_um, color='orange', alpha=0.06,
                    label=f'fitted-R gate [{lo:.1f},{hi:.1f}]·R')
@@ -609,19 +609,19 @@ class OpticalFlowMixin:
                      f"R_free/R_seg {R_free_ratio:.2f}", fontsize=9)
         ax.legend(fontsize=7, loc='upper right'); ax.grid(alpha=0.3)
 
-        # ── Kloosterman per-slice prep ──
-        kl = diag.get('kl') or {}
-        psQ = np.asarray(kl.get('per_slice_Q', []), float)
-        psR = np.asarray(kl.get('per_slice_R', []), float)
-        vmask = np.asarray(kl.get('valid_mask', []), bool)
-        reasons = list(kl.get('per_slice_reason', []))
-        Nkl = len(psQ)
-        good = vmask if vmask.size == Nkl else np.isfinite(psQ)
-        xi = np.arange(Nkl)
+        # ── profile-fit per-slice prep ──
+        prof = diag.get('profile') or {}
+        psQ = np.asarray(prof.get('per_slice_Q', []), float)
+        psR = np.asarray(prof.get('per_slice_R', []), float)
+        vmask = np.asarray(prof.get('valid_mask', []), bool)
+        reasons = list(prof.get('per_slice_reason', []))
+        Nprof = len(psQ)
+        good = vmask if vmask.size == Nprof else np.isfinite(psQ)
+        xi = np.arange(Nprof)
         psQ_nl = psQ * q_conv; psR_um = psR * px_um
-        Q_char = float(res.get('Q_kloosterman', np.nan)) * q_conv
-        V_char = float(kl.get('V_CL_char', np.nan)) * v_conv
-        R_char_um = float(kl.get('R_char', np.nan)) * px_um
+        Q_char = float(res.get('Q_profile', np.nan)) * q_conv
+        V_char = float(prof.get('V_CL_char', np.nan)) * v_conv
+        R_char_um = float(prof.get('R_char', np.nan)) * px_um
         Qmed = float(np.nanmedian(psQ_nl[np.isfinite(psQ_nl)])) if np.isfinite(psQ_nl).any() else np.nan
 
         # (1,0) CL refinement — graph CL vs OF ridge-tracked CL
@@ -652,7 +652,7 @@ class OpticalFlowMixin:
         psQ_p = psQ_nl * _sgn
         Qmed_p = Qmed * _sgn
         Q_char_p = Q_char * _sgn
-        if Nkl:
+        if Nprof:
             ax.plot(xi[good], psQ_p[good], 'o', ms=5, color='#2ca02c', label='accepted')
             bad = (~good) & np.isfinite(psQ_p)
             ax.plot(xi[bad], psQ_p[bad], 'x', ms=6, color='#999', label='rejected')
@@ -671,7 +671,7 @@ class OpticalFlowMixin:
         # (1,2) Q estimator bar
         ax = fig.add_subplot(gs[1, 2])
         bars = [('plug', Q_plug, '#7f7f7f'), ('Pois mask-R', Q_pois_mask, '#2ca02c'),
-                ('Pois free-R', Q_pois_free, '#d62728'), ('Kloosterman', Q_kl, '#1f77b4')]
+                ('Pois free-R', Q_pois_free, '#d62728'), ('profile-fit', Q_profile, '#1f77b4')]
         names = [b[0] for b in bars]
         vals = [abs(b[1]) if np.isfinite(b[1]) else 0.0 for b in bars]
         cols = [b[2] for b in bars]
@@ -688,8 +688,8 @@ class OpticalFlowMixin:
         # CONSISTENT with the reported canonical Q: the per-frame Q_pois_t is the
         # mask-R Poiseuille SHAPE (fit v0(t) with R fixed to R_seg); its absolute
         # scale (R_seg) generally differs from the canonical estimator's radius
-        # (Kloosterman uses per-slice fitted R_char).  Those are INDEPENDENT paths
-        # — Q_pois_t never touches Kloosterman — so raw they disagree by ~(R/ R_seg)².
+        # (profile-fit uses per-slice fitted R_char).  Those are INDEPENDENT paths
+        # — Q_pois_t never touches profile-fit — so raw they disagree by ~(R/ R_seg)².
         # We therefore rescale the waveform by pois_seg_factor (= Q_canon / mean
         # Q_pois) so its mean lands on the reported line: the temporal modulation is
         # the real per-frame OF, the magnitude is the canonical value.  (The raw
@@ -731,7 +731,7 @@ class OpticalFlowMixin:
                      f"H1 {amp1:.3f} nL/s · f₀={f0_hz:.2f} Hz", fontsize=8.5)
         ax.grid(alpha=0.3)
 
-        # (2,1:) verdict + compact Kloosterman derivation (spans two cells)
+        # (2,1:) verdict + compact profile-fit derivation (spans two cells)
         ax = fig.add_subplot(gs[2, 1:]); ax.axis('off')
 
         def _f(x, fmt='{:.2f}'):
@@ -745,27 +745,27 @@ class OpticalFlowMixin:
                 cats[key] = cats.get(key, 0) + 1
         cat_str = ", ".join(f"{k} {n}" for k, n in
                             sorted(cats.items(), key=lambda kv: -kv[1])[:4])
-        # When Kloosterman was NOT used, say so loudly + why it failed.
-        _kl_failed = (canon_name != 'Kloosterman')
-        _kl_reason = str(kl.get('reason', '?'))
-        _fail_line = (f"  ⚠ KLOOSTERMAN FAILED ({int(good.sum())}/{Nkl} slices, "
-                      f"{_kl_reason}) → fell back to {canon_name}\n"
+        # When profile-fit was NOT used, say so loudly + why it failed.
+        _profile_failed = (canon_name != 'profile-fit')
+        _profile_reason = str(prof.get('reason', '?'))
+        _fail_line = (f"  ⚠ PROFILE FIT FAILED ({int(good.sum())}/{Nprof} slices, "
+                      f"{_profile_reason}) → fell back to {canon_name}\n"
                       f"    why: {cat_str}\n"
-                      if _kl_failed else "")
+                      if _profile_failed else "")
         txt = (
             f"VERDICT:  {verdict}\n"
             + _fail_line +
             f"  coverage {cov*100:.0f}%   taper {_f(taper)}   "
             f"R_free/R_seg {_f(R_free_ratio)}\n"
-            f"  Kloosterman: {int(good.sum())}/{Nkl} slices kept\n"
+            f"  profile-fit: {int(good.sum())}/{Nprof} slices kept\n"
             f"  reported Q = {abs(Q_canon):.4f} nL/s ({canon_name})\n"
             f"  R_seg {R_prior_um:.1f} µm    R_inferred {_f(R_free_px*px_um,'{:.1f}')} µm\n"
             + ("  → mask-R and fitted-R agree — both reliable\n"
                if not (set(flags) & {'CROP', 'RAILING'})
                else "  → trust mask-R; fitted-R unreliable here\n")
-            + "\nKloosterman derivation\n"
+            + "\nprofile-fit derivation\n"
             "──────────────────────\n"
-            f"  incl: |v| > {diag.get('kl_v_incl_frac', 0.25):.2f}·v_peak"
+            f"  incl: |v| > {diag.get('profile_v_incl_frac', 0.25):.2f}·v_peak"
             f" (contiguous extent → wall)\n"
             f"  R gate [{lo:.1f},{hi:.1f}]·R_seg (loose)\n"
             f"  outlier: sign-matched to the median (no flow-rate band)\n"
@@ -787,13 +787,13 @@ class OpticalFlowMixin:
         # it, and the white ±R_fit walls trace the full vessel extent implied by
         # the parabola radii.  Accepted = coloured, rejected = gray.
         ax = fig.add_subplot(gs[3, :], projection='3d')
-        psV = np.asarray(kl.get('per_slice_v_CL', []), float)
-        profs = np.asarray(kl.get('per_slice_profiles', []), float)
-        rho_g = np.asarray(kl.get('rho', []), float)
+        psV = np.asarray(prof.get('per_slice_v_CL', []), float)
+        profs = np.asarray(prof.get('per_slice_profiles', []), float)
+        rho_g = np.asarray(prof.get('rho', []), float)
         drew3d = False
         if (cl_ref is not None and centerline_geometry is not None
-                and profs.ndim == 2 and profs.shape[0] == Nkl and rho_g.size
-                and len(cl_ref) >= 2 and Nkl >= 2 and vfield is not None):
+                and profs.ndim == 2 and profs.shape[0] == Nprof and rho_g.size
+                and len(cl_ref) >= 2 and Nprof >= 2 and vfield is not None):
             import matplotlib.cm as _cm
             clr = np.asarray(cl_ref, float)           # (N, 2) = (row, col)
             _s3, _tg3, nm3 = centerline_geometry(clr)  # normals in (row, col)
@@ -821,7 +821,7 @@ class OpticalFlowMixin:
                 pass
             n_acc = max(int(good.sum()), 1); _ai = 0
             wp, wm = [], []
-            for i in range(Nkl):
+            for i in range(Nprof):
                 acc = bool(i < len(good) and good[i])
                 col = (_cm.turbo(_ai / n_acc) if acc else '#b0b0b0')
                 if acc:
@@ -868,7 +868,7 @@ class OpticalFlowMixin:
         ax.set_title(f"per-slice parabolic fits on the real curved vessel — "
                      f"coloured = accepted ({int(good.sum())}), gray = rejected · "
                      f"magenta = ±R_fit extent  (reject if R² < "
-                     f"{diag.get('kl_min_r2', 0.5):.2f})", fontsize=9)
+                     f"{diag.get('profile_min_r2', 0.5):.2f})", fontsize=9)
 
         # ── save PNG + show in a scrollable window (with the mpl toolbar) ──
         try:
@@ -1123,7 +1123,7 @@ class OpticalFlowMixin:
             # junction node (where the CL direction is undefined / kinked) and
             # leave ALL residual end-effect slices — junction bulges, merges,
             # abrupt direction changes — to be rejected downstream by the
-            # Kloosterman median-flow-rate band and per-slice validity gates.
+            # profile-fit median-flow-rate band and per-slice validity gates.
             # Flat ~3px (NOT radius-scaled — thick vessels don't need a bigger
             # trim), but fractionally capped so a SHORT vessel (incl. short LARGE
             # ones) is never gutted: never remove more than 15% of the arc per
@@ -1352,19 +1352,19 @@ class OpticalFlowMixin:
             import traceback; traceback.print_exc()
 
         # Match the BATCH canonical scale target (mosaic_piv:_analyze_vessel):
-        # Kloosterman → Q_pois_free → seg.  Kloosterman is the citable,
+        # profile-fit → Q_pois_free → seg.  profile-fit is the citable,
         # most-defensible method, so fresh OF's headline Q and rescaled
         # waveform reproduce the stored batch Q(t) instead of the old
         # seg-Poiseuille default.  (Overrides pois_seg_factor computed above.)
-        _Q_kl_px = float(unified.get('Q_kloosterman', np.nan))
+        _Q_profile_px = float(unified.get('Q_profile', np.nan))
         _v0_free = float(unified.get('v0_free', np.nan))
         _R_free_px = float(unified.get('R_fit_free', np.nan))
         _Q_pf_px = (abs(_v0_free) * np.pi * _R_free_px ** 2 / 2.0
                     if (np.isfinite(_v0_free) and np.isfinite(_R_free_px)
                         and _R_free_px > 0) else np.nan)
-        # Kloosterman → bounded mask-R Poiseuille (seg) → railing-prone free-R.
-        if np.isfinite(_Q_kl_px):
-            _Q_scale_px = _Q_kl_px; self._of_best_key = 'kl'
+        # profile-fit → bounded mask-R Poiseuille (seg) → railing-prone free-R.
+        if np.isfinite(_Q_profile_px):
+            _Q_scale_px = _Q_profile_px; self._of_best_key = 'profile'
         elif np.isfinite(Q_pois_seg_px):
             _Q_scale_px = Q_pois_seg_px; self._of_best_key = 'pois_seg'
         elif np.isfinite(_Q_pf_px):
@@ -1390,7 +1390,7 @@ class OpticalFlowMixin:
             # Canonical-Q scale + key so the pipeline figure can rebuild the
             # reported Q(t) waveform straight from `unified` (one data path).
             pois_seg_factor=float(pois_seg_factor),
-            best_key=getattr(self, '_of_best_key', 'kl'),
+            best_key=getattr(self, '_of_best_key', 'profile'),
             # Stash the raw stack + geometry so the PIV comparison button can
             # rerun on identical inputs without reloading video from disk.
             frames=stack, centerline_rc=centerline_rc,

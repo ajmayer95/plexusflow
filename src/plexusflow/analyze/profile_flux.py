@@ -24,7 +24,7 @@ from .centerline import _centerline_geometry
 
 
 # The settings the batch uses (analyze/profile.py, mean-flow field already per frame, 60 ρ bins over ±2R) — for code that
-# re-runs the estimator on the cached batch inputs (figures, scripts/kl_reaggregate.py).
+# re-runs the estimator on the cached batch inputs (figures, scripts/profile_reaggregate.py).
 PRODUCTION_KW = dict(dt=1, slice_window=2, n_bins=60, fit_fraction=1.0, outlier_mode="sign", R_slice_lo=0.5, R_slice_hi=2.0,
                      min_valid_slices=2, use_r_prior_area=False, v_incl_frac=0.25, min_r2=0.5, sample_frac=2.0)
 
@@ -37,7 +37,7 @@ def parabolicity(per_slice_r2):
     return float(np.mean(np.where(np.isfinite(r2), np.clip(r2, 0.0, 1.0), 0.0))) if r2.size else 0.0
 
 
-def kloosterman_scalar(
+def profile_flux_scalar(
     flow_avg,
     cl,
     R_prior,
@@ -96,7 +96,7 @@ def kloosterman_scalar(
     slice_window : int — averaging window along arc (default 2 = 5 pts)
     n_bins : int — number of ρ bins over ``[-R_prior, R_prior]``
     fit_fraction : float — fit only ``|ρ| <= fit_fraction × R_prior``
-    outlier_mode : "sign" (same direction as the median; production), "median_band" (Kloosterman) or "iqr"
+    outlier_mode : "sign" (same direction as the median; production), "median_band" (profile-fit) or "iqr"
     median_lo, median_hi : accepted band as fractions of the |Q| median
     R_slice_lo, R_slice_hi : allowed fit-R range as fractions of R_prior
     use_r_prior_area : if True, compute ``Q_slice = ½ V_CL π R_prior²``;
@@ -420,8 +420,8 @@ def kloosterman_scalar(
     )
 
 
-def kloosterman_operator(res, cl, shape, mask=None, slice_window: int = 2):
-    """Linear flux operator of a Kloosterman fit: a sparse row vector w over the flattened (H, W, 2) flow field with
+def profile_flux_operator(res, cl, shape, mask=None, slice_window: int = 2):
+    """Linear flux operator of a profile fit: a sparse row vector w over the flattened (H, W, 2) flow field with
     Q = w · flow equal to the fit's Q_char when ``flow`` is the field it was fitted on.
 
     Freezes everything the time-mean fit decided — accepted sections, the ρ bins each section's fit used, section radius

@@ -1,6 +1,6 @@
 """Known-truth junction ensemble: real Y-junctions × flow split α × speed × seed → production measurement vs exact truth.
 
-Per edge: e = log(Q̂/Q_true) on sign-consistent cases (sign errors and Kloosterman failures counted separately).
+Per edge: e = log(Q̂/Q_true) on sign-consistent cases (sign errors and profile-fit failures counted separately).
 Prints: bias and scatter by speed, size, kept fraction f, alignment and L/R; whether the real reliability scale c
 (results/reliability_model_v1.json, tile term = median c_T) tracks the true error; a fitted bias model; junction imbalance.
 Writes <out>/junctions/<node>_a<α>_s<seed>.pkl (resumable) and <out>/junctions_summary.png.
@@ -35,12 +35,12 @@ def summarize(files, model_path, fig_path):
             for e in c["edges"]:
                 al = e.get("align", np.nan); al = al if np.isfinite(al) else 1.0
                 rows.append(dict(vpar=v, Rseg=e["R_seg"], v=e["v_true"], LR=e["L_over_R"], f=e["f"], align=al, Qt=e["Q_true"],
-                                 Qm=e["Q_kl"], c=cT0 + model["c_" + model.get("profile_term", "f")] * (1 - e.get(model.get("profile_term", "f"), np.nan)) + model["c_a"] * (1 - al)))
+                                 Qm=e["Q_profile"], c=cT0 + model["c_" + model.get("profile_term", "f")] * (1 - e.get(model.get("profile_term", "f"), np.nan)) + model["c_a"] * (1 - al)))
     A = {k: np.array([r[k] for r in rows], float) for k in rows[0]}
     fail = ~np.isfinite(A["Qm"]) | (A["f"] <= 0); signerr = np.isfinite(A["Qm"]) & (np.sign(A["Qm"]) != np.sign(A["Qt"])) & ~fail
     ok = ~fail & ~signerr & (np.abs(A["Qt"]) > 0); e = np.log(np.abs(A["Qm"][ok]) / np.abs(A["Qt"][ok]))
     rsd = lambda x: 1.4826 * np.median(np.abs(x - np.median(x))) if len(x) > 3 else np.nan
-    print(f"{len(files)} (junction, α, seed) runs, {len(rows)} edge measurements: Kloosterman failures {fail.mean():.1%}, "
+    print(f"{len(files)} (junction, α, seed) runs, {len(rows)} edge measurements: profile-fit failures {fail.mean():.1%}, "
           f"sign errors {signerr.mean():.1%}")
     print(f"overall: median Q̂/Q_true ×{np.exp(np.median(e)):.3f}, robust SD of log ratio {rsd(e):.3f}")
 

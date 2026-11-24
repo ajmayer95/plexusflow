@@ -28,6 +28,8 @@ See `plexusflow init` for the scaffold.
 from __future__ import annotations
 
 from pathlib import Path
+from .compat import loads_graph
+from .compat import sidecar_dir
 import typer
 
 from . import __version__
@@ -333,11 +335,11 @@ def analyze(stage_root: Path = typer.Argument(...),
                           '(resume-mode; default: overwrite)'),
              dry_run: bool = typer.Option(False,
                     help='Do not write the output graph'),
-             kl_sidecar: Path = typer.Option(None,
-                    help='Directory for per-tile Kloosterman-input sidecars '
+             profile_sidecar: Path = typer.Option(None,
+                    help='Directory for per-tile profile-input sidecars '
                           '(time-mean flow field, CL, R, mask ROI; float16, gzip) so '
-                          'Kloosterman/QC can be re-run without re-batching. '
-                          'Default: <stage>/batch_kl_inputs. Pass "none" to skip.'),
+                          'profile-fit/QC can be re-run without re-batching. '
+                          'Default: <stage>/batch_profile_inputs. Pass "none" to skip.'),
              out: Path = typer.Option(None,
                     help='Write the measured graph here instead of '
                           '<stage>/graph/graph_vessels_piv.gpickle (e.g. a local disk); '
@@ -361,12 +363,12 @@ def analyze(stage_root: Path = typer.Argument(...),
             else:
                 tile_ids.add(int(part))
         tile_ids = sorted(tile_ids)
-    side = None if (kl_sidecar is not None and str(kl_sidecar).lower() == 'none') \
-        else (kl_sidecar or (Path(stage_root) / 'batch_kl_inputs'))
+    side = None if (profile_sidecar is not None and str(profile_sidecar).lower() == 'none') \
+        else (profile_sidecar or sidecar_dir(stage_root))
     analyze_stage(cfg, tile_ids=tile_ids, max_frames=max_frames,
                     n_workers=workers, default_f0_hz=default_f0_hz,
                     skip_analyzed=skip_analyzed, dry_run=dry_run,
-                    kl_sidecar_dir=side, out_path=out)
+                    profile_sidecar_dir=side, out_path=out)
 
 
 @app.command('refine-eval')
@@ -394,13 +396,13 @@ def carry_measurements_cmd(stage_root: Path = typer.Argument(...),
     cfg = StageConfig.load(stage_root)
     if not cfg.graph_piv_path.exists():
         typer.echo(f'no analysed graph at {cfg.graph_piv_path} — nothing to carry'); raise typer.Exit(2)
-    G_old = pickle.loads(cfg.graph_piv_path.read_bytes())
-    G_new = pickle.loads(cfg.graph_vessels_path.read_bytes())
+    G_old = loads_graph(cfg.graph_piv_path.read_bytes())
+    G_new = loads_graph(cfg.graph_vessels_path.read_bytes())
     stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     backup = cfg.graph_piv_path.with_name(cfg.graph_piv_path.name + f'.pre_carry_{stamp}')
     shutil.copy2(cfg.graph_piv_path, backup)
     stats, emap = carry_measurements(G_new, G_old, tol_px=tol_px)
-    side = Path(stage_root) / 'batch_kl_inputs'
+    side = sidecar_dir(stage_root)
     if side.exists():
         shutil.copytree(side, side.with_name(side.name + f'.pre_carry_{stamp}'))
         n_sc = remap_sidecars(side, emap)
@@ -422,7 +424,7 @@ def legacy_normalize(stage_root: Path = typer.Argument(...),
                     help='Exclude tiles with id <= this value from the cross-tile '
                           'edge aggregation. Default 5 (Stage-21 "fringe" tiles).'),
               radius_consistency: float = typer.Option(0.30,
-                    help='Drop per-tile aggregation contributions whose R_kl_um '
+                    help='Drop per-tile aggregation contributions whose R_profile_um '
                           'deviates from the per-edge median by more than this '
                           'relative fraction. Default 0.30. Use 10.0 to disable.'),
               compute_h2: bool = typer.Option(True,
@@ -459,7 +461,7 @@ def legacy_normalize(stage_root: Path = typer.Argument(...),
         raise FileNotFoundError(f"Source graph not found: {src}\n"
                                 f"Run `plexusflow analyze` first.")
     print(f"[normalize] loading  {src.name}   ({src.stat().st_size/1024/1024:.0f} MB)")
-    G = pickle.loads(src.read_bytes())
+    G = loads_graph(src.read_bytes())
     print(f"[normalize] {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
     # Optional per-tile strip

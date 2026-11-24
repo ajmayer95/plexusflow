@@ -25,7 +25,7 @@ from plexusflow.reconcile import measurement_table, fit_reliability, reconcile_d
 G = paths.load_graph()
 print(f"graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
-# 2. Kloosterman-valid measurements and the reliability scale c = c_T + c_f (1 − f) + c_a (1 − align)
+# 2. profile-valid measurements and the reliability scale c = c_T + c_f (1 − f) + c_a (1 − align)
 M = measurement_table(G)
 model, junctions = fit_reliability(G, M)
 print(f"reliability: c_f {model['c_f']:.2f}, c_a {model['c_a']:.2f}, from {model['n_junctions']} same-tile junctions")

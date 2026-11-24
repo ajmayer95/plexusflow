@@ -23,7 +23,7 @@ JUNCTION_SEEDS = (1, 2)
 
 def junction_case(bundle, node, alpha, seed, speeds=JUNCTION_SPEEDS, nf=400, f0=2.9, tracer=TRACERS_JUNCTION, stage="21S"):
     """One (junction, α, seed): returns dict(node, tile, alpha, seed, cases={speed: dict(edges=[...], imbalance, s_t)}).
-    Edge records: true signed time-mean flux (outward from the node), measured Q_kl, kept fraction f, slices, radii,
+    Edge records: true signed time-mean flux (outward from the node), measured Q_profile, kept fraction f, slices, radii,
     quality numbers, measured Q(t)."""
     J, Z = bundle.junction(node); br, tile = J["branches"], J["tile"]
     uhat = alpha * Z["uA"] + (1 - alpha) * Z["uB"]; FF = p2_field(Z["p"], Z["t"], uhat)
@@ -58,9 +58,9 @@ def junction_case(bundle, node, alpha, seed, speeds=JUNCTION_SPEEDS, nf=400, f0=
             try:
                 rec_e.update(flux_record(run_measurement(vid, cl, b["R_seg"], f0, seg), b["R_seg"]))
             except Exception as ex:
-                rec_e.update(Q_kl=np.nan, f=0.0, err=str(ex))
+                rec_e.update(Q_profile=np.nan, f=0.0, err=str(ex))
             edges.append(rec_e)
-        qm = np.array([e["Q_kl"] for e in edges])
+        qm = np.array([e["Q_profile"] for e in edges])
         out["cases"][v] = dict(edges=edges, imbalance=abs(np.nansum(qm)) / np.nansum(np.abs(qm)) if np.isfinite(qm).all() else np.nan,
                                s_t=s_t(np.arange(nf)))
     return out
@@ -76,7 +76,7 @@ def vessel_case(bundle, name, speeds, seed, nf=400, f0=2.9, tracer=TRACERS_VESSE
     jitter      None or (white σ px per axis, heartbeat amplitude px): rigid per-frame shift, same for every speed
     dts         None → one measurement per video at the batch settings (returns size/shape/accuracy rows);
                 list → the video is measured at every frame spacing (int, 'auto', or ('auto', dt_max, target_px)),
-                rows carry Q_kl, kept fraction, H1/DC vs truth, dt used
+                rows carry Q_profile, kept fraction, H1/DC vs truth, dt used
     speed_order iteration order of the speeds (rendering consumes random numbers in this order); default as given
     """
     meta, Z = bundle.vessel(name); F = p2_field(Z["p"], Z["t"], Z["u"])
@@ -114,27 +114,27 @@ def vessel_case(bundle, name, speeds, seed, nf=400, f0=2.9, tracer=TRACERS_VESSE
         if dts is None:
             try:
                 u = run_measurement(vid, cl, Rseg, f0, seg)
-                q = float(u.get("Q_kloosterman", np.nan)); fq = float(u.get("Q_kloosterman_valid_frac", 0.0)) if np.isfinite(q) else 0.0
-                rk = float(u.get("R_kloosterman", np.nan))
-                _psq = np.asarray(u.get("Q_kloosterman_per_slice", []), float); _psr = np.asarray(u.get("R_kloosterman_per_slice", []), float)
+                q = float(u.get("Q_profile", np.nan)); fq = float(u.get("Q_profile_valid_frac", 0.0)) if np.isfinite(q) else 0.0
+                rk = float(u.get("R_profile", np.nan))
+                _psq = np.asarray(u.get("Q_profile_per_slice", []), float); _psr = np.asarray(u.get("R_profile_per_slice", []), float)
                 _ok = np.isfinite(_psq) & np.isfinite(_psr[:len(_psq)]) if len(_psr) >= len(_psq) else np.zeros(0, bool)
-                extra = dict(V_CL=float(u.get("V_CL_kloosterman", np.nan)), R_med=float(np.median(_psr[:len(_psq)][_ok])) if _ok.any() else np.nan,
+                extra = dict(V_CL=float(u.get("V_CL_profile", np.nan)), R_med=float(np.median(_psr[:len(_psq)][_ok])) if _ok.any() else np.nan,
                              U_true=qt / (np.pi * a_m * (eps * a_m) / 2), R_seg=Rseg)
                 from ...analyze.mosaic_piv import _flow_quality
                 fl = _flow_quality(u.get("vfield_mean"), u.get("cl_used"), float(u.get("R_used", Rseg)))
                 fl["dip"] = central_dip(u.get("vfield_mean"), u.get("cl_used"), float(u.get("R_used", Rseg)))
             except Exception:
                 q, fq, rk, fl = np.nan, 0.0, np.nan, dict(align=np.nan); extra = {}
-            out.append(dict(base, **extra, Q_kl=q, ratio=abs(q) / qt if np.isfinite(q) else np.nan, f=fq, R_kl_over_a=rk / a_m,
+            out.append(dict(base, **extra, Q_profile=q, ratio=abs(q) / qt if np.isfinite(q) else np.nan, f=fq, R_profile_over_a=rk / a_m,
                             align=fl.get("align", np.nan), dip=fl.get("dip", np.nan)))
             continue
         for dt in dts:
             kw = dict(dt=dt) if not isinstance(dt, tuple) else dict(dt="auto", dt_max=dt[1], target_disp_px=dt[2])
             try:
                 u = run_measurement(vid, cl, Rseg, f0, seg, **kw)
-                q = float(u.get("Q_kloosterman", np.nan)); f = float(u.get("Q_kloosterman_valid_frac", 0.0)) if np.isfinite(q) else 0.0
+                q = float(u.get("Q_profile", np.nan)); f = float(u.get("Q_profile_valid_frac", 0.0)) if np.isfinite(q) else 0.0
                 h1, used = h1_over_dc(u, f0, dt)
-                out.append(dict(base, dt=dt, Q_kl=q, f=f, h1=h1, dt_used=used, pilot=float(u.get("of_pilot_disp_px", np.nan))))
+                out.append(dict(base, dt=dt, Q_profile=q, f=f, h1=h1, dt_used=used, pilot=float(u.get("of_pilot_disp_px", np.nan))))
             except Exception as ex:
-                out.append(dict(base, dt=dt, Q_kl=np.nan, f=0.0, h1=np.nan + 0j, dt_used=-1, pilot=np.nan, err=str(ex)))
+                out.append(dict(base, dt=dt, Q_profile=np.nan, f=0.0, h1=np.nan + 0j, dt_used=-1, pilot=np.nan, err=str(ex)))
     return out

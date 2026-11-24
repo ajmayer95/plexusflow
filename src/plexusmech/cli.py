@@ -8,6 +8,7 @@ measured boundary forcing and fitted by profile likelihood) — scripts/mech/ac_
 from __future__ import annotations
 
 from pathlib import Path
+from plexusflow.compat import loads_graph
 import typer
 
 from plexusflow.config import StageConfig
@@ -61,7 +62,7 @@ def simulate(stage_root: Path = typer.Argument(...),
         raise FileNotFoundError(f"Source graph not found: {src}\n"
                                 f"Run `plexusflow legacy-normalize` first.")
     print(f"[simulate] loading  {src.name}   ({src.stat().st_size/1024/1024:.0f} MB)")
-    G = pickle.loads(src.read_bytes())
+    G = loads_graph(src.read_bytes())
     print(f"[simulate] {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
     A = sorted([n for n,d in G.nodes(data=True)

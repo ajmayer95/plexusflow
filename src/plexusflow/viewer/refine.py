@@ -11,6 +11,7 @@ Library: plexusflow.edit.splice / refine / patches.  Nothing here writes the sta
 """
 from __future__ import annotations
 
+from ..compat import loads_graph
 import json
 import os
 import sys
@@ -242,7 +243,7 @@ class RefineMixin:
             # splice the graph FILE, not self.G: the viewer adds in-memory / cache attributes to every edge at startup,
             # which would otherwise end up in the patch
             import pickle
-            G_src = pickle.loads(Path(self.graph_path).read_bytes())
+            G_src = loads_graph(Path(self.graph_path).read_bytes())
             res = splice_region(G_src, cand if cand is not None else base, self._rf["poly"])
             self._rf["G_src"] = G_src
         except Exception as e:
@@ -428,7 +429,7 @@ class RefineMixin:
             return
         import pickle
         try:
-            G = pickle.loads(Path(self.graph_path).read_bytes())
+            G = loads_graph(Path(self.graph_path).read_bytes())
             self._rf_patchlog().revert(G, pid)
         except Exception as e:
             self._rf_say(f"revert FAILED: {e}"); return

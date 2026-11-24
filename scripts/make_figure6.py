@@ -83,7 +83,7 @@ def vein_reference(G, dom, psi, tf0, tile=ZERO_TILE):
     for n in dom["V"]:
         for e in G.edges(n):
             for m in G.edges[e].get("measurements_piv") or []:
-                if int(m["tile_id"]) == tile and m.get("Q_t") is not None and (m.get("quality") or {}).get("kl_ok"):
+                if int(m["tile_id"]) == tile and m.get("Q_t") is not None and (m.get("quality") or {}).get("profile_ok"):
                     a0, H = phasors(m["Q_t"], tf0[tile], K=K_FIT); rho = coherence(m["Q_t"], tf0[tile], K=K_FIT)
                     z.append(np.exp(1j * np.angle(np.sign(a0) * H[0] * np.exp(-1j * psi[tile])))); w.append(max(rho, 0.0))
     return float(np.angle(np.sum(np.array(w) * np.array(z)))), len(z)

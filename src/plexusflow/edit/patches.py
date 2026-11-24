@@ -39,7 +39,7 @@ def require_numpy1() -> None:
 
 
 def _same(a, b) -> bool:
-    """Deep equality with NaN == NaN (measurement records carry NaNs, e.g. Q_kl of a failed fit)."""
+    """Deep equality with NaN == NaN (measurement records carry NaNs, e.g. Q_profile of a failed fit)."""
     if a is b:
         return True
     if isinstance(a, dict) and isinstance(b, dict):

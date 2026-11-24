@@ -1375,7 +1375,7 @@ class TimeseriesMixin:
         # per-tile raw mean flow, oriented u→v, vs the reconciled value
         rows = []
         for m in d.get('measurements_piv') or []:
-            qm = m.get('Q_kl', m.get('mean_Q'))
+            qm = m.get('Q_profile', m.get('mean_Q'))
             if qm is None or not np.isfinite(qm):
                 continue
             sgn = 1.0 if (m.get('flow_from'), m.get('flow_to')) != (v, u) else -1.0

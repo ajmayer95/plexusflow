@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from pathlib import Path
+from ..compat import loads_graph
 import pickle
 
 import numpy as np
@@ -261,7 +262,7 @@ def condense_stage(cfg: StageConfig,
     out = Path(out_path) if out_path else cfg.graph_vessels_path
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    G = pickle.loads(src.read_bytes())
+    G = loads_graph(src.read_bytes())
     UG = G.to_undirected() if G.is_directed() else G
     if verbose:
         d2 = sum(1 for n in UG if UG.degree(n) == 2)

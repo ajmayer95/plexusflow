@@ -11,7 +11,7 @@ Quasi-likelihood method (before 2026-11-19):
 0. (Sensitivity only, off by default) heart-rate normalisation of recording fluxes, plexusflow.reconcile.gain.
 1. Reliability scale c = c0 + c_a(1 − align) (alignment only since 2026-11-18), ML-fitted on same-tile junction balance of
    this stage (--tile-terms: per-tile c_T).
-2. Per vessel the 1/c²-weighted average of its Kloosterman-valid recordings (between-recording spread kept as a variance
+2. Per vessel the 1/c²-weighted average of its profile-valid recordings (between-recording spread kept as a variance
    floor); carved network; quasi-likelihood reconciliation under interior conservation (variance c²Q′² + σ0² evaluated at
    the reconciled flow, projected Newton from the uniform projection; plexusflow.reconcile.dc); emergent boundary
    f = B Q'; passive comparison (--radius: tube-interior [default], consensus or calibrated anatomical radii) + radius shuffle.
@@ -34,7 +34,7 @@ def main():
     ap.add_argument("--tile-terms", action="store_true", help="per-tile c_T (the pre-2026-10-19 model) instead of one c0")
     ap.add_argument("--radius", default="tube", choices=("tube", "consensus", "anatomical"),
                     help="model radius for the passive and AC models: uncalibrated tube-interior segmentation radius (median "
-                         "for resistance, √⟨a²⟩ for compliance; default), consensus √(R_graph·R_kl) (sensitivity), or the "
+                         "for resistance, √⟨a²⟩ for compliance; default), consensus √(R_graph·R_profile) (sensitivity), or the "
                          "calibrated segmentation radius (scripts/anatomical_radius.py)")
     ap.add_argument("--no-topology", action="store_true", help="ignore topology-uncertain region tags (open-region carve only)")
     ap.add_argument("--estimator", default=None, choices=("fixed", "ql"), help="fixed (production) or ql (quasi-likelihood, before 2026-11-19)")

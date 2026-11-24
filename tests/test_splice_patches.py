@@ -181,7 +181,7 @@ def test_patch_log_accept_revert_and_conflicts(tmp_path, setup, monkeypatch):
 
 
 def test_diff_ignores_nan_in_nested_measurements():
-    G = nx.Graph(); G.add_edge(1, 2, measurements_piv=[dict(tile_id=3, Q_kl=float("nan"), harm=dict(v=[np.nan, 1.0]))])
+    G = nx.Graph(); G.add_edge(1, 2, measurements_piv=[dict(tile_id=3, Q_profile=float("nan"), harm=dict(v=[np.nan, 1.0]))])
     G2 = pickle.loads(pickle.dumps(G))
     assert PT.is_empty(PT.diff(G, G2))
     G2.edges[1, 2]["measurements_piv"][0]["tile_id"] = 4

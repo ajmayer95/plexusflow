@@ -8,7 +8,7 @@ Two radii exist in the measurement and they mean different things:
   to the nearest background pixel centre).  The mask sits inside the true lumen; a single additive offset Δ (px) maps the
   mask boundary onto the lumen wall.  Δ comes from an independent boundary calibration (``calibrate_offset``), not from the
   flow data.  Used for the passive (r⁴/ℓ) and pulsatile network models.
-* the **effective profile radius** R_i,fit — the curvature of the measured velocity profile in Kloosterman's section fits.
+* the **effective profile radius** R_i,fit — the curvature of the measured velocity profile in the profile fit's section fits.
   Depth averaging and optical-flow smoothing widen it, so it is a nuisance parameter of the flux estimator and is never used
   as geometry.
 
@@ -110,7 +110,7 @@ def anatomical_radii(G, edt, edges, offset_px):
 #     compliance radius  a_C   = (mean a²)^(1/2)       (volume-equivalent: compliance per length ∝ lumen area)
 # Vessels with fewer than MIN_WALLED walled points or a walled fraction below MIN_FRAC keep the stored net3 radius for both
 # (flagged ``profiled = False``).  Uncalibrated: no offset or factor is fitted to the flow-profile radius.  The consensus
-# radius √(R_graph · R_kl) and the conduction-equivalent radius are kept only as sensitivity analyses.
+# radius √(R_graph · R_profile) and the conduction-equivalent radius are kept only as sensitivity analyses.
 K_CHORD, CAP, MIN_WALLED, MIN_FRAC = 1.5, 4.0, 5, 0.3
 
 

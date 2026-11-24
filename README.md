@@ -90,6 +90,18 @@ plexusflow info        STAGE        # which artefacts exist
 See [docs/pipeline.md](docs/pipeline.md) for every step, the per-stage settings in `plexusflow.yaml`, and the coordinate
 frames and outputs.
 
+### Data written by earlier versions
+
+Graphs, sidecars and releases written before 2026-11-24 use older names for the per-vessel flux estimator (parabolic
+profile fits per cross-section).  They are read as they are: every loader passes stored data through
+`plexusflow.compat`, the only module that knows the old names, and a new batch writes only the current ones
+(`Q_profile`, `quality.profile_ok`, `batch_profile_inputs/`, …).  To rewrite a stage folder in the current names
+(optional; the graph is backed up first, run with system python3 / numpy < 2):
+
+```bash
+python3 -m plexusflow.compat "$PLEXUSFLOW_STAGE"
+```
+
 ## Tests
 
 ```bash
